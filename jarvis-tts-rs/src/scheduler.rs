@@ -63,7 +63,7 @@ pub enum SubmitError {
     Offline,
 }
 impl Pool {
-    pub fn new(engine: Engine, load_ms: u64) -> Self {
+    pub fn new(engine: Engine, mut frontend: text::Frontend, load_ms: u64) -> Self {
         let (interactive, mut a) = mpsc::channel(5);
         let (normal, mut b) = mpsc::channel(5);
         let pool = Self {
@@ -85,7 +85,14 @@ impl Pool {
                     .queue_us
                     .fetch_add(job.queued.elapsed().as_micros() as u64, Relaxed);
                 metrics.jobs.fetch_add(1, Relaxed);
-                let result = run(&engine, &job.control, job.input, &job.out, &rt);
+                let result = run(
+                    &engine,
+                    &mut frontend,
+                    &job.control,
+                    job.input,
+                    &job.out,
+                    &rt,
+                );
                 if let Err(e) = result {
                     metrics.failed.fetch_add(1, Relaxed);
                     tracing::warn!(id=%job.id,error=%e,"request ended");
@@ -149,6 +156,7 @@ impl Pool {
 }
 fn run(
     engine: &Engine,
+    frontend: &mut text::Frontend,
     c: &Control,
     mut input: mpsc::Receiver<String>,
     out: &mpsc::Sender<Frame>,
@@ -161,7 +169,7 @@ fn run(
         });
         let Some(text) = text else { break };
         ensure!(!c.stop.load(Relaxed), "cancelled");
-        let normalized = text::prepare(&text)?;
+        let normalized = frontend.prepare(&text, &c.stop)?;
         engine.synth(&normalized,&c.stop,&mut |frame|{
             samples+=frame.len();
             ensure!(samples<=audio::HZ*90,"audio exceeds 90 s");

@@ -1,7 +1,9 @@
 mod api;
 mod audio;
 mod engine;
+mod linguistics;
 mod scheduler;
+mod stress;
 mod text;
 
 use anyhow::{Context, Result, ensure};
@@ -27,12 +29,23 @@ async fn main() -> Result<()> {
     ensure!((1..=40).contains(&threads), "JARVIS_THREADS must be 1..40");
     let threads = threads.min(std::thread::available_parallelism()?.get());
     pocket_native::set_num_threads(threads);
+    if rayon::current_num_threads() != threads {
+        tracing::debug!(threads, "XN and Candle tensor pools");
+    }
     let dir = PathBuf::from(std::env::var_os("JARVIS_ASSETS").unwrap_or_else(|| ".assets".into()));
     let started = Instant::now();
+    let mut frontend = text::Frontend::load(&dir).context("load Russian text models")?;
+    if std::env::args().nth(1).as_deref() == Some("prepare") {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            println!("{}", frontend.prepare(&line?, &false.into())?);
+        }
+        return Ok(());
+    }
     let engine = engine::Engine::load(&dir).context("load acoustic model and voice")?;
     let load_ms = started.elapsed().as_millis() as u64;
     let state = api::StateData {
-        pool: scheduler::Pool::new(engine, load_ms),
+        pool: scheduler::Pool::new(engine, frontend, load_ms),
         secret,
     };
     let listener = tokio::net::TcpListener::bind(bind).await?;
