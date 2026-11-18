@@ -1,0 +1,14 @@
+bin/jarvis-tts-rs: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, not stripped
+bin/ffmpeg:        ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, for GNU/Linux 3.2.0, BuildID[sha1]=edfa98c6c76982e3c1e0bf47fa06c97212951b21, stripped
+	linux-vdso.so.1 (0x000078e240de3000)
+	libgcc_s.so.1 => /opt/jarvis-tts-rs/build-tools/env/lib/libgcc_s.so.1 (0x000078e240dad000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000078e23f509000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000078e23f200000)
+	/lib64/ld-linux-x86-64.so.2 (0x000078e240de5000)
+793M	model
+Filesystem                           Size  Used Avail Use% Mounted on
+/dev/mapper/backup-vm--101--disk--0   98G   12G   82G  13% /
+root:jarvis-rust-tts 750
+MainPID=0
+ExecMainStartTimestamp=Wed 2026-11-18 18:01:50 UTC
+ActiveState=activating

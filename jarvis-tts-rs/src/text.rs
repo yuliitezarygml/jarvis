@@ -20,7 +20,21 @@ impl Frontend {
     pub fn prepare(&mut self, text: &str, stop: &AtomicBool) -> anyhow::Result<String> {
         anyhow::ensure!(valid(text), "invalid text");
         let mut sentences = Vec::new();
-        for s in text.split_inclusive(['.', '!', '?', '\n']) {
+        let mut start = 0;
+        let boundaries = text
+            .char_indices()
+            .filter_map(|(i, c)| {
+                let end = i + c.len_utf8();
+                let inside_number = c == '.'
+                    && i > 0
+                    && text.as_bytes()[i - 1].is_ascii_digit()
+                    && text.as_bytes().get(end).is_some_and(u8::is_ascii_digit);
+                (matches!(c, '.' | '!' | '?' | '\n') && !inside_number).then_some(end)
+            })
+            .chain([text.len()]);
+        for end in boundaries {
+            let s = &text[start..end];
+            start = end;
             let s = s.trim();
             if s.is_empty() {
                 continue;

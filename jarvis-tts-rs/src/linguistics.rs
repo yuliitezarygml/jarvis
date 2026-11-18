@@ -48,6 +48,10 @@ impl Generator {
     }
     fn generate(&mut self, prompt: &str, limit: usize, stop: &AtomicBool) -> Result<String> {
         let ids = self.tok.encode(prompt, true).map_err(anyhow::Error::msg)?;
+        ensure!(
+            ids.get_ids().len() <= 2048,
+            "text exceeds normalization context"
+        );
         self.model.clear_kv_cache();
         let input = Tensor::new(ids.get_ids(), &Device::Cpu)?.unsqueeze(0)?;
         let encoded = self.model.encode(&input)?;
@@ -76,7 +80,7 @@ pub struct Normalizer {
 }
 static LATIN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z]+(?:[ ,'-]+[A-Za-z]+)*").unwrap());
-static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+").unwrap());
+static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+(?:[:.,/-][0-9]+)*").unwrap());
 static SLOTS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<extra_id_(\d+)>").unwrap());
 static ABBR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[А-ЯЁ]{2,}\b").unwrap());
 const ALPHABET: &str = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ";
@@ -160,69 +164,13 @@ impl Normalizer {
                 .collect::<Vec<_>>()
                 .join(" ")
         });
-        let enc = self
-            .tok
-            .encode(s.as_ref(), true)
-            .map_err(anyhow::Error::msg)?;
-        let mut spans: Vec<(usize, usize)> = Vec::new();
-        for (part, offsets) in enc.get_ids().chunks(500).zip(enc.get_offsets().chunks(500)) {
-            let ids = Tensor::new(part, &Device::Cpu)?.unsqueeze(0)?;
-            let tags = self
-                .head
-                .forward(&self.tagger.forward(&ids, &ids.zeros_like()?, None)?)?
-                .argmax(2)?
-                .get(0)?
-                .to_vec1::<u32>()?;
-            for (&(a, b), tag) in offsets.iter().zip(tags) {
-                if a == b || tag == 0 || s[a..b].chars().any(|c| c.is_ascii_alphabetic()) {
-                    continue;
-                }
-                if let Some(prev) = spans.last_mut()
-                    && prev.1 == a
-                {
-                    prev.1 = b;
-                } else {
-                    spans.push((a, b));
-                }
-            }
-        }
-        for d in DIGITS.find_iter(&s) {
-            if !spans.iter().any(|&(a, b)| a < d.end() && b > d.start()) {
-                spans.push((d.start(), d.end()));
-            }
-        }
-        spans.sort_unstable();
-        let mut text = s.to_string();
-        if !spans.is_empty() {
-            let mut prompt = String::from("<SC1>");
-            let mut pos = 0;
-            let mut replacements = Vec::new();
-            for (i, &(a, b)) in spans.iter().enumerate() {
-                let label = DIGITS
-                    .replace_all(&s[a..b], |c: &regex::Captures| numbers(&c[0]))
-                    .into_owned();
-                prompt.push_str(&s[pos..a]);
-                prompt.push_str(&format!("[{label}]<extra_id_{i}>"));
-                pos = b;
-                replacements.push(label);
-            }
-            prompt.push_str(&s[pos..]);
-            let pred = self.inflect.generate(&prompt, 256, stop)?;
-            let tags = SLOTS.captures_iter(&pred).collect::<Vec<_>>();
-            for (i, c) in tags.iter().enumerate() {
-                let idx = c[1].parse::<usize>()?;
-                let end = tags
-                    .get(i + 1)
-                    .map_or(pred.len(), |n| n.get(0).unwrap().start());
-                let word = pred[c.get(0).unwrap().end()..end].trim();
-                if !word.is_empty() && idx < replacements.len() {
-                    replacements[idx] = word.to_owned();
-                }
-            }
-            for (&(a, b), word) in spans.iter().zip(replacements).rev() {
-                text.replace_range(a..b, &word);
-            }
-        }
+        let numeric = DIGITS
+            .find_iter(&s)
+            .map(|m| (m.start(), m.end()))
+            .collect::<Vec<_>>();
+        let expanded = self.fill_slots(&s, &numeric, stop)?;
+        let tags = self.tagged_spans(&expanded)?;
+        let text = self.fill_slots(&expanded, &tags, stop)?;
         let mut out = String::new();
         let mut pos = 0;
         for m in LATIN.find_iter(&text) {
@@ -242,6 +190,77 @@ impl Normalizer {
         out.push_str(&text[pos..]);
         ensure!(out.len() < 48000, "normalized text too long");
         Ok(out)
+    }
+    fn tagged_spans(&self, s: &str) -> Result<Vec<(usize, usize)>> {
+        let enc = self.tok.encode(s, true).map_err(anyhow::Error::msg)?;
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for (part, offsets) in enc.get_ids().chunks(500).zip(enc.get_offsets().chunks(500)) {
+            let ids = Tensor::new(part, &Device::Cpu)?.unsqueeze(0)?;
+            let tags = self
+                .head
+                .forward(&self.tagger.forward(&ids, &ids.zeros_like()?, None)?)?
+                .argmax(2)?
+                .get(0)?
+                .to_vec1::<u32>()?;
+            for (&(a, b), tag) in offsets.iter().zip(tags) {
+                if a == b
+                    || matches!(tag, 0 | 3)
+                    || s[a..b].chars().any(|c| c.is_ascii_alphabetic())
+                {
+                    continue;
+                }
+                if let Some(prev) = spans.last_mut()
+                    && prev.1 == a
+                {
+                    prev.1 = b;
+                } else {
+                    spans.push((a, b));
+                }
+            }
+        }
+        Ok(spans)
+    }
+    fn fill_slots(
+        &mut self,
+        s: &str,
+        spans: &[(usize, usize)],
+        stop: &AtomicBool,
+    ) -> Result<String> {
+        let mut text = s.to_string();
+        if !spans.is_empty() {
+            let mut prompt = String::from("<SC1>");
+            let mut pos = 0;
+            let mut replacements = Vec::new();
+            for (i, &(a, b)) in spans.iter().enumerate() {
+                let raw = &s[a..b];
+                let label = if raw.bytes().all(|b| b.is_ascii_digit()) {
+                    numbers(raw)
+                } else {
+                    raw.to_owned()
+                };
+                prompt.push_str(&s[pos..a]);
+                prompt.push_str(&format!("[{label}]<extra_id_{i}>"));
+                pos = b;
+                replacements.push(label);
+            }
+            prompt.push_str(&s[pos..]);
+            let pred = self.inflect.generate(&prompt, 512, stop)?;
+            let tags = SLOTS.captures_iter(&pred).collect::<Vec<_>>();
+            for (i, c) in tags.iter().enumerate() {
+                let idx = c[1].parse::<usize>()?;
+                let end = tags
+                    .get(i + 1)
+                    .map_or(pred.len(), |n| n.get(0).unwrap().start());
+                let word = pred[c.get(0).unwrap().end()..end].trim();
+                if !word.is_empty() && idx < replacements.len() {
+                    replacements[idx] = word.to_owned();
+                }
+            }
+            for (&(a, b), word) in spans.iter().zip(replacements).rev() {
+                text.replace_range(a..b, &word);
+            }
+        }
+        Ok(text)
     }
 }
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {

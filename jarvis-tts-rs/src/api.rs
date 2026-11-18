@@ -115,6 +115,10 @@ fn request_id(headers: &HeaderMap) -> Result<String, ApiError> {
     }
 }
 async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
+    static READERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(12);
+    let _admission = READERS
+        .try_acquire()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "queue_full"))?;
     let headers = req.headers();
     let id = request_id(headers)?;
     let plain = headers
@@ -178,17 +182,17 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
         .await?
         .ok_or(ApiError(StatusCode::UNPROCESSABLE_ENTITY, "empty_audio"))?;
     let (body, kind) = if streaming {
-        let frames = stream::unfold((Some(first), ticket), |(first, mut t)| async move {
+        let frames = stream::try_unfold((Some(first), ticket), |(first, mut t)| async move {
             let frame = if let Some(b) = first {
-                Ok(b)
+                b
             } else {
                 match next_frame(&mut t).await {
-                    Ok(Some(f)) => Ok(f),
-                    Ok(None) => return None,
-                    Err(e) => Err(std::io::Error::other(e.1)),
+                    Ok(Some(f)) => f,
+                    Ok(None) => return Ok(None),
+                    Err(e) => return Err(std::io::Error::other(e.1)),
                 }
             };
-            Some((frame, (None, t)))
+            Ok(Some((frame, (None, t))))
         });
         (Body::from_stream(frames), "application/octet-stream")
     } else {
