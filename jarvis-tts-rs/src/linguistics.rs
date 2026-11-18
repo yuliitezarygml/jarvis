@@ -95,9 +95,9 @@ const NAMES: [&str; 33] = [
     "жэ",
     "зэ",
     "и",
-    "и краткое",
+    "ий",
     "ка",
-    "эль",
+    "эл",
     "эм",
     "эн",
     "о",
@@ -109,7 +109,7 @@ const NAMES: [&str; 33] = [
     "эф",
     "ха",
     "цэ",
-    "че",
+    "чэ",
     "ша",
     "ща",
     "твёрдый знак",
@@ -158,7 +158,8 @@ impl Normalizer {
         })
     }
     pub fn sentence(&mut self, s: &str, stop: &AtomicBool) -> Result<String> {
-        let s = ABBR.replace_all(s, |c: &regex::Captures| {
+        let expanded = crate::numeric::expand(s);
+        let s = ABBR.replace_all(&expanded, |c: &regex::Captures| {
             c[0].chars()
                 .filter_map(|l| ALPHABET.chars().position(|v| v == l).map(|i| NAMES[i]))
                 .collect::<Vec<_>>()

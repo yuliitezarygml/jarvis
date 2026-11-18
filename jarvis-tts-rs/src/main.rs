@@ -2,6 +2,7 @@ mod api;
 mod audio;
 mod engine;
 mod linguistics;
+mod numeric;
 mod scheduler;
 mod stress;
 mod text;
