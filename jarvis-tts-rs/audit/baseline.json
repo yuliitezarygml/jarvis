@@ -1,0 +1,116 @@
+[
+  {
+    "id": "short",
+    "status": 200,
+    "headersMs": 1050,
+    "wallMs": 1090,
+    "cached": "miss",
+    "engineMs": "1008",
+    "hz": 24000,
+    "seconds": 1.36,
+    "rtf": 0.8014705882352942
+  },
+  {
+    "id": "long",
+    "status": 200,
+    "headersMs": 4056,
+    "wallMs": 4136,
+    "cached": "miss",
+    "engineMs": "4036",
+    "hz": 24000,
+    "seconds": 7.36,
+    "rtf": 0.5619565217391305
+  },
+  {
+    "id": "english",
+    "status": 200,
+    "headersMs": 926,
+    "wallMs": 1210,
+    "cached": "miss",
+    "engineMs": "909",
+    "hz": 24000,
+    "seconds": 1.44,
+    "rtf": 0.8402777777777778
+  },
+  {
+    "id": "mixed",
+    "status": 200,
+    "headersMs": 1428,
+    "wallMs": 1455,
+    "cached": "miss",
+    "engineMs": "1413",
+    "hz": 24000,
+    "seconds": 2.32,
+    "rtf": 0.6271551724137931
+  },
+  {
+    "id": "numbers",
+    "status": 200,
+    "headersMs": 2843,
+    "wallMs": 3011,
+    "cached": "miss",
+    "engineMs": "2827",
+    "hz": 24000,
+    "seconds": 4.24,
+    "rtf": 0.7101415094339623
+  },
+  {
+    "id": "punct",
+    "status": 200,
+    "headersMs": 1792,
+    "wallMs": 1842,
+    "cached": "miss",
+    "engineMs": "1765",
+    "hz": 24000,
+    "seconds": 2.96,
+    "rtf": 0.6222972972972973
+  },
+  {
+    "id": "empty",
+    "status": 422,
+    "headersMs": 17,
+    "wallMs": 17,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "invalid",
+    "status": 422,
+    "headersMs": 12,
+    "wallMs": 12,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "oversize",
+    "status": 422,
+    "headersMs": 14,
+    "wallMs": 16,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "lang",
+    "status": 422,
+    "headersMs": 13,
+    "wallMs": 13,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "format",
+    "status": 422,
+    "headersMs": 12,
+    "wallMs": 13,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "speed",
+    "status": 422,
+    "headersMs": 13,
+    "wallMs": 13,
+    "cached": null,
+    "engineMs": null
+  }
+]
