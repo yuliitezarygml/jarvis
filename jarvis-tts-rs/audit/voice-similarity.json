@@ -1,5 +1,6 @@
 {
   "model": "wespeaker_en_voxceleb_resnet34.onnx",
+  "recognizer": "sherpa-onnx-zipformer-ru-int8-2025-04-20",
   "sha256": "5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94",
   "rows": [
     {
@@ -10,7 +11,9 @@
       "oldSeconds": 1.36,
       "rustSeconds": 1.44,
       "oldInternalPausesMs": [],
-      "rustInternalPausesMs": []
+      "rustInternalPausesMs": [],
+      "oldTranscript": "добрый вечер сэр",
+      "rustTranscript": "добрый вечер сэр"
     },
     {
       "id": "long",
@@ -27,7 +30,9 @@
         490,
         330,
         430
-      ]
+      ],
+      "oldTranscript": "диагностика завершена вся системы работают в штатном режиме связь с сервером устойчива готов принять следующую команду",
+      "rustTranscript": "диагностика завершена все системы работают в штатном режиме связь с сервером устойчиво готов принять следующую команду"
     },
     {
       "id": "english",
@@ -41,7 +46,9 @@
       ],
       "rustInternalPausesMs": [
         270
-      ]
+      ],
+      "oldTranscript": "гуд морнинг сэр",
+      "rustTranscript": "гуд морнинг сэр"
     },
     {
       "id": "mixed",
@@ -53,7 +60,9 @@
       "oldInternalPausesMs": [
         210
       ],
-      "rustInternalPausesMs": []
+      "rustInternalPausesMs": [],
+      "oldTranscript": "джарвис проверь виндовсы сипи",
+      "rustTranscript": "джарвис проверь виндовспи ю"
     },
     {
       "id": "numbers",
@@ -67,7 +76,9 @@
       ],
       "rustInternalPausesMs": [
         570
-      ]
+      ],
+      "oldTranscript": "температура двадцать пять градусов время четырнадцать нуля тридцать",
+      "rustTranscript": "температура двадцать пять градусов время четырнадцать нуля тридцать"
     },
     {
       "id": "punct",
@@ -81,7 +92,9 @@
       ],
       "rustInternalPausesMs": [
         440
-      ]
+      ],
+      "oldTranscript": "сэр вы здесь отлично",
+      "rustTranscript": "сэр вы вы здесь отлично"
     }
   ]
 }

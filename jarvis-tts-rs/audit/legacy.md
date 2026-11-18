@@ -2,6 +2,17 @@
 
 Осмотрены загруженный systemd unit, исходник обработчиков, конфигурация модели, пакеты RUNorm, Silero Stress и Pocket TTS, файлы весов и реальный ответ HTTP. В контейнере используется регистрозависимый путь `/opt/jarvis-tts`. Uvicorn запускает один процесс `server:app` под пользователем `jarvis-tts` на `192.168.50.38:8080`. Имя службы — `jarvis-tts.service`. Наличие файлов XTTS в каталоге не определяет активный движок.
 
+## Расположение на сервере
+
+| Что | Путь |
+|---|---|
+| Работающий HTTP-обработчик | `/opt/jarvis-tts/server.py` |
+| Эталон голоса | `/opt/jarvis-tts/refs/jarvis-ru.wav` |
+| Конфигурация модели | `/opt/jarvis-tts/cache/model-config.yaml` |
+| Акустические веса и токенизатор | `/opt/jarvis-tts/cache/huggingface/hub/models--ArtShtorm--Shtorm-PocketTTS-RU/snapshots/33f6c328d62c4da5c1227bbe081e89b574a6183a/` — `model_fast.safetensors` и `tokenizer.model` |
+| Данные RUNorm | `/opt/jarvis-tts/cache/runorm/` |
+| Архив Silero Stress | `/opt/jarvis-tts/venv/lib/python3.12/site-packages/silero_stress/data/accentor.pt` |
+
 ## Ресурсы
 
 Видны 20 логических CPU, cpuset `0-3,7-22`, покрывающий 12 разных физических ядер одного сокета. Для восьми ядер доступны оба SMT-потока. Видим один NUMA-узел. Xeon E5-2670 v3 поддерживает SSE4.2, AVX2, FMA и F16C. AVX-512 не заявлен. Контейнер видит 19 GiB RAM и том 98 GiB. Данные о втором сокете физического сервера снаружи контейнера не проверялись. Верхний cgroup внутри контейнера показывает `max`, поэтому при тестах новый процесс запускался с собственными лимитами. Снимок топологии и свободного места находится в [host.txt](host.txt).

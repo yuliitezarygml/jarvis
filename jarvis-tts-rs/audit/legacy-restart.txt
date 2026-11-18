@@ -1,0 +1,18 @@
+Nov 18 21:20:16 jarvis systemd[1]: jarvis-tts.service: Main process exited, code=killed, status=9/KILL
+Nov 18 21:20:16 jarvis systemd[1]: jarvis-tts.service: Failed with result 'signal'.
+Nov 18 21:20:16 jarvis systemd[1]: jarvis-tts.service: Consumed 2min 12.442s CPU time, 1.1G memory peak, 79.8M memory swap peak.
+Nov 18 21:20:21 jarvis systemd[1]: jarvis-tts.service: Scheduled restart job, restart counter is at 1.
+Nov 18 21:20:21 jarvis systemd[1]: Started jarvis-tts.service - Jarvis Russian voice on CPU.
+Nov 18 21:20:23 jarvis python[12759]: INFO:     Started server process [12759]
+Nov 18 21:20:23 jarvis python[12759]: INFO:     Waiting for application startup.
+Nov 18 21:20:44 jarvis python[12759]: INFO:     Application startup complete.
+low 0
+high 0
+max 0
+oom 0
+oom_kill 0
+oom_group_kill 0
+sock_throttled 2627
+Restart=on-failure
+Result=success
+NRestarts=1
