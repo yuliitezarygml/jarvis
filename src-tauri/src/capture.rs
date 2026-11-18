@@ -178,15 +178,7 @@ fn capture(
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
                 emit(Kind::Recognizing, json!(true));
-                let final_text = live
-                    .take()
-                    .map(audio::LiveUtterance::finish)
-                    .unwrap_or_default();
-                let result = if final_text.is_empty() {
-                    c.stt.recognize(&utterance)
-                } else {
-                    Ok(final_text)
-                };
+                let result = c.stt.finalize(&utterance, live.take());
                 if *control.borrow() == Stop::Discard {
                     speech(SpeechUpdate::Cleared);
                     break;

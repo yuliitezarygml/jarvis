@@ -1,4 +1,5 @@
 use anyhow::{bail, ensure, Result};
+use sha2::{Digest, Sha256};
 use sherpa_onnx::{
     OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig, OnlineRecognizer,
     OnlineRecognizerConfig, OnlineStream,
@@ -128,6 +129,19 @@ impl Recognizer {
         let mut guard = self.online.lock().unwrap();
         if guard.is_none() && self.streaming_available() {
             let dir = self.root.join("streaming");
+            // Avoid passing a partial download or mismatched tokens to the native runtime.
+            for line in include_str!("../../scripts/stt-streaming.sha256").lines() {
+                let (expected, name) = line.split_once("  ")?;
+                if name == "LICENSE" {
+                    continue;
+                }
+                let mut file = std::fs::File::open(dir.join(name)).ok()?;
+                let mut hash = Sha256::new();
+                std::io::copy(&mut file, &mut hash).ok()?;
+                if format!("{:x}", hash.finalize()) != expected {
+                    return None;
+                }
+            }
             let mut config = OnlineRecognizerConfig::default();
             config.model_config.t_one_ctc.model =
                 Some(dir.join("model.onnx").to_string_lossy().into_owned());
@@ -169,6 +183,17 @@ impl Recognizer {
         Ok(s.get_result()
             .map(|r| r.text.trim().to_owned())
             .unwrap_or_default())
+    }
+    pub fn finalize(&self, samples: &[f32], live: Option<LiveUtterance>) -> Result<String> {
+        // The original 16 kHz model can refine words that the 8 kHz stream missed.
+        let offline = self.recognize(samples);
+        if matches!(&offline, Ok(text) if !text.is_empty()) {
+            return offline;
+        }
+        match live {
+            Some(stream) => Ok(stream.finish()),
+            None => offline,
+        }
     }
 }
 pub struct LiveUtterance {
@@ -223,7 +248,8 @@ mod acceptance {
     #[ignore = "Requires the installed Russian streaming model and Jarvis WAVs"]
     fn streaming_russian_before_end_and_between_commands() {
         let root = PathBuf::from(std::env::var_os("JARVIS_STT_DIR").expect("JARVIS_STT_DIR"));
-        let engine = Recognizer::new(root).streaming_engine().unwrap();
+        let recognizer = Recognizer::new(root);
+        let engine = recognizer.streaming_engine().unwrap();
         for (name, words) in [("old-long", "диагностика"), ("old-short", "добрый вечер")]
         {
             let wave =
@@ -241,7 +267,7 @@ mod acceptance {
                     println!("{} ms audio: {text}", (i + 1) * 50);
                 }
             }
-            let text = live.finish();
+            let text = recognizer.finalize(&samples, Some(live)).unwrap();
             println!("Final: {text}");
             if name == "old-long" {
                 assert!(changes >= 3);
@@ -273,7 +299,19 @@ mod acceptance {
                 }
             })
             .collect();
-        let text = Recognizer::new(root).recognize(&audio).unwrap();
+        // This isolated installation has the old files and an incomplete streaming download.
+        let fallback = std::env::temp_dir().join(format!("jarvis-fallback-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(fallback.join("streaming")).unwrap();
+        for file in ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt"] {
+            std::fs::copy(root.join(file), fallback.join(file)).unwrap();
+        }
+        std::fs::write(fallback.join("streaming/model.onnx"), b"incomplete").unwrap();
+        std::fs::write(fallback.join("streaming/tokens.txt"), b"").unwrap();
+        let recognizer = Recognizer::new(fallback.clone());
+        assert!(recognizer.available());
+        assert!(recognizer.streaming_engine().is_none());
+        let text = recognizer.finalize(&audio, None).unwrap();
+        std::fs::remove_dir_all(fallback).unwrap();
         println!("Русская расшифровка: {text}");
         assert!(text.to_lowercase().contains("добрый вечер"));
     }

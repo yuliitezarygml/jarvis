@@ -30,3 +30,4 @@ anyhow = "1"
 dotenvy = "0.15"
 chrono = { version = "0.4", features = ["clock"] }
 sherpa-onnx = "=2.0.1"
+sha2 = "0.10"
