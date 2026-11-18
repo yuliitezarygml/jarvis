@@ -1,0 +1,42 @@
+{
+  "model": "wespeaker_en_voxceleb_resnet34.onnx",
+  "sha256": "5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94",
+  "rows": [
+    {
+      "id": "short",
+      "oldVsReference": 0.7503611396754781,
+      "rustVsReference": 0.6718808381245392,
+      "oldVsRust": 0.9125530171229671
+    },
+    {
+      "id": "long",
+      "oldVsReference": 0.828301070739768,
+      "rustVsReference": 0.8491132546910882,
+      "oldVsRust": 0.9559034949724524
+    },
+    {
+      "id": "english",
+      "oldVsReference": 0.6243036151637943,
+      "rustVsReference": 0.685316417894533,
+      "oldVsRust": 0.8300576461674579
+    },
+    {
+      "id": "mixed",
+      "oldVsReference": 0.7952469875816518,
+      "rustVsReference": 0.6950733285351234,
+      "oldVsRust": 0.900472040538363
+    },
+    {
+      "id": "numbers",
+      "oldVsReference": 0.7057411347258252,
+      "rustVsReference": 0.7620116471388438,
+      "oldVsRust": 0.9076198087118538
+    },
+    {
+      "id": "punct",
+      "oldVsReference": 0.8026636173949274,
+      "rustVsReference": 0.7516800876486311,
+      "oldVsRust": 0.8927173346079101
+    }
+  ]
+}
