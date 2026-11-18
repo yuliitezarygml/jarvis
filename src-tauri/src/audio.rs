@@ -300,9 +300,15 @@ mod acceptance {
             })
             .collect();
         // This isolated installation has the old files and an incomplete streaming download.
-        let fallback = std::env::temp_dir().join(format!("jarvis-fallback-{}", uuid::Uuid::new_v4()));
+        let fallback =
+            std::env::temp_dir().join(format!("jarvis-fallback-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(fallback.join("streaming")).unwrap();
-        for file in ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt"] {
+        for file in [
+            "encoder.int8.onnx",
+            "decoder.onnx",
+            "joiner.int8.onnx",
+            "tokens.txt",
+        ] {
             std::fs::copy(root.join(file), fallback.join(file)).unwrap();
         }
         std::fs::write(fallback.join("streaming/model.onnx"), b"incomplete").unwrap();
