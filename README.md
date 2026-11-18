@@ -1,66 +1,57 @@
-# Jarvis
+# J.A.R.V.I.S.
 
-Основа desktop-приложения: **Rust + Tauri 2 + Next.js + React + TypeScript**.
+Голосовой ассистент для macOS на Rust, Tauri 2, Next.js и React. По умолчанию текстовые запросы идут в Groq через OpenAI-совместимый API. Выбрана доступная в аккаунте модель `openai/gpt-oss-120b`. Русская речь распознаётся на Mac через sherpa-onnx / Zipformer. Ответ озвучивает существующий Rust TTS на Xeon.
 
-## Запуск
+## Запуск на этом Mac
 
-Нужны Node.js 22 LTS, npm и Rust/Cargo. Для macOS также нужны Xcode Command Line Tools. Системные зависимости для Windows и Linux описаны в [документации Tauri](https://v2.tauri.app/start/prerequisites/).
+Откройте `src-tauri/target/release/bundle/macos/Jarvis.app`. В окне «Голосовой пульт» можно написать команду или нажать «Говорить». Кнопка с квадратом прерывает генерацию и очищает очередь воспроизведения. Пробел вне текстового поля и кнопок работает как push-to-talk. При первом включении микрофона macOS попросит разрешение.
 
-```bash
-npm install
+Для связи с TTS требуется активный SSH-туннель. Если в панели голосовой движок недоступен, запустите в отдельном терминале из каталога проекта:
+
+```sh
+./scripts/tts-tunnel.sh
+```
+
+Скрипт слушает только на `127.0.0.1:18181` и пересылает трафик в `127.0.0.1:8181` на Xeon. Можно задать `JARVIS_SSH_HOST` для SSH-алиаса из личной конфигурации. При уже открытом туннеле второй экземпляр не нужен. Тестовый сервер TTS запускается отдельной временной службой, порядок постоянной установки описан в [инструкции движка](jarvis-tts-rs/README.md).
+
+## Настройка на другой машине
+
+1. Установите Node.js 22+, npm, Rust stable и Xcode Command Line Tools. Для этого релиза проверена macOS arm64.
+2. Поместите заполненную копию [.env.example](.env.example) в `~/Library/Application Support/com.jarvis.desktop/backend.env`, задайте права `0600`. Минимальный набор — `GROQ_API_KEY`, `GROQ_BASE_URL`, `JARVIS_TTS_URL` и `JARVIS_TTS_TOKEN`. Токен TTS предоставляет администратор сервера. Ключи читает Rust при запуске приложения.
+3. Запустите `scripts/install-stt.sh`. Установщик скачает модель, проверит контрольные суммы и разместит четыре файла в подкаталоге `stt` рядом с базой данных. Нативный inference runtime включается при сборке. Для собственного расположения модели задайте `JARVIS_STT_DIR`.
+4. Запустите SSH-туннель, затем приложение. В «Настройках» доступны провайдер, модель, системный промпт, озвучивание и инструменты. При смене хоста API сначала обновите доверенный URL соответствующего провайдера в backend.env и перезапустите приложение. Это привязывает каждый секрет к выбранному оператором origin.
+
+## Разработка
+
+```sh
+npm ci
 npm run desktop:dev
+npm run desktop:build -- --bundles app
+npm run check
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --release --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --release --manifest-path src-tauri/Cargo.toml
 ```
 
-Команда сама запускает Next.js и открывает нативное окно. На первом запуске Cargo скачивает и компилирует зависимости.
+Для отдельного веб-просмотра HUD доступен `npm run dev`. Нативные функции доступны внутри окна Tauri. Next.js экспортирует статические ресурсы в `out/`.
 
-Только веб-интерфейс:
+## Диалоги и голос
 
-```bash
-npm run dev
+- Профили Groq, OmniRouter, OpenCode Zen, Z.AI и настраиваемый сервер используют интерфейс LlmProvider. Адаптер читает SSE, собирает фрагменты tool_calls и обрабатывает завершение или разрыв потока. Ошибка озвучивания сохраняет доступ к тексту.
+- По мере появления законченных фраз Rust отправляет их на `/tts/stream`, принимает PCM16 mono 24 кГц и ставит блоки в ограниченную очередь AVAudioPlayerNode. Остановка отменяет запрос провайдера, отправляет отмену активной работы TTS и останавливает плеер.
+- При однократном вводе микрофон закрывается после конца фразы, отпускания пробела или нажатия «Завершить ввод». Постоянный режим включается отдельно. Он использует адаптивный энергетический VAD и VoiceProcessingIO для эхоподавления. При начале новой команды старый ответ отменяется. Русский STT выдаёт расшифровку по завершении фразы. Аудиозапись микрофона обрабатывается в памяти.
+- SQLite сохраняет сессии, тексты сообщений, настройки и подтверждённые предпочтения в `jarvis.sqlite3` рядом с backend.env. В запрос входят до 25 последних сообщений в пределах 16 000 символов, системный промпт и ограниченный список предпочтений. Память и сессии удаляются через вкладку «Память».
+- Семь диагностических инструментов позволяют прочитать время, конфигурацию системы, загрузку CPU и RAM, диски, доступность сервера и готовность TTS. Инструменты модификации системы закрыты. В текущем интерфейсе модели доступны только диагностические схемы.
+- При штатном запросе Groq получает выбранный контекст диалога. TTS получает фразы ответа по SSH. Распознавание микрофона выполняется локально.
+
+## Сквозная проверка
+
+Команда ниже использует отдельную временную SQLite-базу, загружает реальную русскую запись и выводит ответ через аудиоустройство Mac. Нужны сеть, модели STT и действующий туннель.
+
+```sh
+export JARVIS_BACKEND_ENV="$HOME/Library/Application Support/com.jarvis.desktop/backend.env"
+export JARVIS_STT_DIR="$HOME/Library/Application Support/com.jarvis.desktop/stt"
+cargo test --release --manifest-path src-tauri/Cargo.toml recorded_russian_turn_reaches_speakers -- --ignored --nocapture
 ```
 
-Адрес: http://127.0.0.1:3000. Rust-команды доступны в desktop-окне; веб-просмотр выводит подсказку при попытке их вызвать.
-
-## Сборка
-
-```bash
-npm run desktop:build
-```
-
-Next.js экспортирует интерфейс в `out/`, Tauri встраивает его в приложение. Результат находится в `src-tauri/target/release/bundle/`. Для сборки на другую ОС обычно нужна соответствующая система и её инструменты.
-
-```bash
-npm run build       # Только статический интерфейс
-npm run check       # ESLint и TypeScript
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-## Структура
-
-```text
-src/
-  app/                 # Страницы, корневой layout, стили
-  components/          # React-компоненты
-  lib/tauri.ts         # Типизированные вызовы Rust-команд
-src-tauri/
-  src/commands.rs      # Команды greet и get_app_info
-  src/lib.rs           # Запуск Tauri и регистрация команд
-  capabilities/        # Разрешения нативного окна
-  tauri.conf.json      # Настройки окна и сборки
-```
-
-На стартовом экране есть пример настоящего вызова `invoke` из React в Rust, с проверкой имени, обработкой ошибок и состоянием загрузки.
-
-Чтобы добавить команду, создай функцию с `#[tauri::command]` в `commands.rs`, зарегистрируй её в `generate_handler!` в `lib.rs` и добавь типизированную обёртку в `src/lib/tauri.ts`.
-
-## Особенности Next.js в Tauri
-
-Используется App Router и `output: "export"`, как рекомендует [руководство Tauri для Next.js](https://v2.tauri.app/start/frontend/nextjs/). Server Actions, API Routes и SSR требуют отдельного сервера и в эту основу не входят. Локальная логика выполняется в Rust через `invoke`.
-
-Перед публикацией замени `identifier` в `src-tauri/tauri.conf.json` на собственный идентификатор приложения. Исходник иконки находится в `public/icon.svg`; пересоздать платформенные иконки можно командой:
-
-```bash
-npm run tauri -- icon public/icon.svg --output src-tauri/icons
-```
+[Текущие результаты, ограничения и передача работы](HANDOFF.md)

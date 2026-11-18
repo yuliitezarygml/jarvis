@@ -87,7 +87,12 @@ pub async fn speech(
         let play = phrase(&core, &turn, &id, &text, &mut first, start);
         tokio::select! {biased;_=cancel.cancelled()=>{if let Ok(req)=request(&core.http,reqwest::Method::DELETE,&format!("/tts/{id}")){let _=req.timeout(Duration::from_secs(2)).send().await;}bail!("Отменено")},r=play=>r?}
     }
+    let drain = Instant::now();
     while !cancel.is_cancelled() && audio::pending() > 0 {
+        ensure!(
+            drain.elapsed() < Duration::from_secs(4),
+            "Аудиоустройство перестало воспроизводить звук"
+        );
         tokio::time::sleep(Duration::from_millis(12)).await;
     }
     Ok(())
@@ -131,7 +136,12 @@ async fn phrase(
             if block.is_empty() {
                 continue;
             }
+            let wait = Instant::now();
             loop {
+                ensure!(
+                    wait.elapsed() < Duration::from_secs(4),
+                    "Аудиоустройство не освобождает буфер"
+                );
                 let accepted = core
                     .for_turn(turn, || audio::play(block))
                     .context("Отменено")??;

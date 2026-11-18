@@ -141,6 +141,7 @@ impl Core {
             let token = cancel.child_token();
             Some(tauri::async_runtime::spawn(async move {
                 if let Err(e) = tts::speech(core.clone(), turn.clone(), token, rx, start).await {
+                    core.for_turn(&turn, audio::stop);
                     core.event(&turn, "warning", json!(format!("{e:#}")));
                 }
             }))
