@@ -34,6 +34,14 @@ if(process.env.SWEEP_ONLY!=='1'){
  for(const [id,text] of corpus)await run(id,text,false,true);
  for(const data of [{text:''},{text:'   '},{text:'… 🎵'},{text:'а'.repeat(2001)},{text:'тест',speed:0},{text:'Hello',lang:'en'},{text:'тест',format:'bad'},{text:'тест',voice:'other'}]){
  const res=await fetch(base+'/tts',payload(data));assert.equal(res.status,422);await res.arrayBuffer();}
+ for (const body of ['', Buffer.from([0xff, 0x0a]), 'а'.repeat(2001)]) {
+   const response = await fetch(base+'/tts/stream', {
+     method:'POST', headers:{...auth,'Content-Type':'text/plain'}, body,
+     signal:AbortSignal.timeout(5000),
+   });
+   assert.equal(response.status,422);
+   assert.equal((await response.json()).error,'invalid_input');
+ }
  const mp=await fetch(base+'/tts',payload({text:'Проверка.',speed:1.25,format:'mp3'}));assert.equal(mp.status,200);assert.equal(mp.headers.get('content-type'),'audio/mpeg');await fs.writeFile('examples/audio/rust-fast.mp3',Buffer.from(await mp.arrayBuffer()));
  const queueStart=await(await fetch(base+'/metrics',{headers:auth})).text();
  await Promise.all([run('concurrent-a',corpus[0][1],false,false),run('concurrent-b',corpus[0][1],false,false)]);

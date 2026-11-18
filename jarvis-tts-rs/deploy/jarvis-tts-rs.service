@@ -11,7 +11,7 @@ Environment=JARVIS_BIND=127.0.0.1:8181
 Environment=JARVIS_THREADS=4
 Environment=JARVIS_ASSETS=/opt/jarvis-tts-rs/model
 Environment=JARVIS_FFMPEG=/opt/jarvis-tts-rs/bin/ffmpeg
-EnvironmentFile=-/etc/jarvis-tts-rs.env
+EnvironmentFile=/etc/jarvis-tts-rs.env
 MemoryHigh=4G
 MemoryMax=6G
 TasksMax=96

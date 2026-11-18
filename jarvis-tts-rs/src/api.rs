@@ -169,8 +169,12 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
     if let Some(body) = body {
         let c = ticket.control.clone();
         tokio::spawn(async move {
-            let result = tokio::select! {_=c.cancel.cancelled()=>return,r=feed(body,tx)=>r};
+            let result = tokio::select! {
+                _ = c.cancel.cancelled() => return,
+                result = feed(body, &tx) => result,
+            };
             if result.is_err() {
+                c.invalid_input.store(true, Relaxed);
                 c.stop();
             }
         });
@@ -228,11 +232,21 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
         .unwrap())
 }
 async fn next_frame(t: &mut Ticket) -> Result<Option<Bytes>, ApiError> {
-    tokio::select! {biased;_=t.control.cancel.cancelled()=>Err(ApiError(StatusCode::REQUEST_TIMEOUT,"cancelled_or_timed_out")),
-    v=t.rx.recv()=>v.transpose().map_err(|_|ApiError(StatusCode::INTERNAL_SERVER_ERROR,"synthesis_failed"))}
+    tokio::select! {
+        biased;
+        _ = t.control.cancel.cancelled() => {
+            if t.control.invalid_input.load(Relaxed) {
+                Err(invalid())
+            } else {
+                Err(ApiError(StatusCode::REQUEST_TIMEOUT, "cancelled_or_timed_out"))
+            }
+        },
+        frame = t.rx.recv() => frame.transpose()
+            .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "synthesis_failed")),
+    }
 }
 // UTF-8 may straddle transport frames. A newline commits one complete phrase to the model.
-async fn feed(body: Body, tx: mpsc::Sender<String>) -> Result<(), ()> {
+async fn feed(body: Body, tx: &mpsc::Sender<String>) -> Result<(), ()> {
     let mut chunks = body.into_data_stream();
     let mut pending = Vec::new();
     let mut total = 0;
@@ -245,13 +259,13 @@ async fn feed(body: Body, tx: mpsc::Sender<String>) -> Result<(), ()> {
         }
         for &b in &bytes {
             if b == b'\n' {
-                send_line(&mut pending, &mut seen, &tx).await?
+                send_line(&mut pending, &mut seen, tx).await?
             } else {
                 pending.push(b);
             }
         }
     }
-    send_line(&mut pending, &mut seen, &tx).await?;
+    send_line(&mut pending, &mut seen, tx).await?;
     if seen == 0 {
         return Err(());
     }

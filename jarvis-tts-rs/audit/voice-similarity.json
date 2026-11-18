@@ -6,37 +6,82 @@
       "id": "short",
       "oldVsReference": 0.7503611396754781,
       "rustVsReference": 0.67189464492534,
-      "oldVsRust": 0.9125483029745085
+      "oldVsRust": 0.9125483029745085,
+      "oldSeconds": 1.36,
+      "rustSeconds": 1.44,
+      "oldInternalPausesMs": [],
+      "rustInternalPausesMs": []
     },
     {
       "id": "long",
       "oldVsReference": 0.828301070739768,
       "rustVsReference": 0.8491177006730374,
-      "oldVsRust": 0.9559063597737782
+      "oldVsRust": 0.9559063597737782,
+      "oldSeconds": 7.36,
+      "rustSeconds": 7.76,
+      "oldInternalPausesMs": [
+        470,
+        590
+      ],
+      "rustInternalPausesMs": [
+        490,
+        330,
+        430
+      ]
     },
     {
       "id": "english",
       "oldVsReference": 0.6243036151637943,
       "rustVsReference": 0.6853990759342838,
-      "oldVsRust": 0.8300862502635845
+      "oldVsRust": 0.8300862502635845,
+      "oldSeconds": 1.44,
+      "rustSeconds": 1.52,
+      "oldInternalPausesMs": [
+        190
+      ],
+      "rustInternalPausesMs": [
+        270
+      ]
     },
     {
       "id": "mixed",
       "oldVsReference": 0.7952469875816518,
       "rustVsReference": 0.6950771950015854,
-      "oldVsRust": 0.9004694404335716
+      "oldVsRust": 0.9004694404335716,
+      "oldSeconds": 2.32,
+      "rustSeconds": 2.32,
+      "oldInternalPausesMs": [
+        210
+      ],
+      "rustInternalPausesMs": []
     },
     {
       "id": "numbers",
       "oldVsReference": 0.7057411347258252,
       "rustVsReference": 0.762018992024396,
-      "oldVsRust": 0.9076153877618311
+      "oldVsRust": 0.9076153877618311,
+      "oldSeconds": 4.24,
+      "rustSeconds": 4.32,
+      "oldInternalPausesMs": [
+        320
+      ],
+      "rustInternalPausesMs": [
+        570
+      ]
     },
     {
       "id": "punct",
       "oldVsReference": 0.8026636173949274,
       "rustVsReference": 0.751674702869519,
-      "oldVsRust": 0.8927168675060007
+      "oldVsRust": 0.8927168675060007,
+      "oldSeconds": 2.96,
+      "rustSeconds": 2.32,
+      "oldInternalPausesMs": [
+        970
+      ],
+      "rustInternalPausesMs": [
+        440
+      ]
     }
   ]
 }

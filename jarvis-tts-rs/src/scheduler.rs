@@ -16,6 +16,7 @@ pub type Frame = std::io::Result<Bytes>;
 pub struct Control {
     pub stop: AtomicBool,
     pub cancel: CancellationToken,
+    pub invalid_input: AtomicBool,
 }
 impl Control {
     pub fn stop(&self) {
@@ -117,6 +118,7 @@ impl Pool {
         let control = Arc::new(Control {
             stop: false.into(),
             cancel: CancellationToken::new(),
+            invalid_input: false.into(),
         });
         let (out, rx) = mpsc::channel(4);
         let mut active = self.active.lock().unwrap();
