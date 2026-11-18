@@ -65,7 +65,7 @@ pub struct VoiceState<Q: CpuBackend> {
 
 impl<Q: CpuBackend> VoiceState<Q> {
     /// Positions the prompt fills.
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         match self.transformer_state.layer_states.first() {
             Some(LayerAttentionState::FlowLm(state)) => state.current_end,
             _ => 0,

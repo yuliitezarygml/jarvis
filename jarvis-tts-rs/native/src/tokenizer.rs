@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use std::sync::Arc;
 
 pub enum Tokenizer {
-    SentencePiece(sentencepiece_rs::SentencePieceProcessor),
+    SentencePiece(Box<sentencepiece_rs::SentencePieceProcessor>),
     Json(Box<tokenizers::Tokenizer>),
 }
 
@@ -35,7 +35,7 @@ impl Tokenizer {
                     sp.model().vocab_size()
                 )
             }
-            Ok(Self::SentencePiece(sp))
+            Ok(Self::SentencePiece(Box::new(sp)))
         }
     }
 
