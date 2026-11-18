@@ -9,7 +9,10 @@ pub mod tokenizer;
 pub mod weights;
 mod download {
     pub fn download_if_necessary(path: &str) -> anyhow::Result<std::path::PathBuf> {
-        anyhow::ensure!(std::path::Path::new(path).is_file(), "missing local model asset: {path}");
+        anyhow::ensure!(
+            std::path::Path::new(path).is_file(),
+            "missing local model asset: {path}"
+        );
         Ok(path.into())
     }
 }

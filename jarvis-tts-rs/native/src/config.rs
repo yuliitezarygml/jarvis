@@ -9,7 +9,13 @@ pub use ptts::flow_lm::FlowType;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-const CONFIGS: &[(&str, &str)] = &[("english",include_str!("../config/english.yaml")),("english_drifting_26-09",include_str!("../config/english_drifting_26-09.yaml"))];
+const CONFIGS: &[(&str, &str)] = &[
+    ("english", include_str!("../config/english.yaml")),
+    (
+        "english_drifting_26-09",
+        include_str!("../config/english_drifting_26-09.yaml"),
+    ),
+];
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
