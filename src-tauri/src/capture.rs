@@ -32,7 +32,7 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     c.cancel();
     ensure!(c.stt.available(), "Русская модель STT не установлена");
     let mut g = c.capture.lock().await;
-    tokio::task::spawn_blocking(audio::mic_start).await??;
+    tokio::task::spawn_blocking(move || audio::mic_start(continuous)).await??;
     let (tx, rx) = watch::channel(Stop::Live);
     let core = c.clone();
     let handle = tauri::async_runtime::spawn(async move {
@@ -63,8 +63,16 @@ async fn capture(
     let mut noise = 0.002f32;
     let mut meter = Instant::now();
     let mut capture_open = true;
+    let opened = Instant::now();
     loop {
-        let mode = *control.borrow();
+        let mut mode = *control.borrow();
+        if !continuous
+            && !speaking
+            && opened.elapsed() > Duration::from_secs(12)
+            && mode == Stop::Live
+        {
+            mode = Stop::Submit;
+        }
         if mode == Stop::Discard {
             break;
         }

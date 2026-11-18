@@ -17,13 +17,13 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            provider: "OmniRouter".into(),
-            url: std::env::var("OMNIROUTER_BASE_URL").unwrap_or_default(),
-            model: std::env::var("OMNIROUTER_MODEL")
-                .unwrap_or_else(|_| "opencode-zen/deepseek-v4.1-flash".into()),
+            provider: "Groq".into(),
+            url: std::env::var("GROQ_BASE_URL")
+                .unwrap_or_else(|_| "https://api.groq.com/openai/v1".into()),
+            model: std::env::var("GROQ_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".into()),
             prompt: include_str!("../config/personality.txt").trim().into(),
             speak: true,
-            tools: false,
+            tools: true,
         }
     }
 }
@@ -163,5 +163,31 @@ impl Store {
         }
         all.extend(rows);
         Ok(all)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sessions_and_preferences_survive_reopen() {
+        let path = std::env::temp_dir().join(format!("jarvis-db-test-{}.sqlite", Uuid::new_v4()));
+        let mut db = Store::open(&path).unwrap();
+        let a = db.new_session().unwrap();
+        db.append(&a, "user", "Добрый вечер").unwrap();
+        let b = db.new_session().unwrap();
+        db.preference("Ответы коротко").unwrap();
+        drop(db);
+        let mut db = Store::open(&path).unwrap();
+        assert_eq!(db.history(&a, 10).unwrap()[0]["content"], "Добрый вечер");
+        assert!(db.history(&b, 10).unwrap().is_empty());
+        assert_eq!(db.prefs().unwrap().len(), 1);
+        db.delete(&a).unwrap();
+        assert!(db.history(&a, 10).unwrap().is_empty());
+        db.forget(db.prefs().unwrap()[0]["id"].as_i64().unwrap())
+            .unwrap();
+        assert!(db.prefs().unwrap().is_empty());
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 }

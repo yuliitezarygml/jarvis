@@ -8,7 +8,7 @@ use std::{
 #[cfg(target_os = "macos")]
 mod device {
     unsafe extern "C" {
-        pub fn jv_mic_start() -> i32;
+        pub fn jv_mic_start(continuous: i32) -> i32;
         pub fn jv_mic_status() -> i32;
         pub fn jv_mic_end();
         pub fn jv_read(p: *mut f32, cap: i32) -> i32;
@@ -19,12 +19,12 @@ mod device {
     }
 }
 #[cfg(target_os = "macos")]
-pub fn mic_start() -> Result<()> {
-    match unsafe { device::jv_mic_start() } {
+pub fn mic_start(continuous: bool) -> Result<()> {
+    match unsafe { device::jv_mic_start(i32::from(continuous)) } {
         1 => Ok(()),
         -1 => bail!("Разрешите доступ к микрофону в настройках конфиденциальности macOS"),
         -2 => bail!("Истекло время ожидания разрешения микрофона"),
-        _ => bail!("Не удалось открыть микрофон с эхоподавлением. Проверьте устройство ввода."),
+        _ => bail!("Не удалось открыть устройство ввода. Проверьте выбранный микрофон macOS."),
     }
 }
 #[cfg(target_os = "macos")]
@@ -68,7 +68,7 @@ pub fn gpu() -> String {
 #[cfg(not(target_os = "macos"))]
 mod fallback {
     use anyhow::{bail, Result};
-    pub fn mic_start() -> Result<()> {
+    pub fn mic_start(continuous: bool) -> Result<()> {
         bail!("Голосовой ввод поддерживается в macOS")
     }
     pub fn mic_status() -> i32 {
@@ -142,4 +142,33 @@ impl Recognizer {
 }
 pub fn level(samples: &[f32]) -> f32 {
     (samples.iter().map(|v| v * v).sum::<f32>() / samples.len().max(1) as f32).sqrt()
+}
+
+#[cfg(test)]
+mod acceptance {
+    use super::*;
+    #[test]
+    #[ignore = "Requires the installed Russian model and real Jarvis WAV"]
+    fn original_voice_recognized_in_russian() {
+        let root = std::env::var_os("JARVIS_STT_DIR")
+            .map(PathBuf::from)
+            .expect("JARVIS_STT_DIR");
+        let wave =
+            sherpa_onnx::Wave::read("../jarvis-tts-rs/examples/audio/old-short.wav").unwrap();
+        assert_eq!(wave.sample_rate(), 24000);
+        let audio: Vec<f32> = (0..wave.samples().len() * 2 / 3)
+            .map(|i| {
+                let pos = i * 3 / 2;
+                if i % 2 == 0 {
+                    wave.samples()[pos]
+                } else {
+                    (wave.samples()[pos] + wave.samples().get(pos + 1).copied().unwrap_or_default())
+                        / 2.
+                }
+            })
+            .collect();
+        let text = Recognizer::new(root).recognize(&audio).unwrap();
+        println!("Русская расшифровка: {text}");
+        assert!(text.to_lowercase().contains("добрый вечер"));
+    }
 }

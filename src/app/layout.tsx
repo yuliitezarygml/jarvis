@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Jarvis",
-  description: "Основа desktop-приложения на Rust, Tauri и Next.js.",
+  description: "Голосовой пульт персонального ассистента J.A.R.V.I.S.",
   icons: { icon: "/icon.svg" },
 };
 

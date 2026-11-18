@@ -34,6 +34,7 @@ pub fn base(raw: &str) -> Result<Url> {
 }
 fn credential(s: &Settings) -> Result<String> {
     let (host, key) = match s.provider.as_str() {
+        "Groq" => ("GROQ_BASE_URL", "GROQ_API_KEY"),
         "OmniRouter" => ("OMNIROUTER_BASE_URL", "OMNIROUTER_API_KEY"),
         "OpenCode Zen" => ("OPENCODE_BASE_URL", "OPENCODE_API_KEY"),
         "Z.AI" => ("ZAI_BASE_URL", "ZAI_API_KEY"),
@@ -109,7 +110,7 @@ impl LlmProvider for Compatible {
             body["tools"] = tools.into();
         }
         let req = self.request(s, "chat/completions", false)?.json(&body);
-        let response = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=req.send()=>r.context("Нет связи с OmniRouter")?};
+        let response = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=req.send()=>r.context("Нет связи с AI-провайдером")?};
         status(response.status())?;
         let mut stream = response.bytes_stream().eventsource();
         let mut calls: BTreeMap<usize, (String, String, String)> = BTreeMap::new();

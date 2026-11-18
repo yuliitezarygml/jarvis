@@ -230,3 +230,76 @@ impl Core {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod acceptance {
+    use super::*;
+    /// Tests the same queue, provider, STT, audio renderer and event stream as the desktop commands.
+    /// Uses a fresh SQLite database, existing operator credentials and the original audio fixture.
+    #[test]
+    #[ignore = "Live Groq, forwarded TTS, Mac output device and STT assets required"]
+    fn recorded_russian_turn_reaches_speakers() {
+        tauri::async_runtime::block_on(async {
+            let config = std::env::var_os("JARVIS_BACKEND_ENV").expect("JARVIS_BACKEND_ENV");
+            dotenvy::from_path(config).unwrap();
+            let folder = std::env::temp_dir().join(format!("jarvis-acceptance-{}", Uuid::new_v4()));
+            let (events, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let c = Core::open(
+                &folder,
+                Arc::new(move |v| {
+                    let _ = events.send(v);
+                }),
+            )
+            .unwrap();
+            let wave =
+                sherpa_onnx::Wave::read("../jarvis-tts-rs/examples/audio/old-short.wav").unwrap();
+            let pcm: Vec<f32> = (0..wave.samples().len() * 2 / 3)
+                .map(|i| wave.samples()[i * 3 / 2])
+                .collect();
+            let before = Instant::now();
+            let text = c.stt.recognize(&pcm).unwrap();
+            println!("STT {} ms, {}", before.elapsed().as_millis(), text);
+            assert!(text.contains("добрый вечер"));
+            let s = c.db.lock().unwrap().new_session().unwrap();
+            c.start(s.clone(), text).unwrap();
+            let mut voice = false;
+            let mut first = false;
+            tokio::time::timeout(std::time::Duration::from_secs(75), async {
+                while let Some(e) = rx.recv().await {
+                    match e["kind"].as_str().unwrap() {
+                        "first_text" => {
+                            first = true;
+                            println!("LLM first text {} ms", e["data"])
+                        }
+                        "speaking" => {
+                            voice = true;
+                            println!(
+                                "First PCM queued for actual playback {} ms",
+                                e["data"]["ms"]
+                            )
+                        }
+                        "error" | "warning" => panic!("Desktop audio turn: {}", e["data"]),
+                        "done" => break,
+                        _ => (),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(first && voice);
+            assert_eq!(audio::pending(), 0);
+            let rows = c.db.lock().unwrap().history(&s, 10).unwrap();
+            assert_eq!(rows.len(), 2);
+            println!("Groq: {}", rows[1]["content"]);
+            println!(
+                "STT + completed playback {} ms",
+                before.elapsed().as_millis()
+            );
+            c.start(s, "Расскажи о планетах.".into()).unwrap();
+            c.cancel();
+            assert_eq!(audio::pending(), 0);
+            drop(c);
+            let _ = std::fs::remove_dir_all(folder);
+        })
+    }
+}
