@@ -95,13 +95,15 @@ export function useConsole() {
     sid = useRef(""),
     turn = useRef(""),
     liveMic = useRef("off"),
+    historyVersion = useRef(0),
     micChain = useRef<Promise<void>>(Promise.resolve()),
     buffer = useRef(""),
     paint = useRef(0);
   const report = useCallback((e: unknown) => setError(String(e)), []);
   const updateHistory = useCallback(async (id: string) => {
+    const version = ++historyVersion.current;
     const rows = await invoke<Msg[]>("messages", { session: id });
-    if (sid.current === id) setMessages(rows);
+    if (sid.current === id && version === historyVersion.current) setMessages(rows);
   }, []);
   const refresh = useCallback(async () => {
     if (!isTauri()) return;
@@ -132,6 +134,7 @@ export function useConsole() {
       const off = await listen<Event>("jarvis-event", ({ payload: e }) => {
         if (e.session !== sid.current) return;
         if (e.kind === "start") {
+          historyVersion.current++;
           turn.current = e.turn ?? "";
           buffer.current = "";
           setPartial("");
@@ -191,6 +194,10 @@ export function useConsole() {
           case "error":
             turn.current = "";
             setBusy(false);
+            if (e.kind === "done" && buffer.current) {
+              const reply: Msg = { role: "assistant", content: buffer.current };
+              setMessages((rows) => [...rows, reply]);
+            }
             buffer.current = "";
             setPartial("");
             energy.current = 0;
@@ -257,6 +264,7 @@ export function useConsole() {
     await stop();
     sid.current = id;
     turn.current = "";
+    buffer.current = "";
     setSession(id);
     setPartial("");
     setMessages([]);

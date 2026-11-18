@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   useConsole,
   type Console,
@@ -120,10 +120,14 @@ function Rail({ c }: { c: Console }) {
   );
 }
 function Transcript({ c }: { c: Console }) {
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const box = end.current;
-    if (box) box.scrollTop = box.scrollHeight;
+  const history = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  useLayoutEffect(() => {
+    followLatest.current = true;
+  }, [c.session]);
+  useLayoutEffect(() => {
+    const box = history.current;
+    if (box && followLatest.current) box.scrollTop = box.scrollHeight;
   }, [c.messages, c.partial]);
   return (
     <section className="panel timeline">
@@ -150,7 +154,15 @@ function Transcript({ c }: { c: Console }) {
           </option>
         ))}
       </select>
-      <div ref={end} className="messages" aria-label="История диалога">
+      <div
+        ref={history}
+        className="messages"
+        aria-label="История диалога"
+        onScroll={(e) => {
+          const box = e.currentTarget;
+          followLatest.current = box.scrollHeight - box.clientHeight - box.scrollTop <= 16;
+        }}
+      >
         {!c.messages.length && !c.partial ? (
           <div className="empty">
             <Icon name="chat" size={28} />
@@ -438,7 +450,7 @@ export default function Hud() {
     };
   }, [page]);
   return (
-    <div className="shell">
+    <div className={page === "center" ? "shell commandCenter" : "shell"}>
       <header>
         <div className="brand">
           <span className="brandMark">
