@@ -95,7 +95,14 @@ async fn capture(
                     noise = noise * 0.96 + level * 0.04;
                 }
             }
-            if !speaking {
+            if !continuous {
+                // Push-to-talk preserves quiet syllables until the button is released.
+                utterance.extend_from_slice(chunk);
+                if !speaking && loud >= 1200 {
+                    speaking = true;
+                    emit("voice_start", json!(true));
+                }
+            } else if !speaking {
                 pre.extend(chunk);
                 while pre.len() > 4800 {
                     pre.pop_front();
@@ -110,8 +117,9 @@ async fn capture(
                 utterance.extend_from_slice(chunk);
             }
         }
-        let finish =
-            mode == Stop::Submit || (speaking && (quiet >= 10400 || utterance.len() >= 16000 * 24));
+        let finish = mode == Stop::Submit
+            || (continuous && speaking && quiet >= 10400)
+            || utterance.len() >= 16000 * 24;
         if finish {
             if !continuous || mode == Stop::Submit {
                 audio::mic_end();
@@ -119,7 +127,7 @@ async fn capture(
                 emit("mic", json!("off"));
             }
             if utterance.len() > 2400 {
-                if quiet < utterance.len() {
+                if continuous && quiet < utterance.len() {
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
                 emit("recognizing", json!(true));

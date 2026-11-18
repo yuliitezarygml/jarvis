@@ -38,7 +38,7 @@ export function CoreDisplay({
         !el ||
         !g ||
         document.hidden ||
-        ms - prev < (reduced.matches ? 240 : 32)
+        ms - prev < (reduced.matches ? 240 : mode.current === "IDLE" ? 70 : 40)
       )
         return;
       const dt = Math.min(80, ms - prev) / 1000;
