@@ -1,0 +1,116 @@
+[
+  {
+    "id": "short",
+    "status": 200,
+    "headersMs": 976,
+    "wallMs": 980,
+    "cached": "miss",
+    "engineMs": "917",
+    "hz": 24000,
+    "seconds": 1.36,
+    "rtf": 0.7205882352941176
+  },
+  {
+    "id": "long",
+    "status": 200,
+    "headersMs": 3083,
+    "wallMs": 3086,
+    "cached": "miss",
+    "engineMs": "3080",
+    "hz": 24000,
+    "seconds": 5.52,
+    "rtf": 0.5590579710144927
+  },
+  {
+    "id": "english",
+    "status": 200,
+    "headersMs": 912,
+    "wallMs": 913,
+    "cached": "miss",
+    "engineMs": "909",
+    "hz": 24000,
+    "seconds": 1.44,
+    "rtf": 0.6340277777777777
+  },
+  {
+    "id": "mixed",
+    "status": 200,
+    "headersMs": 1415,
+    "wallMs": 1416,
+    "cached": "miss",
+    "engineMs": "1412",
+    "hz": 24000,
+    "seconds": 2.4,
+    "rtf": 0.59
+  },
+  {
+    "id": "numbers",
+    "status": 200,
+    "headersMs": 2525,
+    "wallMs": 2527,
+    "cached": "miss",
+    "engineMs": "2522",
+    "hz": 24000,
+    "seconds": 3.76,
+    "rtf": 0.6720744680851064
+  },
+  {
+    "id": "punct",
+    "status": 200,
+    "headersMs": 1468,
+    "wallMs": 1469,
+    "cached": "miss",
+    "engineMs": "1465",
+    "hz": 24000,
+    "seconds": 2.32,
+    "rtf": 0.6331896551724138
+  },
+  {
+    "id": "empty",
+    "status": 422,
+    "headersMs": 3,
+    "wallMs": 3,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "invalid",
+    "status": 422,
+    "headersMs": 2,
+    "wallMs": 2,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "oversize",
+    "status": 422,
+    "headersMs": 4,
+    "wallMs": 5,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "lang",
+    "status": 422,
+    "headersMs": 2,
+    "wallMs": 2,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "format",
+    "status": 422,
+    "headersMs": 2,
+    "wallMs": 2,
+    "cached": null,
+    "engineMs": null
+  },
+  {
+    "id": "speed",
+    "status": 422,
+    "headersMs": 2,
+    "wallMs": 3,
+    "cached": null,
+    "engineMs": null
+  }
+]

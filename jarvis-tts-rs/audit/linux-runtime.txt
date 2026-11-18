@@ -12,3 +12,11 @@ root:jarvis-rust-tts 750
 MainPID=0
 ExecMainStartTimestamp=Wed 2026-11-18 18:01:50 UTC
 ActiveState=activating
+ExecMainStartTimestamp=Wed 2026-11-18 21:21:21 UTC
+MemoryPeak=1968959488
+ActiveState=active
+Result=success
+NRestarts=1
+ExecMainStartTimestamp=Wed 2026-11-18 21:20:21 UTC
+ActiveState=active
+{"ok":true,"engine":"pocket-tts-ru","model":"Shtorm-PocketTTS-RU fast","voice":"Jarvis RU clone","languages":["ru"],"external_tts":false,"notice":""}
