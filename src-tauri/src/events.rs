@@ -20,7 +20,17 @@ pub enum Kind {
     MicError,
     VoiceStart,
     Recognizing,
-    Transcript,
+    Speech,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(tag = "state", content = "text", rename_all = "snake_case")]
+pub enum SpeechUpdate<'a> {
+    Listening,
+    Fallback,
+    Partial(&'a str),
+    Final(&'a str),
+    Cleared,
 }
 
 #[derive(Clone, Serialize)]
@@ -32,6 +42,9 @@ pub struct Event {
     pub data: Value,
 }
 impl Event {
+    pub fn speech(session: &str, update: SpeechUpdate<'_>) -> Self {
+        Self::new(session, None, Kind::Speech, serde_json::json!(update))
+    }
     pub fn new(session: &str, turn: Option<&str>, kind: Kind, data: Value) -> Self {
         Self {
             session: session.to_owned(),
