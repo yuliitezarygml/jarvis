@@ -63,7 +63,7 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     let (done, finished) = watch::channel(());
     let core = c.clone();
     tokio::task::spawn_blocking(move || {
-        capture(core, session, continuous, rx, online);
+        capture(core, session, continuous, rx, online, audio::read);
         drop(done);
     });
     *g = Some(Capture { stop: tx, finished });
@@ -75,6 +75,7 @@ fn capture(
     continuous: bool,
     control: watch::Receiver<Stop>,
     online: Option<Arc<OnlineRecognizer>>,
+    mut read: impl FnMut(&mut [f32]) -> usize,
 ) {
     let emit =
         |kind: Kind, data: serde_json::Value| (c.bus)(Event::new(&session, None, kind, data));
@@ -110,7 +111,7 @@ fn capture(
             speech(SpeechUpdate::Cleared);
             break;
         }
-        let n = audio::read(&mut buffer);
+        let n = read(&mut buffer);
         let chunk = &buffer[..n];
         let level = audio::level(chunk);
         if n > 0 {
@@ -214,5 +215,107 @@ fn capture(
     if capture_open {
         audio::mic_end();
         emit(Kind::Mic, json!("off"));
+    }
+}
+
+#[cfg(test)]
+mod acceptance {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    #[ignore = "Requires JARVIS_STT_DIR with both installed Russian models"]
+    fn continuous_speech_submits_only_finals_and_discards_last_command() {
+        // Drive the same capture loop with real PCM, independent of room acoustics.
+        let (stop, control) = watch::channel(Stop::Live);
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let recorded = trace.clone();
+        let discard = stop.clone();
+        let dir = std::env::temp_dir().join(format!("jarvis-vad-{}", uuid::Uuid::new_v4()));
+        let core = Core::open(
+            &dir,
+            Arc::new(move |event| {
+                if !matches!(event.kind, Kind::Speech | Kind::Start) {
+                    return;
+                }
+                let mut events = recorded.lock().unwrap();
+                let submissions = events
+                    .iter()
+                    .filter(|e: &&Event| matches!(e.kind, Kind::Start))
+                    .count();
+                if submissions == 2 && event.data["state"] == "partial" {
+                    discard.send(Stop::Discard).unwrap();
+                }
+                events.push(event);
+            }),
+        )
+        .unwrap();
+        let session = {
+            let db = core.db.lock().unwrap();
+            let mut settings = db.settings().unwrap();
+            settings.url.clear(); // This test stops at command dispatch, before any network call.
+            settings.speak = false;
+            db.save(&settings).unwrap();
+            db.new_session().unwrap()
+        };
+        let engine = core.stt.streaming_engine().expect("streaming model");
+        let mut pcm = Vec::new();
+        for name in ["old-long", "old-short", "old-long"] {
+            let wave =
+                sherpa_onnx::Wave::read(&format!("../jarvis-tts-rs/examples/audio/{name}.wav"))
+                    .unwrap();
+            assert_eq!(wave.sample_rate(), 24000);
+            pcm.extend((0..wave.samples().len() * 2 / 3).map(|i| wave.samples()[i * 3 / 2]));
+            pcm.extend(std::iter::repeat_n(0.0, 16000));
+        }
+        let mut frames = pcm.chunks(320);
+        capture(
+            core.clone(),
+            session.clone(),
+            true,
+            control,
+            Some(engine),
+            |out| {
+                if let Some(frame) = frames.next() {
+                    out[..frame.len()].copy_from_slice(frame);
+                    frame.len()
+                } else {
+                    stop.send(Stop::Discard).unwrap();
+                    0
+                }
+            },
+        );
+        let trace = trace.lock().unwrap();
+        let mut finals = Vec::new();
+        let mut sent = Vec::new();
+        let mut changes = 0;
+        for event in trace.iter() {
+            match event.data["state"].as_str() {
+                Some("listening") => changes = 0,
+                Some("partial") => changes += 1,
+                Some("final") => {
+                    assert!(changes > 0);
+                    finals.push(event.data["text"].as_str().unwrap());
+                    println!(
+                        "{changes} partials before final: {}",
+                        finals.last().unwrap()
+                    );
+                }
+                _ if matches!(event.kind, Kind::Start) => {
+                    sent.push(event.data.as_str().unwrap());
+                    assert_eq!(sent, finals);
+                }
+                _ => (),
+            }
+        }
+        assert_eq!(sent.len(), 2);
+        assert!(sent[0].contains("диагностика завершена"));
+        assert_eq!(sent[1], "добрый вечер сэр");
+        assert!(changes > 0);
+        assert_eq!(trace.last().unwrap().data["state"], "cleared");
+        let rows = core.db.lock().unwrap().history(&session, 20).unwrap();
+        assert_eq!(rows.iter().filter(|r| r["role"] == "user").count(), 2);
+        drop(core);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
