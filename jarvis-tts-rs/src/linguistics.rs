@@ -75,7 +75,7 @@ pub struct Normalizer {
     tok: Tokenizer,
 }
 static LATIN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z]+(?:[ '-]+[A-Za-z]+)*").unwrap());
+    LazyLock::new(|| Regex::new(r"[A-Za-z]+(?:[ ,'-]+[A-Za-z]+)*").unwrap());
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+").unwrap());
 static SLOTS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<extra_id_(\d+)>").unwrap());
 static ABBR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[А-ЯЁ]{2,}\b").unwrap());
@@ -235,6 +235,9 @@ impl Normalizer {
             let translit = translit.replace("<pad>", "").replace("<s>", "");
             out.push_str(translit.trim());
             pos = m.end();
+            if text[pos..].trim() == "." {
+                pos = text.len();
+            }
         }
         out.push_str(&text[pos..]);
         ensure!(out.len() < 48000, "normalized text too long");

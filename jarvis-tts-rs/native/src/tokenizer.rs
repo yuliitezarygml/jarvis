@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use std::sync::Arc;
 
 pub enum Tokenizer {
-    SentencePiece(sentencepiece::SentencePieceProcessor),
+    SentencePiece(sentencepiece_rs::SentencePieceProcessor),
     Json(Box<tokenizers::Tokenizer>),
 }
 
@@ -27,12 +27,12 @@ impl Tokenizer {
             Ok(Self::Json(Box::new(tokenizer)))
         } else {
             log::info!("Loading sentencepiece tokenizer from {tokenizer_path}");
-            let sp = sentencepiece::SentencePieceProcessor::open(&local_path)
+            let sp = sentencepiece_rs::SentencePieceProcessor::open(&local_path)
                 .with_context(|| format!("cannot load {}", local_path.display()))?;
-            if sp.len() != n_bins {
+            if sp.model().vocab_size() != n_bins {
                 bail!(
                     "sentencepiece tokenizer has vocab size={} but nbins={n_bins} was specified",
-                    sp.len()
+                    sp.model().vocab_size()
                 )
             }
             Ok(Self::SentencePiece(sp))
@@ -41,7 +41,11 @@ impl Tokenizer {
 
     pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
         match self {
-            Self::SentencePiece(sp) => Ok(sp.encode(text)?.into_iter().map(|p| p.id).collect()),
+            Self::SentencePiece(sp) => Ok(sp
+                .encode_to_ids(text)?
+                .into_iter()
+                .map(|p| p as u32)
+                .collect()),
             // `add_special_tokens` as in Python's `Tokenizer.encode` default.
             Self::Json(tok) => Ok(tok
                 .encode(text, true)
@@ -53,7 +57,9 @@ impl Tokenizer {
 
     pub fn decode(&self, ids: &[u32]) -> Result<String> {
         match self {
-            Self::SentencePiece(sp) => Ok(sp.decode_piece_ids(ids)?),
+            Self::SentencePiece(sp) => {
+                Ok(sp.decode_ids(&ids.iter().map(|&i| i as usize).collect::<Vec<_>>())?)
+            }
             Self::Json(tok) => tok.decode(ids, true).map_err(|e| anyhow::anyhow!("{e}")),
         }
     }

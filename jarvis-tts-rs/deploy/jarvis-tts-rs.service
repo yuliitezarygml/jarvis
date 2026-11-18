@@ -1,0 +1,26 @@
+[Unit]
+Description=Jarvis native Russian speech synthesis
+After=network.target
+
+[Service]
+User=jarvis-rust-tts
+Group=jarvis-rust-tts
+WorkingDirectory=/opt/jarvis-tts-rs
+ExecStart=/opt/jarvis-tts-rs/bin/jarvis-tts-rs
+Environment=JARVIS_BIND=127.0.0.1:8181
+Environment=JARVIS_THREADS=4
+Environment=JARVIS_ASSETS=/opt/jarvis-tts-rs/model
+Environment=JARVIS_FFMPEG=/opt/jarvis-tts-rs/bin/ffmpeg
+EnvironmentFile=-/etc/jarvis-tts-rs.env
+MemoryHigh=4G
+MemoryMax=6G
+TasksMax=96
+CPUQuota=1000%
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

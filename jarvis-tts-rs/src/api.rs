@@ -127,6 +127,8 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
         return Err(invalid());
     }
     let mut body = Some(req.into_body());
+    let mut speed = 1.0;
+    let mut mp3 = false;
     if !plain {
         let buf = tokio::time::timeout(
             Duration::from_secs(5),
@@ -139,13 +141,20 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
         if !text::valid(&u.text)
             || u.voice.as_deref().unwrap_or("jarvis-ru") != "jarvis-ru"
             || u.lang.as_deref().unwrap_or("ru") != "ru"
-            || u.speed.unwrap_or(1.) != 1.
-            || u.format
-                .as_deref()
-                .is_some_and(|f| f != if streaming { "pcm" } else { "wav" })
+            || !(0.6..=1.6).contains(&u.speed.unwrap_or(1.))
+            || (streaming && u.speed.unwrap_or(1.) != 1.)
+            || u.format.as_deref().is_some_and(|f| {
+                if streaming {
+                    f != "pcm"
+                } else {
+                    !matches!(f, "wav" | "mp3")
+                }
+            })
         {
             return Err(invalid());
         }
+        speed = u.speed.unwrap_or(1.);
+        mp3 = u.format.as_deref() == Some("mp3");
         tx.send(u.text).await.map_err(|_| invalid())?;
     }
     let mut ticket = s.pool.submit(id, streaming, rx).map_err(|e| match e {
@@ -187,13 +196,30 @@ async fn speech(s: StateData, req: Request, streaming: bool) -> Reply {
         while let Some(frame) = next_frame(&mut ticket).await? {
             data.extend(frame);
         }
-        (Body::from(audio::wav(&data)), "audio/wav")
+        if mp3 || speed != 1. {
+            let result = audio::encode(data, mp3, speed)
+                .await
+                .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "encoder_unavailable"))?;
+            (
+                Body::from(result),
+                if mp3 { "audio/mpeg" } else { "audio/wav" },
+            )
+        } else {
+            (Body::from(audio::wav(&data)), "audio/wav")
+        }
     };
     Ok(Response::builder()
         .header("Content-Type", kind)
         .header("Cache-Control", "no-store")
         .header("X-Request-Id", id)
-        .header("X-Audio-Format", "s16le;rate=24000;channels=1")
+        .header(
+            "X-Audio-Format",
+            if mp3 {
+                "mp3;rate=24000;channels=1"
+            } else {
+                "s16le;rate=24000;channels=1"
+            },
+        )
         .body(body)
         .unwrap())
 }
