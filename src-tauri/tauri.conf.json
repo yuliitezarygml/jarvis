@@ -14,11 +14,11 @@
       {
         "label": "main",
         "title": "Jarvis",
-        "width": 1100,
-        "height": 860,
-        "minWidth": 720,
+        "width": 1320,
+        "height": 850,
+        "minWidth": 800,
         "minHeight": 600,
-        "backgroundColor": "#101310"
+        "backgroundColor": "#080e13"
       }
     ],
     "security": {
