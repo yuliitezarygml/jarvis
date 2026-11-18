@@ -3,7 +3,7 @@ name = "jarvis"
 version = "0.1.0"
 description = "Jarvis desktop application"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [lib]
 name = "jarvis_lib"

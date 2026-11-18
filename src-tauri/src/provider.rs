@@ -75,7 +75,15 @@ impl Compatible {
 }
 pub fn status(status: reqwest::StatusCode) -> Result<()> {
     if !status.is_success() {
-        bail!("Сервис вернул HTTP {}", status.as_u16());
+        let reason = match status.as_u16() {
+            401 | 403 => "проверьте ключ и права доступа",
+            402 => "недостаточно средств у провайдера",
+            404 => "маршрут или модель не найдены",
+            429 => "превышен лимит запросов",
+            500..=599 => "сервис временно недоступен",
+            _ => "проверьте параметры запроса",
+        };
+        bail!("HTTP {} — {}", status.as_u16(), reason);
     }
     Ok(())
 }
@@ -154,5 +162,28 @@ impl LlmProvider for Compatible {
         }
         ensure!(ended, "Ответ прерван до завершения");
         Ok(calls.into_values().map(|(id,name,args)|json!({"id":id,"type":"function","function":{"name":name,"arguments":args}})).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn credentials_only_go_to_secure_origins() {
+        assert!(base("http://public.example/v1").is_err());
+        assert!(base("https://user:pass@example.com/v1").is_err());
+        assert!(base("https://api.groq.com/openai/v1").is_ok());
+        assert!(base("http://127.0.0.1:18181").is_ok());
+    }
+    #[test]
+    fn identifies_network_failures() {
+        assert!(status(reqwest::StatusCode::SERVICE_UNAVAILABLE)
+            .unwrap_err()
+            .to_string()
+            .contains("временно"));
+        assert!(status(reqwest::StatusCode::PAYMENT_REQUIRED)
+            .unwrap_err()
+            .to_string()
+            .contains("средств"));
     }
 }
