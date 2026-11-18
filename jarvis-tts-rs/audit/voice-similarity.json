@@ -6,8 +6,8 @@
     {
       "id": "short",
       "oldVsReference": 0.7503611396754781,
-      "rustVsReference": 0.67189464492534,
-      "oldVsRust": 0.9125483029745085,
+      "rustVsReference": 0.671811624994715,
+      "oldVsRust": 0.9125527469028433,
       "oldSeconds": 1.36,
       "rustSeconds": 1.44,
       "oldInternalPausesMs": [],
@@ -18,8 +18,8 @@
     {
       "id": "long",
       "oldVsReference": 0.828301070739768,
-      "rustVsReference": 0.8491177006730374,
-      "oldVsRust": 0.9559063597737782,
+      "rustVsReference": 0.8491134406729464,
+      "oldVsRust": 0.9558992561469968,
       "oldSeconds": 7.36,
       "rustSeconds": 7.76,
       "oldInternalPausesMs": [
@@ -37,8 +37,8 @@
     {
       "id": "english",
       "oldVsReference": 0.6243036151637943,
-      "rustVsReference": 0.6853990759342838,
-      "oldVsRust": 0.8300862502635845,
+      "rustVsReference": 0.6854073095654973,
+      "oldVsRust": 0.8300953206499885,
       "oldSeconds": 1.44,
       "rustSeconds": 1.52,
       "oldInternalPausesMs": [
@@ -53,8 +53,8 @@
     {
       "id": "mixed",
       "oldVsReference": 0.7952469875816518,
-      "rustVsReference": 0.6950771950015854,
-      "oldVsRust": 0.9004694404335716,
+      "rustVsReference": 0.6950724837706107,
+      "oldVsRust": 0.9004736928664607,
       "oldSeconds": 2.32,
       "rustSeconds": 2.32,
       "oldInternalPausesMs": [
@@ -62,13 +62,13 @@
       ],
       "rustInternalPausesMs": [],
       "oldTranscript": "джарвис проверь виндовсы сипи",
-      "rustTranscript": "джарвис проверь виндовспи ю"
+      "rustTranscript": "джарвис проверь виндовсем"
     },
     {
       "id": "numbers",
       "oldVsReference": 0.7057411347258252,
-      "rustVsReference": 0.762018992024396,
-      "oldVsRust": 0.9076153877618311,
+      "rustVsReference": 0.7620121125728552,
+      "oldVsRust": 0.9076166578857939,
       "oldSeconds": 4.24,
       "rustSeconds": 4.32,
       "oldInternalPausesMs": [
@@ -83,8 +83,8 @@
     {
       "id": "punct",
       "oldVsReference": 0.8026636173949274,
-      "rustVsReference": 0.751674702869519,
-      "oldVsRust": 0.8927168675060007,
+      "rustVsReference": 0.7516810822010881,
+      "oldVsRust": 0.8927205418530808,
       "oldSeconds": 2.96,
       "rustSeconds": 2.32,
       "oldInternalPausesMs": [
