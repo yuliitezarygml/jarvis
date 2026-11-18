@@ -1,7 +1,8 @@
-use crate::events::{Event, Kind};
+use crate::events::{Event, Kind, SpeechUpdate};
 use crate::{audio, core::Core};
 use anyhow::{ensure, Result};
 use serde_json::json;
+use sherpa_onnx::OnlineRecognizer;
 use std::{
     collections::VecDeque,
     sync::Arc,
@@ -17,43 +18,64 @@ enum Stop {
 }
 pub struct Capture {
     stop: watch::Sender<Stop>,
-    task: tauri::async_runtime::JoinHandle<()>,
+    finished: watch::Receiver<()>,
+}
+impl Capture {
+    fn request(&self, mode: Stop) -> watch::Receiver<()> {
+        self.stop.send_modify(|state| {
+            if *state != Stop::Discard { *state = mode; }
+        });
+        self.finished.clone()
+    }
 }
 pub async fn end(c: &Arc<Core>, submit: bool) {
-    let mut g = c.capture.lock().await;
-    if let Some(job) = g.take() {
-        let _ = job
-            .stop
-            .send(if submit { Stop::Submit } else { Stop::Discard });
-        let _ = job.task.await;
+    let finished = c.capture.lock().await.as_ref().map(|job|
+        job.request(if submit { Stop::Submit } else { Stop::Discard }));
+    if let Some(mut finished) = finished {
+        let _ = finished.changed().await;
     }
 }
 pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<()> {
-    end(c, false).await;
+    let mut g = c.capture.lock().await;
+    if let Some(job) = g.take() {
+        let _ = job.request(Stop::Discard).changed().await;
+    }
     c.cancel();
     ensure!(c.stt.available(), "Русская модель STT не установлена");
-    let mut g = c.capture.lock().await;
-    tokio::task::spawn_blocking(move || audio::mic_start(continuous)).await??;
-    let (tx, rx) = watch::channel(Stop::Live);
     let core = c.clone();
-    let handle = tauri::async_runtime::spawn(async move {
-        capture(core, session, continuous, rx).await;
+    let online = tokio::task::spawn_blocking(move || -> Result<_> {
+        let online = core.stt.streaming_engine();
+        ensure!(online.is_some() || core.stt.offline_available(), "Не удалось открыть русскую модель STT");
+        audio::mic_start(continuous)?;
+        Ok(online)
+    }).await??;
+    let (tx, rx) = watch::channel(Stop::Live);
+    let (done, finished) = watch::channel(());
+    let core = c.clone();
+    tokio::task::spawn_blocking(move || {
+        capture(core, session, continuous, rx, online);
+        drop(done);
     });
     *g = Some(Capture {
         stop: tx,
-        task: handle,
+        finished,
     });
     Ok(())
 }
-async fn capture(
+fn capture(
     c: Arc<Core>,
     session: String,
     continuous: bool,
-    mut control: watch::Receiver<Stop>,
+    control: watch::Receiver<Stop>,
+    online: Option<Arc<OnlineRecognizer>>,
 ) {
     let emit =
         |kind: Kind, data: serde_json::Value| (c.bus)(Event::new(&session, None, kind, data));
     emit(Kind::Mic, json!(if continuous { "auto" } else { "ptt" }));
+    let speech = |update| (c.bus)(Event::speech(&session, update));
+    let listening = if online.is_some() { SpeechUpdate::Listening } else { SpeechUpdate::Fallback };
+    speech(listening);
+    let mut live = online.as_ref().map(audio::LiveUtterance::new);
     let mut buffer = vec![0f32; 4096];
     let mut pre: VecDeque<f32> = VecDeque::new();
     let mut utterance = vec![];
@@ -74,12 +96,14 @@ async fn capture(
             mode = Stop::Submit;
         }
         if mode == Stop::Discard {
+            speech(SpeechUpdate::Cleared);
             break;
         }
         let n = audio::read(&mut buffer);
         let chunk = &buffer[..n];
         let level = audio::level(chunk);
         if n > 0 {
+            let previous_len = utterance.len();
             if meter.elapsed() > Duration::from_millis(65) {
                 emit(Kind::MicLevel, json!(level));
                 meter = Instant::now();
@@ -112,10 +136,19 @@ async fn capture(
                     utterance.extend(pre.drain(..));
                     c.cancel();
                     emit(Kind::VoiceStart, json!(true));
+                    speech(listening);
                 }
             } else {
                 utterance.extend_from_slice(chunk);
             }
+            if utterance.len() > previous_len {
+                if let Some(text) = live.as_mut().and_then(|s| s.push(&utterance[previous_len..])) {
+                    (c.bus)(Event::speech(&session, SpeechUpdate::Partial(text)));
+                }
+            }
+        }
+        if mode == Stop::Submit && n == buffer.len() && utterance.len() < 16000 * 24 {
+            continue;
         }
         let finish = mode == Stop::Submit
             || (continuous && speaking && quiet >= 10400)
@@ -131,22 +164,21 @@ async fn capture(
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
                 emit(Kind::Recognizing, json!(true));
-                let core = c.clone();
-                let data = std::mem::take(&mut utterance);
-                let result = tokio::task::spawn_blocking(move || core.stt.recognize(&data)).await;
+                let final_text = live.take().map(audio::LiveUtterance::finish).unwrap_or_default();
+                let result = if final_text.is_empty() { c.stt.recognize(&utterance) } else { Ok(final_text) };
                 if *control.borrow() == Stop::Discard {
+                    speech(SpeechUpdate::Cleared);
                     break;
                 }
                 match result {
-                    Ok(Ok(text)) if !text.is_empty() => {
-                        emit(Kind::Transcript, json!(text));
+                    Ok(text) if !text.is_empty() => {
+                        (c.bus)(Event::speech(&session, SpeechUpdate::Final(&text)));
                         if let Err(e) = c.start(session.clone(), text) {
                             emit(Kind::MicError, json!(e.to_string()));
                         }
                     }
-                    Ok(Ok(_)) => emit(Kind::MicError, json!("Речь не распознана")),
-                    Ok(Err(e)) => emit(Kind::MicError, json!(e.to_string())),
-                    Err(_) => emit(Kind::MicError, json!("Ошибка распознавания")),
+                    Ok(_) => emit(Kind::MicError, json!("Речь не распознана")),
+                    Err(e) => emit(Kind::MicError, json!(e.to_string())),
                 }
             } else if mode == Stop::Submit {
                 emit(
@@ -162,9 +194,9 @@ async fn capture(
             quiet = 0;
             pre.clear();
             utterance.clear();
-            while audio::read(&mut buffer) > 0 {}
+            live = online.as_ref().map(audio::LiveUtterance::new);
         }
-        tokio::select! {_=tokio::time::sleep(Duration::from_millis(20))=>(),_=control.changed()=>()}
+        std::thread::sleep(Duration::from_millis(15));
     }
     if capture_open {
         audio::mic_end();

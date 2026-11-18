@@ -114,7 +114,7 @@ impl Recognizer {
         let dir = self.root.join("streaming");
         dir.join("model.onnx").is_file() && dir.join("tokens.txt").is_file()
     }
-    fn offline_available(&self) -> bool {
+    pub fn offline_available(&self) -> bool {
         [
             "encoder.int8.onnx",
             "decoder.onnx",
