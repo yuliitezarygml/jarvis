@@ -3,6 +3,7 @@ mod capture;
 mod commands;
 mod core;
 mod desktop;
+mod events;
 mod provider;
 mod storage;
 mod tools;

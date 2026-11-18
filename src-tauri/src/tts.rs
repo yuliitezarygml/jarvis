@@ -1,3 +1,4 @@
+use crate::events::Kind;
 use crate::{audio, core::Core, provider};
 use anyhow::{bail, ensure, Context, Result};
 use futures_util::StreamExt;
@@ -152,7 +153,11 @@ async fn phrase(
             }
             if *first {
                 *first = false;
-                core.event(turn, "speaking", json!({"ms":start.elapsed().as_millis()}));
+                core.event(
+                    turn,
+                    Kind::Speaking,
+                    json!({"ms":start.elapsed().as_millis()}),
+                );
             }
             heard = true;
             let rms = (block
@@ -161,7 +166,7 @@ async fn phrase(
                 .sum::<f32>()
                 / block.len() as f32)
                 .sqrt();
-            core.event(turn, "level", json!(rms));
+            core.event(turn, Kind::Level, json!(rms));
         }
     }
     ensure!(heard && low.is_none(), "Получен неполный поток PCM");

@@ -1,3 +1,4 @@
+use crate::events::{Event, Kind};
 use crate::{audio, core::Core};
 use anyhow::{ensure, Result};
 use serde_json::json;
@@ -50,10 +51,9 @@ async fn capture(
     continuous: bool,
     mut control: watch::Receiver<Stop>,
 ) {
-    let emit = |kind: &str, data: serde_json::Value| {
-        (c.bus)(json!({"session":session,"kind":kind,"data":data}))
-    };
-    emit("mic", json!(if continuous { "auto" } else { "ptt" }));
+    let emit =
+        |kind: Kind, data: serde_json::Value| (c.bus)(Event::new(&session, None, kind, data));
+    emit(Kind::Mic, json!(if continuous { "auto" } else { "ptt" }));
     let mut buffer = vec![0f32; 4096];
     let mut pre: VecDeque<f32> = VecDeque::new();
     let mut utterance = vec![];
@@ -81,7 +81,7 @@ async fn capture(
         let level = audio::level(chunk);
         if n > 0 {
             if meter.elapsed() > Duration::from_millis(65) {
-                emit("mic_level", json!(level));
+                emit(Kind::MicLevel, json!(level));
                 meter = Instant::now();
             }
             let voiced = level > (noise * 3.3).clamp(0.008, 0.048);
@@ -100,7 +100,7 @@ async fn capture(
                 utterance.extend_from_slice(chunk);
                 if !speaking && loud >= 1200 {
                     speaking = true;
-                    emit("voice_start", json!(true));
+                    emit(Kind::VoiceStart, json!(true));
                 }
             } else if !speaking {
                 pre.extend(chunk);
@@ -111,7 +111,7 @@ async fn capture(
                     speaking = true;
                     utterance.extend(pre.drain(..));
                     c.cancel();
-                    emit("voice_start", json!(true));
+                    emit(Kind::VoiceStart, json!(true));
                 }
             } else {
                 utterance.extend_from_slice(chunk);
@@ -124,13 +124,13 @@ async fn capture(
             if !continuous || mode == Stop::Submit {
                 audio::mic_end();
                 capture_open = false;
-                emit("mic", json!("off"));
+                emit(Kind::Mic, json!("off"));
             }
             if utterance.len() > 2400 {
                 if continuous && quiet < utterance.len() {
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
-                emit("recognizing", json!(true));
+                emit(Kind::Recognizing, json!(true));
                 let core = c.clone();
                 let data = std::mem::take(&mut utterance);
                 let result = tokio::task::spawn_blocking(move || core.stt.recognize(&data)).await;
@@ -139,18 +139,18 @@ async fn capture(
                 }
                 match result {
                     Ok(Ok(text)) if !text.is_empty() => {
-                        emit("transcript", json!(text));
+                        emit(Kind::Transcript, json!(text));
                         if let Err(e) = c.start(session.clone(), text) {
-                            emit("mic_error", json!(e.to_string()));
+                            emit(Kind::MicError, json!(e.to_string()));
                         }
                     }
-                    Ok(Ok(_)) => emit("mic_error", json!("Речь не распознана")),
-                    Ok(Err(e)) => emit("mic_error", json!(e.to_string())),
-                    Err(_) => emit("mic_error", json!("Ошибка распознавания")),
+                    Ok(Ok(_)) => emit(Kind::MicError, json!("Речь не распознана")),
+                    Ok(Err(e)) => emit(Kind::MicError, json!(e.to_string())),
+                    Err(_) => emit(Kind::MicError, json!("Ошибка распознавания")),
                 }
             } else if mode == Stop::Submit {
                 emit(
-                    "mic_error",
+                    Kind::MicError,
                     json!("Сигнал речи слишком короткий или микрофон не получил звук"),
                 );
             }
@@ -168,6 +168,6 @@ async fn capture(
     }
     if capture_open {
         audio::mic_end();
-        emit("mic", json!("off"));
+        emit(Kind::Mic, json!("off"));
     }
 }

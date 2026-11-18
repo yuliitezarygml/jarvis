@@ -43,7 +43,29 @@ type Stats = {
   os: string;
   cores: number;
 };
-type Event = { session: string; turn?: string; kind: string; data?: unknown };
+type Event = {
+  session: string;
+  turn?: string;
+  kind:
+    | "start"
+    | "delta"
+    | "done"
+    | "error"
+    | "warning"
+    | "cancelled"
+    | "thinking"
+    | "executing"
+    | "speaking"
+    | "level"
+    | "first_text"
+    | "mic"
+    | "mic_level"
+    | "mic_error"
+    | "voice_start"
+    | "recognizing"
+    | "transcript";
+  data?: unknown;
+};
 export const defaults: Settings = {
   provider: "Groq",
   url: "",

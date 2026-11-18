@@ -1,3 +1,4 @@
+use crate::events::{Event, Kind};
 use crate::{
     audio::{self, Recognizer},
     provider::{self, Compatible, LlmProvider},
@@ -15,7 +16,7 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-type Bus = Arc<dyn Fn(Value) + Send + Sync>;
+type Bus = Arc<dyn Fn(Event) + Send + Sync>;
 struct Turn {
     id: String,
     session: String,
@@ -60,13 +61,13 @@ impl Core {
             .filter(|t| t.id == id && !t.cancel.is_cancelled())
             .map(|_| run())
     }
-    pub fn event(&self, id: &str, kind: &str, data: Value) {
+    pub fn event(&self, id: &str, kind: Kind, data: Value) {
         let g = self.active.lock().unwrap();
         if let Some(t) = g
             .as_ref()
             .filter(|t| t.id == id && !t.cancel.is_cancelled())
         {
-            (self.bus)(json!({"turn":id,"session":t.session,"kind":kind,"data":data}));
+            (self.bus)(Event::new(&t.session, Some(id), kind, data));
         }
     }
     pub fn cancel(&self) {
@@ -74,7 +75,12 @@ impl Core {
         if let Some(t) = g.take() {
             t.cancel.cancel();
             audio::stop();
-            (self.bus)(json!({"turn":t.id,"session":t.session,"kind":"cancelled"}));
+            (self.bus)(Event::new(
+                &t.session,
+                Some(&t.id),
+                Kind::Cancelled,
+                Value::Null,
+            ));
         }
     }
     pub fn start(self: &Arc<Self>, session: String, text: String) -> Result<String> {
@@ -100,7 +106,7 @@ impl Core {
                 session: session.clone(),
                 cancel: token.clone(),
             });
-            (self.bus)(json!({"kind":"start","turn":id,"session":session,"data":text}));
+            (self.bus)(Event::new(&session, Some(&id), Kind::Start, json!(text)));
             (s, rows)
         };
         let core = self.clone();
@@ -112,13 +118,13 @@ impl Core {
             let mut g = core.active.lock().unwrap();
             if g.as_ref().is_some_and(|t| t.id == turn) {
                 let (kind, data) = match result {
-                    Ok(()) => ("done", Value::Null),
+                    Ok(()) => (Kind::Done, Value::Null),
                     Err(e) => {
                         audio::stop();
-                        ("error", json!(format!("{e:#}")))
+                        (Kind::Error, json!(format!("{e:#}")))
                     }
                 };
-                (core.bus)(json!({"kind":kind,"turn":turn,"session":session,"data":data}));
+                (core.bus)(Event::new(&session, Some(&turn), kind, data));
                 g.take();
             }
             token.cancel();
@@ -142,7 +148,7 @@ impl Core {
             Some(tauri::async_runtime::spawn(async move {
                 if let Err(e) = tts::speech(core.clone(), turn.clone(), token, rx, start).await {
                     core.for_turn(&turn, audio::stop);
-                    core.event(&turn, "warning", json!(format!("{e:#}")));
+                    core.event(&turn, Kind::Warning, json!(format!("{e:#}")));
                 }
             }))
         } else {
@@ -166,11 +172,11 @@ impl Core {
                 }
                 if first {
                     first = false;
-                    self.event(id, "first_text", json!(start.elapsed().as_millis()));
+                    self.event(id, Kind::FirstText, json!(start.elapsed().as_millis()));
                 }
                 text.push_str(value);
                 current.push_str(value);
-                self.event(id, "delta", json!(value));
+                self.event(id, Kind::Delta, json!(value));
                 if s.speak && !tx.is_closed() {
                     for sentence in splitter.push(value, false) {
                         match tx.try_send(sentence) {
@@ -189,7 +195,7 @@ impl Core {
                 Err(e) if round == 0 && !schemas.is_empty() && first && !cancel.is_cancelled() => {
                     self.event(
                         id,
-                        "warning",
+                        Kind::Warning,
                         json!(format!("Инструменты недоступны ({e}). Повторяю без них.")),
                     );
                     schemas.clear();
@@ -206,13 +212,13 @@ impl Core {
                 let name = call["function"]["name"]
                     .as_str()
                     .context("Имя инструмента отсутствует")?;
-                self.event(id, "executing", json!(name));
+                self.event(id, Kind::Executing, json!(name));
                 let args: Value =
                     serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))?;
                 let data = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=ToolRegistry::run(self,name,&args)=>r.unwrap_or_else(|e|json!({"error":e.to_string()}))};
                 context.push(json!({"role":"tool","tool_call_id":call["id"],"content":serde_json::to_string(&data)?}));
             }
-            self.event(id, "thinking", Value::Null);
+            self.event(id, Kind::Thinking, Value::Null);
         }
         ensure!(!text.trim().is_empty(), "Модель завершила ответ без текста");
         self.for_turn(id, || {
@@ -248,7 +254,7 @@ mod acceptance {
             let c = Core::open(
                 &folder,
                 Arc::new(move |v| {
-                    let _ = events.send(v);
+                    let _ = events.send(serde_json::to_value(v).unwrap());
                 }),
             )
             .unwrap();
@@ -296,8 +302,31 @@ mod acceptance {
                 "STT + completed playback {} ms",
                 before.elapsed().as_millis()
             );
-            c.start(s, "Расскажи о планетах.".into()).unwrap();
+            let interrupted = c
+                .start(
+                    s.clone(),
+                    "Назови четыре планеты полными предложениями.".into(),
+                )
+                .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(45), async {
+                loop {
+                    let e = rx.recv().await.unwrap();
+                    if e["turn"] == interrupted && e["kind"] == "speaking" {
+                        break;
+                    }
+                    assert!(e["kind"] != "error" && e["kind"] != "warning", "{e}");
+                }
+            })
+            .await
+            .unwrap();
+            let stopped = Instant::now();
             c.cancel();
+            println!(
+                "Interrupt after first PCM: {} ms, {} buffers",
+                stopped.elapsed().as_millis(),
+                audio::pending()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             assert_eq!(audio::pending(), 0);
             drop(c);
             let _ = std::fs::remove_dir_all(folder);
