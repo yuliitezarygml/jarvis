@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { RustDemo } from "@/components/rust-demo";
 
 const stack = [
@@ -10,10 +11,10 @@ export default function Home() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Jarvis — главная">
+        <Link className="brand" href="/" aria-label="Jarvis — главная">
           <span className="brand-icon" aria-hidden="true">j.</span>
           jarvis
-        </a>
+        </Link>
         <span className="version">v0.1.0</span>
       </header>
 
