@@ -71,7 +71,7 @@ TTS НЕ ПЕРЕПИСЫВАТЬ. ПОДКЛЮЧИТЬ ГОТОВЫЙ СЕРВ�
 
 OMNIROUTER_BASE_URL=https://venues-gain-omissions-often.trycloudflare.com/v1
 OMNIROUTER_MODEL=opencode-zen/deepseek-v4.1-flash
-OMNIROUTER_API_KEY=sk-788a1fbd337506a0-b11d67-0bb0a329
+OMNIROUTER_API_KEY=<из защищённой конфигурации>
 
 API-ключ предоставляется отдельно. Не придумывай его и не вставляй в исходники.
 
