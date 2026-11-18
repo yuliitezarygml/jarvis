@@ -10,7 +10,7 @@ fn error(e: anyhow::Error) -> String {
 pub fn bootstrap(core: Shared) -> Result<Value, String> {
     let db = core.db.lock().unwrap();
     Ok(
-        json!({"sessions":db.sessions().map_err(error)?,"settings":db.settings().map_err(error)?,"preferences":db.prefs().map_err(error)?,"stt":core.stt.available(),"microphone":audio::mic_status()}),
+        json!({"sessions":db.sessions().map_err(error)?,"settings":db.settings().map_err(error)?,"preferences":db.prefs().map_err(error)?,"stt":core.stt.available(),"streamingStt":core.stt.streaming_available(),"microphone":audio::mic_status()}),
     )
 }
 #[tauri::command]

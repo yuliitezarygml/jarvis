@@ -129,8 +129,10 @@ impl Recognizer {
         if guard.is_none() && self.streaming_available() {
             let dir = self.root.join("streaming");
             let mut config = OnlineRecognizerConfig::default();
-            config.model_config.t_one_ctc.model = Some(dir.join("model.onnx").to_string_lossy().into_owned());
-            config.model_config.tokens = Some(dir.join("tokens.txt").to_string_lossy().into_owned());
+            config.model_config.t_one_ctc.model =
+                Some(dir.join("model.onnx").to_string_lossy().into_owned());
+            config.model_config.tokens =
+                Some(dir.join("tokens.txt").to_string_lossy().into_owned());
             config.model_config.num_threads = 2;
             config.feat_config.sample_rate = 8000;
             config.decoding_method = Some("greedy_search".into());
@@ -152,7 +154,10 @@ impl Recognizer {
             .ok_or_else(|| anyhow::anyhow!("Не удалось загрузить русскую STT-модель"))
     }
     pub fn recognize(&self, samples: &[f32]) -> Result<String> {
-        ensure!(self.offline_available(), "Резервная модель Zipformer не установлена");
+        ensure!(
+            self.offline_available(),
+            "Резервная модель Zipformer не установлена"
+        );
         let mut guard = self.engine.lock().unwrap();
         if guard.is_none() {
             *guard = Some(Self::open(&self.root)?);
@@ -173,7 +178,11 @@ pub struct LiveUtterance {
 }
 impl LiveUtterance {
     pub fn new(engine: &Arc<OnlineRecognizer>) -> Self {
-        Self { stream: engine.create_stream(), engine: engine.clone(), text: String::new() }
+        Self {
+            stream: engine.create_stream(),
+            engine: engine.clone(),
+            text: String::new(),
+        }
     }
     pub fn push(&mut self, samples: &[f32]) -> Option<&str> {
         // sherpa resamples 16 kHz microphone PCM to the T-one input rate.
@@ -181,17 +190,23 @@ impl LiveUtterance {
         self.decode()
     }
     fn decode(&mut self) -> Option<&str> {
-        if !self.engine.is_ready(&self.stream) { return None; }
-        while self.engine.is_ready(&self.stream) { self.engine.decode(&self.stream); }
+        if !self.engine.is_ready(&self.stream) {
+            return None;
+        }
+        while self.engine.is_ready(&self.stream) {
+            self.engine.decode(&self.stream);
+        }
         let result = self.engine.get_result(&self.stream)?;
         let text = result.text.trim();
-        if self.text == text { return None; }
+        if self.text == text {
+            return None;
+        }
         self.text = text.to_owned();
         Some(&self.text)
     }
     pub fn finish(mut self) -> String {
         // Flush the last acoustic chunk, including a word cut off by the PTT release.
-        self.stream.accept_waveform(16000, &[0.0; 9600]);
+        self.stream.accept_waveform(16000, &[0.0; 24000]);
         self.stream.input_finished();
         self.decode();
         self.text
@@ -204,6 +219,40 @@ pub fn level(samples: &[f32]) -> f32 {
 #[cfg(test)]
 mod acceptance {
     use super::*;
+    #[test]
+    #[ignore = "Requires the installed Russian streaming model and Jarvis WAVs"]
+    fn streaming_russian_before_end_and_between_commands() {
+        let root = PathBuf::from(std::env::var_os("JARVIS_STT_DIR").expect("JARVIS_STT_DIR"));
+        let engine = Recognizer::new(root).streaming_engine().unwrap();
+        for (name, words) in [("old-long", "диагностика"), ("old-short", "добрый вечер")]
+        {
+            let wave =
+                sherpa_onnx::Wave::read(&format!("../jarvis-tts-rs/examples/audio/{name}.wav"))
+                    .unwrap();
+            assert_eq!(wave.sample_rate(), 24000);
+            let samples: Vec<_> = (0..wave.samples().len() * 2 / 3)
+                .map(|i| wave.samples()[i * 3 / 2])
+                .collect();
+            let mut live = LiveUtterance::new(&engine);
+            let mut changes = 0;
+            for (i, chunk) in samples.chunks(800).enumerate() {
+                if let Some(text) = live.push(chunk) {
+                    changes += 1;
+                    println!("{} ms audio: {text}", (i + 1) * 50);
+                }
+            }
+            let text = live.finish();
+            println!("Final: {text}");
+            if name == "old-long" {
+                assert!(changes >= 3);
+                assert!(text.ends_with("следующую команду"));
+            }
+            assert!(text.contains(words));
+            if name == "old-short" {
+                assert_eq!(text, "добрый вечер сэр");
+            }
+        }
+    }
     #[test]
     #[ignore = "Requires the installed Russian model and real Jarvis WAV"]
     fn original_voice_recognized_in_russian() {

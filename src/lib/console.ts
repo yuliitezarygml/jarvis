@@ -20,12 +20,14 @@ export type Phase =
   | "THINKING"
   | "SPEAKING"
   | "EXECUTING"
+  | "STOPPED"
   | "ERROR";
 type Bootstrap = {
   sessions: Session[];
   settings: Settings;
   preferences: Pref[];
   stt: boolean;
+  streamingStt: boolean;
   microphone: number;
 };
 type Link = {
@@ -43,9 +45,10 @@ type Stats = {
   os: string;
   cores: number;
 };
-type Event = {
-  session: string;
-  turn?: string;
+export type SpeechUpdate =
+  | { state: "listening" | "fallback" | "cleared" }
+  | { state: "partial" | "final"; text: string };
+type Event = { session: string; turn?: string } & ({
   kind:
     | "start"
     | "delta"
@@ -62,10 +65,9 @@ type Event = {
     | "mic_level"
     | "mic_error"
     | "voice_start"
-    | "recognizing"
-    | "transcript";
+    | "recognizing";
   data?: unknown;
-};
+} | { kind: "speech"; data: SpeechUpdate });
 export const defaults: Settings = {
   provider: "Groq",
   url: "",
@@ -86,12 +88,15 @@ export function useConsole() {
   const [phase, setPhase] = useState<Phase>("IDLE"),
     [mic, setMic] = useState("off"),
     [stt, setStt] = useState(false),
+    [streamingStt, setStreamingStt] = useState(false),
+    [speech, setSpeech] = useState<SpeechUpdate>({ state: "cleared" }),
     [permission, setPermission] = useState(0),
     [error, setError] = useState(""),
     [firstMs, setFirstMs] = useState<number | null>(null);
   const [partial, setPartial] = useState(""),
     [busy, setBusy] = useState(false);
   const energy = useRef(0),
+    micLevels = useRef(new Float32Array(28)),
     sid = useRef(""),
     turn = useRef(""),
     liveMic = useRef("off"),
@@ -119,6 +124,7 @@ export function useConsole() {
     setSettings(data.settings);
     setPrefs(data.preferences);
     setStt(data.stt);
+    setStreamingStt(data.streamingStt);
     setPermission(data.microphone);
     if (!sid.current && data.sessions.length) {
       sid.current = data.sessions[0].id;
@@ -166,15 +172,27 @@ export function useConsole() {
             setPhase("EXECUTING");
             break;
           case "level":
-          case "mic_level":
             energy.current = Math.min(1, Number(e.data) * 5);
+            break;
+          case "mic_level":
+            micLevels.current.copyWithin(0, 1);
+            micLevels.current[micLevels.current.length - 1] = Math.min(1, Math.sqrt(Number(e.data) * 4));
+            if (!turn.current) energy.current = Math.min(1, Number(e.data) * 5);
             break;
           case "mic":
             liveMic.current = String(e.data);
             setMic(liveMic.current);
+            micLevels.current.fill(0);
             setPermission(3);
             if (liveMic.current !== "off") setPhase("LISTENING");
             else if (!turn.current) setPhase("IDLE");
+            break;
+          case "speech":
+            if (e.data.state === "cleared") {
+              setSpeech((last) => last.state === "final" ? last : { state: "cleared" });
+            } else {
+              setSpeech(e.data);
+            }
             break;
           case "voice_start":
             setPhase("LISTENING");
@@ -183,6 +201,7 @@ export function useConsole() {
             setPhase("THINKING");
             break;
           case "mic_error":
+            setSpeech({ state: "cleared" });
             setError(String(e.data));
             setPhase("ERROR");
             break;
@@ -253,7 +272,7 @@ export function useConsole() {
     try {
       await act("interrupt");
       setBusy(false);
-      setPhase("IDLE");
+      setPhase("STOPPED");
       energy.current = 0;
     } catch (e) {
       report(e);
@@ -266,6 +285,8 @@ export function useConsole() {
     turn.current = "";
     buffer.current = "";
     setSession(id);
+    setSpeech({ state: "cleared" });
+    setPhase("IDLE");
     setPartial("");
     setMessages([]);
     setError("");
@@ -286,6 +307,7 @@ export function useConsole() {
   async function send(text: string) {
     if (!text.trim()) return;
     try {
+      setSpeech({ state: "cleared" });
       await act("send_text", { session: sid.current, text });
     } catch (e) {
       report(e);
@@ -330,6 +352,9 @@ export function useConsole() {
     phase,
     mic,
     stt,
+    streamingStt,
+    speech,
+    micLevels,
     permission,
     error,
     firstMs,

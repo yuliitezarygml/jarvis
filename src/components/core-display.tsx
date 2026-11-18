@@ -3,6 +3,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { Phase } from "@/lib/console";
 const speed: Record<Phase, number> = {
   IDLE: 0.17,
+  STOPPED: 0.12,
   LISTENING: 0.32,
   THINKING: 0.56,
   SPEAKING: 0.4,

@@ -23,14 +23,20 @@ pub struct Capture {
 impl Capture {
     fn request(&self, mode: Stop) -> watch::Receiver<()> {
         self.stop.send_modify(|state| {
-            if *state != Stop::Discard { *state = mode; }
+            if *state != Stop::Discard {
+                *state = mode;
+            }
         });
         self.finished.clone()
     }
 }
 pub async fn end(c: &Arc<Core>, submit: bool) {
-    let finished = c.capture.lock().await.as_ref().map(|job|
-        job.request(if submit { Stop::Submit } else { Stop::Discard }));
+    let finished = c
+        .capture
+        .lock()
+        .await
+        .as_ref()
+        .map(|job| job.request(if submit { Stop::Submit } else { Stop::Discard }));
     if let Some(mut finished) = finished {
         let _ = finished.changed().await;
     }
@@ -45,10 +51,14 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     let core = c.clone();
     let online = tokio::task::spawn_blocking(move || -> Result<_> {
         let online = core.stt.streaming_engine();
-        ensure!(online.is_some() || core.stt.offline_available(), "Не удалось открыть русскую модель STT");
+        ensure!(
+            online.is_some() || core.stt.offline_available(),
+            "Не удалось открыть русскую модель STT"
+        );
         audio::mic_start(continuous)?;
         Ok(online)
-    }).await??;
+    })
+    .await??;
     let (tx, rx) = watch::channel(Stop::Live);
     let (done, finished) = watch::channel(());
     let core = c.clone();
@@ -56,10 +66,7 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
         capture(core, session, continuous, rx, online);
         drop(done);
     });
-    *g = Some(Capture {
-        stop: tx,
-        finished,
-    });
+    *g = Some(Capture { stop: tx, finished });
     Ok(())
 }
 fn capture(
@@ -73,7 +80,11 @@ fn capture(
         |kind: Kind, data: serde_json::Value| (c.bus)(Event::new(&session, None, kind, data));
     emit(Kind::Mic, json!(if continuous { "auto" } else { "ptt" }));
     let speech = |update| (c.bus)(Event::speech(&session, update));
-    let listening = if online.is_some() { SpeechUpdate::Listening } else { SpeechUpdate::Fallback };
+    let listening = if online.is_some() {
+        SpeechUpdate::Listening
+    } else {
+        SpeechUpdate::Fallback
+    };
     speech(listening);
     let mut live = online.as_ref().map(audio::LiveUtterance::new);
     let mut buffer = vec![0f32; 4096];
@@ -142,7 +153,10 @@ fn capture(
                 utterance.extend_from_slice(chunk);
             }
             if utterance.len() > previous_len {
-                if let Some(text) = live.as_mut().and_then(|s| s.push(&utterance[previous_len..])) {
+                if let Some(text) = live
+                    .as_mut()
+                    .and_then(|s| s.push(&utterance[previous_len..]))
+                {
                     (c.bus)(Event::speech(&session, SpeechUpdate::Partial(text)));
                 }
             }
@@ -164,8 +178,15 @@ fn capture(
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
                 emit(Kind::Recognizing, json!(true));
-                let final_text = live.take().map(audio::LiveUtterance::finish).unwrap_or_default();
-                let result = if final_text.is_empty() { c.stt.recognize(&utterance) } else { Ok(final_text) };
+                let final_text = live
+                    .take()
+                    .map(audio::LiveUtterance::finish)
+                    .unwrap_or_default();
+                let result = if final_text.is_empty() {
+                    c.stt.recognize(&utterance)
+                } else {
+                    Ok(final_text)
+                };
                 if *control.borrow() == Stop::Discard {
                     speech(SpeechUpdate::Cleared);
                     break;

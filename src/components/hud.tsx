@@ -7,9 +7,11 @@ import {
   type Phase,
 } from "@/lib/console";
 import { CoreDisplay } from "./core-display";
+import { LiveSpeech } from "./live-speech";
 import { Icon } from "./icons";
 const states: Record<Phase, string> = {
   IDLE: "Ожидаю команду",
+  STOPPED: "Остановлено",
   LISTENING: "Слушаю вас",
   THINKING: "Обрабатываю запрос",
   SPEAKING: "Говорю",
@@ -58,8 +60,8 @@ function Rail({ c }: { c: Console }) {
         <PanelTitle icon="connection">Подсистемы</PanelTitle>
         {[
           [
-            "AI-маршрут",
-            c.settings.provider,
+            "JARVIS AI v2 — Цезарь",
+            "Интеллектуальное ядро",
             c.links ? !c.links.llmError : null,
           ],
           [
@@ -67,7 +69,7 @@ function Rail({ c }: { c: Console }) {
             "Rust TTS · 24 kHz",
             c.links ? !!c.links.tts?.ready : null,
           ],
-          ["Распознавание", "Zipformer · RU", c.online ? c.stt : null],
+          ["Распознавание", c.streamingStt && c.speech.state !== "fallback" ? "T-one · RU" : "Zipformer · RU", c.online ? c.stt : null],
           [
             "Микрофон",
             c.mic === "off" ? "Выключен" : "Активен",
@@ -112,10 +114,6 @@ function Rail({ c }: { c: Console }) {
           <b>{t?.gpu || "—"}</b>
         </div>
       </section>
-      <div className="model">
-        <small>АКТИВНАЯ МОДЕЛЬ</small>
-        <strong>{c.settings.model || "—"}</strong>
-      </div>
     </aside>
   );
 }
@@ -531,24 +529,32 @@ export default function Hud() {
                   <span className="phase">{c.phase}</span>
                   <h2>{states[c.phase]}</h2>
                 </div>
+                <LiveSpeech
+                  speech={c.speech}
+                  levels={c.micLevels}
+                  active={c.mic !== "off"}
+                  recognizing={c.phase === "THINKING" && !c.busy}
+                />
                 <div className="voiceControl">
                   <button
                     className="primary"
                     disabled={!c.online}
+                    title={c.mic === "off" ? "Начать голосовую команду" : "Закончить запись и отправить распознанную команду"}
                     onClick={() =>
                       void c.capture(c.mic === "off" ? "ptt" : "submit")
                     }
                   >
-                    <Icon name="mic" />
-                    {c.mic === "off" ? "Говорить" : "Завершить ввод"}
+                    <Icon name={c.mic === "off" ? "mic" : "stop"} />
+                    {c.mic === "off" ? "Говорить" : "Завершить"}
                   </button>
                   <button
-                    className="square"
-                    title="Остановить речь и генерацию"
-                    aria-label="Остановить"
+                    className="stopControl"
+                    title="Отменить запись и остановить генерацию и озвучивание"
+                    disabled={!c.online || (c.mic === "off" && !c.busy && c.phase !== "THINKING")}
                     onClick={() => void c.stop()}
                   >
                     <Icon name="stop" />
+                    Остановить
                   </button>
                 </div>
                 <label className="auto">
