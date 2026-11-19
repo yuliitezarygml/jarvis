@@ -58,6 +58,7 @@ impl ToolRegistry {
                 | "fs_list"
                 | "fs_read"
                 | "hash"
+                | "security_log_status"
         ) || crate::platform::windows::DIAGNOSTICS
             .iter()
             .any(|d| d.name == name)
@@ -83,6 +84,7 @@ impl ToolRegistry {
         let schemas=schemas.chain(crate::platform::windows::DIAGNOSTICS.iter().map(|d|schema(d.name,d.description,json!({}),&[])))
             .chain([
                 schema("kb_status","Состав локальной справки Windows, версия и происхождение",json!({}),&[]),
+                schema("security_log_status","Число записей в журнале Security через подключённый брокер администратора",json!({}),&[]),
                 schema("kb_search","Search local Windows documentation in English. Cite repo and path.",json!({"query":{"type":"string","maxLength":160},"version":{"type":"string"},"limit":{"type":"integer","minimum":3,"maximum":5}}),&["query"]),
                 schema("kb_lookup_command","Точная справка по имени команды",json!({"name":{"type":"string","maxLength":100}}),&["name"]),
                 schema("command_help","Проверить наличие и справку командлета в Windows PowerShell",json!({"name":{"type":"string","maxLength":80}}),&["name"]),
@@ -106,6 +108,10 @@ impl ToolRegistry {
         }
         #[cfg(windows)]
         {
+            if name == "security_log_status" {
+                anyhow::ensure!(args == &json!({}), "Ожидается пустой объект");
+                return c.admin.log_status().await;
+            }
             if matches!(name, "fs_list" | "fs_read" | "hash") {
                 return c.actions.files.inspect(name, args);
             }

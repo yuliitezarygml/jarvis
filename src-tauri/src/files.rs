@@ -22,6 +22,8 @@ pub struct Change {
     after: Option<String>,
     // A rename never replaces an existing destination.
     target: Option<String>,
+    #[serde(default)]
+    copy_from:Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +149,7 @@ impl Files {
                     before,
                     after: Some(a.text),
                     target: None,
+                    copy_from:None,
                 })
             }
             "fs_move" | "fs_copy" => {
@@ -159,6 +162,7 @@ impl Files {
                         before: None,
                         after: Some(before),
                         target: None,
+                        copy_from:Some(a.name),
                     })
                 } else {
                     Ok(Change {
@@ -166,6 +170,7 @@ impl Files {
                         before: Some(before),
                         after: None,
                         target: Some(a.target),
+                        copy_from:None,
                     })
                 }
             }
@@ -173,6 +178,9 @@ impl Files {
         }
     }
     pub fn apply(&self, change: &Change, undo: bool) -> Result<()> {
+        if !undo {
+            if let Some(source)=&change.copy_from {ensure!(self.read(source)?==change.after,"Содержимое источника изменилось");}
+        }
         let (old, new) = if undo {
             (&change.after, &change.before)
         } else {
@@ -193,7 +201,12 @@ impl Files {
                 self.read(to)?.is_none() && self.read(from)? == change.before,
                 "Изменился исходный файл или назначение"
             );
-            fs::rename(self.root.join(from), self.root.join(to))?;
+            // MoveFileW refuses an existing destination, including one created after the check.
+            use std::os::windows::ffi::OsStrExt;
+            let wide=|name:&str|self.root.join(name).as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let (from_path,to_path)=(wide(from),wide(to));
+            unsafe extern "system"{fn MoveFileW(source:*const u16,destination:*const u16)->i32;}
+            if unsafe{MoveFileW(from_path.as_ptr(),to_path.as_ptr())}==0{return Err(std::io::Error::last_os_error().into());}
             ensure!(
                 self.read(to)? == change.before && self.read(from)?.is_none(),
                 "Проверка переноса не прошла"
@@ -227,7 +240,19 @@ impl Files {
         Ok(())
     }
     pub fn describe(&self, c: &Change, undo: bool) -> Value {
-        json!({"folder":self.root,"file":c.name,"destination":c.target,"undo":undo,"text_after":if undo {&c.before}else{&c.after}})
+        json!({"folder":self.root,"file":c.name,"source":c.copy_from,"destination":c.target,"undo":undo,"text_after":if undo {&c.before}else{&c.after}})
+    }
+    pub fn mutation_lock(&self)->Result<File>{
+        Ok(OpenOptions::new().read(true).write(true).create(true).truncate(false).share_mode(0).open(self.root.join(".mutation.lock")).context("Другая операция с файлами ещё выполняется")?)
+    }
+    pub fn matches_snapshot(&self,c:&Change,after:bool)->Result<bool>{
+        let expected=if after{&c.after}else{&c.before};
+        if &self.read(&c.name)?!=expected{return Ok(false);}
+        if let Some(target)=&c.target {
+            let destination=self.read(target)?;
+            return Ok(if after{destination==c.before}else{destination.is_none()});
+        }
+        Ok(true)
     }
 }
 

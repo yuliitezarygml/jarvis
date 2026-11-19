@@ -22,12 +22,33 @@ struct Ticket {
     until: Instant,
     sender: oneshot::Sender<bool>,
 }
+type WindowAction=Box<dyn Fn(bool)->Result<bool>+Send+Sync>;
 pub struct Actions {
     pub files: Files,
-    pub window: OnceLock<tauri::WebviewWindow>,
+    pub window: OnceLock<WindowAction>,
     pending: Mutex<Option<Ticket>>,
 }
 impl Actions {
+    pub fn recover(&self,store:&mut crate::storage::Store)->Result<()>{
+        let _guard=self.files.mutation_lock()?;
+        store.0.execute_batch("CREATE TABLE IF NOT EXISTS action_undo(change_id INTEGER PRIMARY KEY,original INTEGER NOT NULL);")?;
+        let tx=store.0.transaction()?;
+        {
+            let mut stmt=tx.prepare("SELECT a.id,a.snapshot,u.original FROM action_log a LEFT JOIN action_undo u ON u.change_id=a.id WHERE a.state='prepared' ORDER BY a.id")?;
+            let mut rows=stmt.query([])?;
+            while let Some(row)=rows.next()?{
+                let id:i64=row.get(0)?;
+                let plan:Change=serde_json::from_str(&row.get::<_,String>(1)?)?;
+                let undo:Option<i64>=row.get(2)?;
+                let state=if self.files.matches_snapshot(&plan,undo.is_none()).unwrap_or(false) {
+                    if let Some(original)=undo{tx.execute("UPDATE action_log SET undone=1 WHERE id=?",[original])?;}
+                    "verified"
+                }else if self.files.matches_snapshot(&plan,undo.is_some()).unwrap_or(false){"interrupted"}else{"conflict"};
+                tx.execute("UPDATE action_log SET state=?,result=? WHERE id=?",params![state,"Проверено после перезапуска",id])?;
+            }
+        }
+        tx.commit()?; Ok(())
+    }
     pub fn new(dir: &Path) -> Result<Self> {
         Ok(Self {
             files: Files::open(&dir.join("files"))?,
@@ -108,13 +129,17 @@ async fn change(
     core.event(turn, Kind::Confirmation, Value::Null);
     ensure!(matches!(decision, Ok(Ok(true))), "Действие не подтверждено");
     core.for_turn(turn, || -> Result<()> {
+        let _guard=core.actions.files.mutation_lock()?;
         let mut db = core.db.lock().unwrap();
         ensure!(!db.settings()?.read_only, "Включён режим только чтения");
         // Commit the before-image before touching the filesystem.
-        db.0.execute(
+        let journal=db.0.transaction()?;
+        if let Some(original)=original{journal.execute("INSERT INTO action_undo VALUES(?,?)",params![id,original])?;}
+        journal.execute(
             "UPDATE action_log SET confirmation=?,snapshot=?,state='prepared' WHERE id=?",
             params![digest, snapshot, id],
         )?;
+        journal.commit()?;
         core.actions.files.apply(&plan, original.is_some())?;
         let tx = db.0.transaction()?;
         if let Some(original) = original {
@@ -161,12 +186,7 @@ pub async fn dispatch(
                     .get()
                     .context("Окно Jarvis недоступно")?;
                 let minimize = tool == "window_minimize";
-                if minimize {
-                    w.minimize()?
-                } else {
-                    w.unminimize()?
-                }
-                Ok(json!({"verified":w.is_minimized()?==minimize,"window":"Jarvis"}))
+                Ok(json!({"verified":w(minimize)?,"window":"Jarvis"}))
             })
             .context("Действие отменено")?,
         2 => change(core, turn, session, tool, args, id).await,

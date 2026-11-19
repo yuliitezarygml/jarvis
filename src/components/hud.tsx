@@ -283,6 +283,7 @@ function SettingsForm({ c }: { c: Console }) {
         {c.windows ? "Разрешить модели инструменты Windows" : "Разрешить модели диагностические инструменты"}
       </label>
       {c.windows && <label className="auto"><input type="checkbox" checked={s.read_only} onChange={e=>field("read_only",e.target.checked)} />Только чтение</label>}
+      {c.windows && <button type="button" onClick={()=>void c.toggleAdmin(!c.admin)}>{c.admin ? "Выключить режим администратора" : "Включить режим администратора"}</button>}
       <label>
         Пауза после речи
         <select value={s.silence_ms} onChange={(e) => field("silence_ms", Number(e.target.value))}>
@@ -376,6 +377,7 @@ function Diagnostics({ c }: { c: Console }) {
     disks: "Диски",
     server_status: "Соединение с сервером",
     tts_status: "Готовность TTS",
+    ...(c.windows ? {kb_status:"Локальная база знаний Windows",net_info:"Сетевые адаптеры",volume_info:"Тома Windows"} : {}),
   };
   return (
     <section className="panel formPanel">
@@ -464,7 +466,7 @@ export default function Hud() {
       {c.proposal && <div className="actionShade"><section role="alertdialog" aria-modal="true" aria-label="Подтверждение действия" className="panel actionPrompt">
         <h2>Подтвердить действие?</h2>
         <p>{{fs_write:"Записать файл",fs_move:"Переименовать файл",fs_copy:"Скопировать файл",undo_last:"Отменить последнее изменение"}[c.proposal.tool] ?? c.proposal.tool}</p>
-        <p>{c.proposal.detail.folder}</p><strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
+        <p>{c.proposal.detail.folder}</p>{c.proposal.detail.source && <>{c.proposal.detail.source} → </>}<strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
         {c.proposal.detail.text_after!==null && <pre>{c.proposal.detail.text_after}</pre>}
         <div><button autoFocus onClick={()=>void c.decide(false)}>Отмена</button> <button onClick={()=>void c.decide(true)}>Подтвердить</button></div>
       </section></div>}
@@ -474,6 +476,7 @@ export default function Hud() {
             <Icon name="core" size={26} />
           </span>
           J.A.R.V.I.S.
+          {c.admin && <strong aria-label="Режим администратора включён"> ADMIN</strong>}
         </div>
         <nav>
           {Object.entries(titles).map(([id, t]) => (

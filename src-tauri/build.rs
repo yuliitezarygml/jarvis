@@ -11,7 +11,7 @@ fn main() {
         println!("cargo:rerun-if-changed=native/audio.m");
     } else if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         cc::Build::new()
-            .files(["native/audio_win.c","native/admin_win.c"])
+            .files(["native/audio_win.c", "native/admin_win.c"])
             .compile("jarvis_audio");
         println!("cargo:rustc-link-lib=winmm");
         println!("cargo:rustc-link-lib=wintrust");

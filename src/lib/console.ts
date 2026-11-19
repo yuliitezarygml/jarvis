@@ -86,7 +86,16 @@ export const defaults: Settings = {
 };
 export function useConsole() {
   const [windows,setWindows]=useState(false);
-  type Proposal={turn:string;digest:string;tool:string;detail:{folder:string;file:string;destination:string|null;undo:boolean;text_after:string|null}};
+  const [admin,setAdmin]=useState(false);
+  useEffect(()=>{
+    if(!windows)return;
+    let live=true;
+    const poll=()=>{void invoke<boolean>("admin_mode",{enable:null}).then(v=>{if(live)setAdmin(v);}).catch(()=>{if(live)setAdmin(false);});};
+    poll();
+    const timer=window.setInterval(poll,1500);
+    return ()=>{live=false;window.clearInterval(timer);};
+  },[windows]);
+  type Proposal={turn:string;digest:string;tool:string;detail:{folder:string;file:string;source:string|null;destination:string|null;undo:boolean;text_after:string|null}};
   const [proposal,setProposal]=useState<Proposal|null>(null);
   const [online, setOnline] = useState(false),
     [sessions, setSessions] = useState<Session[]>([]),
@@ -301,6 +310,7 @@ export function useConsole() {
   }
   async function select(id: string) {
     if (!id) return;
+    setProposal(null);
     await stop();
     sid.current = id;
     turn.current = "";
@@ -367,6 +377,10 @@ export function useConsole() {
   }
   return {
     windows,proposal,
+    admin,
+    toggleAdmin:async (enable:boolean)=>{
+      try{setAdmin(await invoke<boolean>("admin_mode",{enable}));}catch(e){report(e);}
+    },
     decide:async (allow:boolean)=>{
       if(!proposal)return;
       try {await invoke("confirm_action",{turn:proposal.turn,digest:proposal.digest,allow});}

@@ -14,6 +14,21 @@ pub fn bootstrap(core: Shared) -> Result<Value, String> {
     )
 }
 #[tauri::command]
+pub async fn admin_mode(core: Shared<'_>, enable: Option<bool>) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        match enable {
+            None => Ok(core.admin.active().await),
+            Some(on) => core.admin.set(on).await.map_err(error),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (core, enable);
+        Ok(false)
+    }
+}
+#[tauri::command]
 pub fn messages(core: Shared, session: String) -> Result<Vec<Value>, String> {
     core.db
         .lock()

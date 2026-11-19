@@ -31,6 +31,8 @@ pub struct Core {
     pub kb: crate::kb::Knowledge,
     #[cfg(windows)]
     pub actions: crate::actions::Actions,
+    #[cfg(windows)]
+    pub admin: crate::admin::Admin,
     pub stt: Recognizer,
     active: Mutex<Option<Turn>>,
     playback_phrases: Mutex<std::collections::VecDeque<String>>,
@@ -45,7 +47,7 @@ impl Core {
             dotenvy::from_path(env)?;
         }
         let http = provider::client()?;
-        Ok(Arc::new(Self {
+        let core=Arc::new(Self {
             db: Mutex::new(Store::open(&dir.join("jarvis.sqlite3"))?),
             http: tts::client()?,
             llm: Arc::new(Compatible(http)),
@@ -54,6 +56,8 @@ impl Core {
             kb: crate::kb::Knowledge::start(dir.to_owned()),
             #[cfg(windows)]
             actions: crate::actions::Actions::new(dir)?,
+            #[cfg(windows)]
+            admin: Default::default(),
             stt: Recognizer::new(
                 std::env::var_os("JARVIS_STT_DIR")
                     .map(Into::into)
@@ -63,7 +67,10 @@ impl Core {
             playback_phrases: Default::default(),
             capture: Default::default(),
             bus,
-        }))
+        });
+        #[cfg(windows)]
+        core.actions.recover(&mut core.db.lock().unwrap())?;
+        Ok(core)
     }
     pub fn for_turn<T>(&self, id: &str, run: impl FnOnce() -> T) -> Option<T> {
         let g = self.active.lock().unwrap();
@@ -178,6 +185,33 @@ impl Core {
         cancel: CancellationToken,
     ) -> Result<()> {
         let start = Instant::now();
+        #[cfg(windows)]
+        if let Some(last) = context
+            .last()
+            .filter(|v| v["role"] == "user")
+            .and_then(|v| v["content"].as_str())
+        {
+            let command = normalize_speech(last);
+            let on = match command.trim_start_matches("джарвис ") {
+                "включи режим администратора" => Some(true),
+                "выключи режим администратора" => Some(false),
+                _ => None,
+            };
+            if let Some(on) = on {
+                let active = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),s=self.admin.set(on)=>s?};
+                let result = if active {
+                    "Режим администратора включён."
+                } else {
+                    "Режим администратора выключен."
+                };
+                self.event(id, Kind::Delta, json!(result));
+                self.for_turn(id, || {
+                    self.db.lock().unwrap().append(session, "assistant", result)
+                })
+                .context("Отменено")??;
+                return Ok(());
+            }
+        }
         #[cfg(windows)]
         if let Some(prompt) = context.first_mut().and_then(|m| m.get_mut("content")) {
             if let Some(template) = prompt.as_str() {

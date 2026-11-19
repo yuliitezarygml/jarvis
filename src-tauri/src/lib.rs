@@ -1,5 +1,7 @@
 #[cfg(windows)]
 mod actions;
+#[cfg(windows)]
+mod admin;
 mod audio;
 mod capture;
 mod commands;
@@ -20,6 +22,15 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    match admin::entry() {
+        Ok(false) => {}
+        Ok(true) => return,
+        Err(e) => {
+            eprintln!("{e:#}");
+            return;
+        }
+    }
     tauri::Builder::default()
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -32,7 +43,10 @@ pub fn run() {
             )?;
             #[cfg(windows)]
             if let Some(w) = app.get_webview_window("main") {
-                let _ = core.actions.window.set(w);
+                let _ = core.actions.window.set(Box::new(move|minimize|{
+                    if minimize{w.minimize()?}else{w.unminimize()?}
+                    Ok(w.is_minimized()?==minimize)
+                }));
             }
             app.manage(core);
             Ok(())
@@ -51,6 +65,7 @@ pub fn run() {
             desktop::telemetry,
             desktop::connections,
             desktop::confirm_action,
+            desktop::admin_mode,
             desktop::run_tool
         ])
         .run(tauri::generate_context!())

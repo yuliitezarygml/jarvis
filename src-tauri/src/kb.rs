@@ -47,7 +47,10 @@ fn open(path: &Path, pinned: &str) -> Result<State> {
         format!("{:x}", hash.finalize()).eq_ignore_ascii_case(pinned),
         "SHA-256 локальной копии не совпадает"
     );
-    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    // Immutable also excludes a stray WAL or rollback journal from the trusted input.
+    let mut uri=reqwest::Url::from_file_path(path).map_err(|_|anyhow::anyhow!("Некорректный путь базы знаний"))?;
+    uri.set_query(Some("immutable=1&mode=ro"));
+    let connection = Connection::open_with_flags(uri.as_str(), OpenFlags::SQLITE_OPEN_READ_ONLY|OpenFlags::SQLITE_OPEN_URI)?;
     connection.execute_batch("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON;")?;
     ensure!(
         connection.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? == 1,
@@ -129,7 +132,8 @@ impl Knowledge {
                     .flatten()
                     .filter_map(|s| s["repo"].as_str())
                     .collect::<Vec<_>>();
-                format!("{} документов, {} фрагментов. {}. {}. PowerShell, модули Windows, справка команд и tldr. Локальная сборка, SHA-256 проверен, без подписи. Уточняй состав через kb_status.",manifest["documents"],manifest["chunks"],manifest["date"],sources.join(", ")).chars().take(600).collect()
+                let sections=manifest["sources"].as_array().into_iter().flatten().flat_map(|s|s["sections"].as_array().into_iter().flatten().filter_map(Value::as_str).take(2)).collect::<Vec<_>>();
+                format!("{} документов, {} фрагментов. {}. {}. Разделы {}. Локальная сборка, SHA-256 проверен, без подписи.",manifest["documents"],manifest["chunks"],manifest["date"].as_str().unwrap_or("unknown"),sources.join(", "),sections.join(", ")).chars().take(600).collect()
             }
         }
     }
