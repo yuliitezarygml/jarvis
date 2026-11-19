@@ -127,7 +127,17 @@ impl Store {
             .query_row("SELECT data FROM config WHERE id=1", [], |r| r.get(0))
             .optional()?;
         Ok(match val {
-            Some(s) => serde_json::from_str(&s)?,
+            Some(s) => {
+                let mut saved: Settings = serde_json::from_str(&s)?;
+                if cfg!(windows)
+                    && saved.prompt.trim() == include_str!("../config/personality.txt").trim()
+                {
+                    saved.prompt = include_str!("../config/personality-windows.txt")
+                        .trim()
+                        .into();
+                }
+                saved
+            }
             None => Settings::default(),
         })
     }

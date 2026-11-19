@@ -1,12 +1,13 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{bail, ensure, Result};
 use rusqlite::{params, Connection, OpenFlags, Params};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::{Duration, SystemTime},
 };
 
 const FIND: &str = include_str!("../../scripts/kb/search.sql");
@@ -16,7 +17,7 @@ enum State {
     Unavailable(String),
     Ready {
         connection: Connection,
-        _file: File,
+        update_error: Option<String>,
         manifest: Value,
         last_answer: bool,
     },
@@ -64,9 +65,20 @@ fn open(path: &Path, pinned: &str) -> Result<State> {
         connection.query_row("SELECT value FROM metadata WHERE key='manifest'", [], |r| {
             r.get::<_, String>(0)
         })?;
+    // Release the public filename after verification so a concurrent installer
+    // can replace it. Readers keep a private temporary DB and a bounded cache.
+    let mut reader = Connection::open("")?;
+    rusqlite::backup::Backup::new(&connection, &mut reader)?.run_to_completion(
+        512,
+        Duration::ZERO,
+        None,
+    )?;
+    reader.execute_batch(
+        "PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; PRAGMA cache_size=-8192;",
+    )?;
     Ok(State::Ready {
-        connection,
-        _file: file,
+        connection: reader,
+        update_error: None,
         manifest: serde_json::from_str(&manifest)?,
         last_answer: false,
     })
@@ -74,7 +86,12 @@ fn open(path: &Path, pinned: &str) -> Result<State> {
 fn load(dir: &Path, pin: &str) -> Result<State> {
     let current = open(&dir.join("windows_kb.sqlite3"), pin);
     if current.is_err() && dir.join("windows_kb.previous.sqlite3").is_file() {
-        if let Ok(previous) = open(&dir.join("windows_kb.previous.sqlite3"), pin) {
+        if let Ok(mut previous) = open(&dir.join("windows_kb.previous.sqlite3"), pin) {
+            if let State::Ready { update_error, .. } = &mut previous {
+                *update_error = Some(
+                    "Открыт предыдущий проверенный снимок. Текущий файл не прошёл проверку.".into(),
+                );
+            }
             return Ok(previous);
         }
     }
@@ -116,13 +133,45 @@ impl Knowledge {
         let state = Arc::new(Mutex::new(State::Unavailable(
             "Идёт проверка локальной копии".into(),
         )));
-        let handle = state.clone();
+        let handle = Arc::downgrade(&state);
         std::thread::spawn(move || {
-            let result = std::env::var("JARVIS_KB_LOCAL_SHA256")
-                .context("Локальная база не подключена")
-                .and_then(|pin| load(&dir, &pin));
-            *handle.lock().unwrap() =
-                result.unwrap_or_else(|e| State::Unavailable(format!("{e:#}")));
+            let config = dir.join("backend.env");
+            let active = dir.join("windows_kb.sqlite3");
+            let stamp = |file: &Path| -> Option<(SystemTime, u64)> {
+                let m = file.metadata().ok()?;
+                Some((m.modified().ok()?, m.len()))
+            };
+            let mut seen = None;
+            while let Some(owner) = handle.upgrade() {
+                let signature = (stamp(&config), stamp(&active));
+                if seen != Some(signature) {
+                    let pin = if config.is_file() {
+                        dotenvy::from_path_iter(&config).ok().and_then(|lines| {
+                            lines
+                                .filter_map(|r| r.ok())
+                                .find(|(k, _)| k == "JARVIS_KB_LOCAL_SHA256")
+                                .map(|(_, v)| v)
+                        })
+                    } else {
+                        std::env::var("JARVIS_KB_LOCAL_SHA256").ok()
+                    };
+                    let next = pin.filter(|p| !p.is_empty()).map(|p| load(&dir, &p));
+                    let mut old = owner.lock().unwrap();
+                    match next {
+                        Some(Ok(ready)) => *old = ready,
+                        Some(Err(e)) => match &mut *old {
+                            State::Ready { update_error, .. } => {
+                                *update_error = Some(format!("{e:#}"))
+                            }
+                            current => *current = State::Unavailable(format!("{e:#}")),
+                        },
+                        None => *old = State::Unavailable("Локальная база не подключена".into()),
+                    }
+                    seen = Some(signature);
+                }
+                drop(owner);
+                std::thread::sleep(Duration::from_secs(5));
+            }
         });
         Self(state)
     }
@@ -164,9 +213,10 @@ impl Knowledge {
                 State::Ready {
                     manifest,
                     last_answer,
+                    update_error,
                     ..
                 } => {
-                    json!({"available":true,"local":manifest,"server":null,"sha256_verified":true,"signature":"local_unsigned","last_answer":last_answer.then_some("local")})
+                    json!({"available":true,"local":manifest,"server":null,"sha256_verified":true,"signature":"local_unsigned","update_error":update_error,"last_answer":last_answer.then_some("local")})
                 }
             });
         }
@@ -221,6 +271,45 @@ impl Knowledge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn published_file_can_change_during_search_and_rollback() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("windows_kb.sqlite3");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(include_str!("../../scripts/kb/schema.sql"))
+            .unwrap();
+        c.execute(
+            "INSERT INTO metadata VALUES('manifest','{\"version\":\"first\"}')",
+            [],
+        )
+        .unwrap();
+        drop(c);
+        let pin = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+        let live = Knowledge(Arc::new(Mutex::new(load(&dir, &pin).unwrap())));
+        std::thread::scope(|scope| {
+            let reading = scope.spawn(|| {
+                for _ in 0..30 {
+                    assert!(live
+                        .run("kb_search", &json!({"query":"Get-Process"}))
+                        .is_ok());
+                    assert_eq!(
+                        live.run("kb_status", &json!({})).unwrap()["local"]["version"],
+                        "first"
+                    );
+                }
+            });
+            std::fs::rename(&path, dir.join("windows_kb.previous.sqlite3")).unwrap();
+            std::fs::write(&path, b"incomplete snapshot").unwrap();
+            let restored = Knowledge(Arc::new(Mutex::new(load(&dir, &pin).unwrap())));
+            let state = restored.run("kb_status", &json!({})).unwrap();
+            assert_eq!(state["local"]["version"], "first");
+            assert!(state["update_error"].is_string());
+            reading.join().unwrap();
+        });
+        drop(live);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn status_search_and_lookup_use_only_the_pinned_snapshot() {
         let p = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
@@ -279,10 +368,17 @@ mod tests {
         drop(c);
         let bytes = std::fs::read(&p).unwrap();
         let pin = format!("{:x}", Sha256::digest(&bytes));
-        assert!(open(&p, &pin).is_ok());
+        let first = Knowledge(Arc::new(Mutex::new(open(&p, &pin).unwrap())));
         assert!(open(&p, &"0".repeat(64)).is_err());
         std::fs::write(&p, &bytes[..bytes.len() / 2]).unwrap();
         assert!(open(&p, &pin).is_err());
+        assert_eq!(
+            first.run("kb_status", &json!({})).unwrap()["available"],
+            true
+        );
+        assert!(first
+            .run("kb_lookup_command", &json!({"name":"Get-Process"}))
+            .is_ok());
         std::fs::remove_file(p).unwrap();
     }
 }

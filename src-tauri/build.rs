@@ -16,6 +16,8 @@ fn main() {
         println!("cargo:rustc-link-lib=winmm");
         cc::Build::new()
             .cpp(true)
+            // sherpa-onnx ships its Windows C++ dependencies with the static MSVC CRT.
+            .static_crt(true)
             .file("native/desktop_win.cpp")
             .compile("jarvis_desktop");
         println!("cargo:rustc-link-lib=ole32");

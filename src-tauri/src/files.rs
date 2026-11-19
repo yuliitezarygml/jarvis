@@ -42,6 +42,22 @@ struct WriteText {
     name: String,
     text: String,
 }
+fn rename_new(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+    let wide = |p: &Path| {
+        p.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    let (from, to) = (wide(source), wide(destination));
+    // No REPLACE_EXISTING flag: a concurrent creator retains its file.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
+}
 fn valid(name: &str) -> Result<()> {
     let (stem, ext) = name
         .rsplit_once('.')
@@ -245,23 +261,7 @@ impl Files {
                 self.read(to)?.is_none() && self.read(from)? == change.before,
                 "Изменился исходный файл или назначение"
             );
-            // MoveFileW refuses an existing destination, including one created after the check.
-            use std::os::windows::ffi::OsStrExt;
-            let wide = |name: &str| {
-                self.root
-                    .join(name)
-                    .as_os_str()
-                    .encode_wide()
-                    .chain(Some(0))
-                    .collect::<Vec<_>>()
-            };
-            let (from_path, to_path) = (wide(from), wide(to));
-            unsafe extern "system" {
-                fn MoveFileW(source: *const u16, destination: *const u16) -> i32;
-            }
-            if unsafe { MoveFileW(from_path.as_ptr(), to_path.as_ptr()) } == 0 {
-                return Err(std::io::Error::last_os_error().into());
-            }
+            rename_new(&self.root.join(from), &self.root.join(to))?;
             ensure!(
                 self.read(to)? == change.before && self.read(from)?.is_none(),
                 "Проверка переноса не прошла"
@@ -274,8 +274,7 @@ impl Files {
                 f.sync_all()?;
                 drop(f);
                 if old.is_none() {
-                    // No-replace semantics even if another process created the target.
-                    fs::hard_link(&temp, &target)?;
+                    rename_new(&temp, &target)?;
                 } else {
                     fs::rename(&temp, &target)?;
                 }

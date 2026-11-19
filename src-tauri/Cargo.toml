@@ -22,7 +22,7 @@ tokio-util = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots", "http2"] }
 futures-util = "0.3"
 eventsource-stream = "0.2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 sysinfo = "0.37"
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
