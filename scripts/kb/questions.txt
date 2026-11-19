@@ -1,0 +1,106 @@
+# Русский вопрос | английский запрос для FTS | ожидаемая статья
+Как узнать текущие IP-адреса адаптеров?|ip address adapters configuration|ipconfig
+Как показать полный вывод ipconfig?|ipconfig /all|ipconfig
+Как посмотреть содержимое кэша DNS?|display dns resolver cache|ipconfig
+Чем узнать физический адрес сетевой карты?|physical MAC address|getmac
+Как посмотреть маршрут пакетов до узла?|trace route destination|tracert
+Как измерить потери по пути до узла?|packet loss router path|pathping
+Как вывести таблицу маршрутизации IP?|route routing table|route
+Как проверить доступность узла по ICMP?|ping echo request|ping
+Как посмотреть таблицу соответствия IP и MAC?|arp cache addresses|arp
+Как узнать статистику активных TCP-подключений?|netstat active tcp connections|netstat
+Как запросить запись DNS?|nslookup dns server|nslookup
+Как узнать имя этого компьютера?|display host name computer|hostname
+Какая утилита покажет сведения об ОС?|system configuration operating system|systeminfo
+Как вывести имя текущего пользователя?|whoami user name|whoami
+Как посмотреть версию Windows в cmd?|windows version number|ver
+Как посмотреть список процессов из cmd?|list running processes tasklist|tasklist
+Как получить справку по параметрам tasklist?|tasklist syntax parameters|tasklist
+Как вывести перечень установленных драйверов?|list installed device drivers|driverquery
+Как проверить файловую систему тома?|check disk file system errors|chkdsk
+Как получить серийный номер тома?|volume serial number|vol
+Как узнать тип файловой системы через fsutil?|fsutil fsinfo volumeinfo|fsutil-fsinfo
+Как посмотреть дерево каталогов?|tree directory structure|tree
+Как перечислить файлы включая скрытые?|dir hidden files|dir
+Как вывести содержимое текстового файла в cmd?|type text file contents|type
+Как постранично просмотреть текст?|more one screen|more
+Как сравнить два файла?|compare two files differences|fc
+Как найти строку в текстовом файле?|find text string file|find
+Как найти строки по регулярному выражению в cmd?|findstr regular expressions|findstr
+Как узнать путь к исполняемому файлу?|where search files path|where
+Как посмотреть атрибуты файла?|attrib file attributes|attrib
+Как скопировать каталог со всеми подкаталогами?|robocopy subdirectories copy|robocopy
+Как проверить синтаксис xcopy?|xcopy syntax|xcopy
+Как узнать синтаксис команды переименования?|ren rename files|ren
+Как создать пустую папку в cmd?|mkdir directory|mkdir
+Как узнать текущий каталог в cmd?|cd current directory|cd
+Как восстановить сохранённый текущий каталог?|popd directory pushd|popd
+Как положить текущий каталог в стек?|pushd directory stack|pushd
+Как показать текущую кодовую страницу консоли?|active console code page|chcp
+Как вывести текущее время в командной строке?|time current system time|time
+Как узнать системную дату из cmd?|date current system date|date
+Как посмотреть имя часового пояса?|tzutil time zone|tzutil
+Как узнать конфигурацию службы времени?|w32tm configuration|w32tm
+Как вывести активную схему электропитания?|powercfg active power scheme|powercfg
+Как узнать расписание задач в cmd?|schtasks query scheduled tasks|schtasks-query
+Как посмотреть состояние службы через sc.exe?|sc query service state|sc-query
+Как получить конфигурацию службы через sc.exe?|sc qc service configuration|sc-qc
+Как перечислить журналы событий Windows?|wevtutil event logs|wevtutil
+Как узнать применённые групповые политики?|gpresult resultant set policy|gpresult
+Как просмотреть права на файл?|icacls access control lists|icacls
+Как получить значения из ветки реестра?|reg query registry|reg-query
+Как сохранить копию ветки реестра?|reg export registry file|reg-export
+Как посмотреть конфигурацию загрузки?|bcdedit enum entries|bcdedit
+Как получить список процессов PowerShell?|Get-Process|Get-Process
+Как найти процесс по имени?|Get-Process name|Get-Process
+Как перечислить службы PowerShell?|Get-Service|Get-Service
+Как узнать, от каких служб зависит служба?|Get-Service RequiredServices|Get-Service
+Чем вывести переменные сеанса PowerShell?|Get-Variable|Get-Variable
+Как получить список модулей на диске?|Get-Module ListAvailable|Get-Module
+Как найти командлет по имени?|Get-Command name|Get-Command
+Как посмотреть полную справку по командлету?|Get-Help Full|Get-Help
+Как посмотреть только примеры командлета?|Get-Help Examples|Get-Help
+Как получить список псевдонимов?|Get-Alias|Get-Alias
+Как посмотреть свойства объекта?|Get-Member properties|Get-Member
+Как отфильтровать объекты по свойству?|Where-Object property|Where-Object
+Чем отсортировать объекты?|Sort-Object|Sort-Object
+Как выбрать первые десять результатов?|Select-Object First|Select-Object
+Как сгруппировать объекты по значению?|Group-Object property|Group-Object
+Как посчитать сумму числового свойства?|Measure-Object Sum|Measure-Object
+Как сравнить две коллекции объектов?|Compare-Object|Compare-Object
+Как проверить существование пути?|Test-Path|Test-Path
+Как раскрыть относительный путь?|Resolve-Path relative|Resolve-Path
+Как получить родительскую часть пути?|Split-Path Parent|Split-Path
+Как объединить каталог и имя файла?|Join-Path ChildPath|Join-Path
+Как получить размеры файлов папки?|Get-ChildItem files|Get-ChildItem
+Как вывести последние строки файла?|Get-Content Tail|Get-Content
+Как искать текст в файлах PowerShell?|Select-String pattern|Select-String
+Как вычислить контрольную сумму SHA256?|Get-FileHash SHA256|Get-FileHash
+Как проверить подпись файла?|Get-AuthenticodeSignature|Get-AuthenticodeSignature
+Как получить дату в формате ISO?|Get-Date Format|Get-Date
+Как вывести длительность между датами?|New-TimeSpan|New-TimeSpan
+Как узнать региональные настройки?|Get-Culture|Get-Culture
+Как узнать язык интерфейса PowerShell?|Get-UICulture|Get-UICulture
+Как перечислить провайдеры PowerShell?|Get-PSProvider|Get-PSProvider
+Как посмотреть подключённые диски PowerShell?|Get-PSDrive|Get-PSDrive
+Как получить идентификатор текущей папки?|Get-Location|Get-Location
+Как получить свойство элемента реестра?|Get-ItemProperty|Get-ItemProperty
+Как посмотреть ACL каталога PowerShell?|Get-Acl|Get-Acl
+Как прочитать события системного журнала?|Get-WinEvent LogName|Get-WinEvent
+Как извлечь сведения о компьютере PowerShell?|Get-ComputerInfo|Get-ComputerInfo
+Как проверить соединение PowerShell?|Test-Connection|Test-Connection
+Как посмотреть список сетевых карт?|Get-NetAdapter|Get-NetAdapter
+Как получить статистику сетевой карты?|Get-NetAdapterStatistics|Get-NetAdapterStatistics
+Как узнать IP-конфигурацию интерфейса?|Get-NetIPConfiguration|Get-NetIPConfiguration
+Как перечислить адреса IPv6 в PowerShell?|Get-NetIPAddress AddressFamily|Get-NetIPAddress
+Как узнать маршруты IPv4?|Get-NetRoute AddressFamily|Get-NetRoute
+Как получить активные TCP-соединения?|Get-NetTCPConnection|Get-NetTCPConnection
+Как посмотреть локальные UDP-порты?|Get-NetUDPEndpoint|Get-NetUDPEndpoint
+Как получить адреса DNS-серверов?|Get-DnsClientServerAddress|Get-DnsClientServerAddress
+Как прочитать локальный DNS-кэш PowerShell?|Get-DnsClientCache|Get-DnsClientCache
+Как выполнить разрешение доменного имени?|Resolve-DnsName|Resolve-DnsName
+Как узнать число физических дисков?|Get-PhysicalDisk|Get-PhysicalDisk
+Как получить описание разделов диска?|Get-Partition|Get-Partition
+Как перечислить тома по буквам дисков?|Get-Volume DriveLetter|Get-Volume
+Как узнать время последнего запуска задачи?|Get-ScheduledTaskInfo LastRunTime|Get-ScheduledTaskInfo
+Как перечислить доступные принтеры?|Get-Printer|Get-Printer

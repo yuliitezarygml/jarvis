@@ -1,3 +1,4 @@
+use crate::platform::{NativeBackend, PlatformBackend};
 use crate::{audio, core::Core, tts};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
@@ -39,6 +40,16 @@ pub enum Permission {
 }
 impl ToolRegistry {
     pub fn permission(name: &str) -> Permission {
+        #[cfg(windows)]
+        if matches!(
+            name,
+            "kb_status" | "kb_search" | "kb_lookup_command" | "command_help"
+        ) || crate::platform::windows::DIAGNOSTICS
+            .iter()
+            .any(|d| d.name == name)
+        {
+            return Permission::ReadOnly;
+        }
         if TOOLS.iter().any(|(registered, _)| *registered == name) {
             return Permission::ReadOnly;
         }
@@ -50,13 +61,19 @@ impl ToolRegistry {
         }
     }
     pub fn schemas() -> Vec<Value> {
-        TOOLS
-            .iter()
-            .map(|(name, description)| {
-                json!({"type":"function","function":{"name":name,"description":description,
-               "parameters":{"type":"object","properties":{},"additionalProperties":false}}})
-            })
-            .collect()
+        fn schema(name: &str, desc: &str, properties: Value, required: &[&str]) -> Value {
+            json!({"type":"function","function":{"name":name,"description":desc,"parameters":{"type":"object","properties":properties,"required":required,"additionalProperties":false}}})
+        }
+        let schemas = TOOLS.iter().map(|(n, d)| schema(n, d, json!({}), &[]));
+        #[cfg(windows)]
+        let schemas=schemas.chain(crate::platform::windows::DIAGNOSTICS.iter().map(|d|schema(d.name,d.description,json!({}),&[])))
+            .chain([
+                schema("kb_status","Состав локальной справки Windows, версия и происхождение",json!({}),&[]),
+                schema("kb_search","Search local Windows documentation in English. Cite repo and path.",json!({"query":{"type":"string","maxLength":160},"version":{"type":"string"},"limit":{"type":"integer","minimum":3,"maximum":5}}),&["query"]),
+                schema("kb_lookup_command","Точная справка по имени команды",json!({"name":{"type":"string","maxLength":100}}),&["name"]),
+                schema("command_help","Проверить наличие и справку командлета в Windows PowerShell",json!({"name":{"type":"string","maxLength":80}}),&["name"]),
+            ]);
+        schemas.collect()
     }
     pub async fn run(c: &Core, name: &str, args: &Value) -> Result<Value> {
         match Self::permission(name) {
@@ -64,12 +81,25 @@ impl ToolRegistry {
             Permission::RequiresConfirmation=>bail!("Требуется отдельное подтверждение пользователя. Исполнитель этого действия ещё не подключён."),
             Permission::ReadOnly=>()
         }
+        #[cfg(windows)]
+        {
+            if matches!(name, "kb_search" | "kb_lookup_command" | "kb_status") {
+                return c.kb.run(name, args);
+            }
+            if name == "command_help"
+                || crate::platform::windows::DIAGNOSTICS
+                    .iter()
+                    .any(|d| d.name == name)
+            {
+                return crate::platform::windows::diagnostic(name, args).await;
+            }
+        }
         if !args.as_object().is_some_and(|o| o.is_empty()) {
             bail!("Инструмент принимает пустой объект");
         }
         let result=match name {
             "get_time"=>json!({"time":chrono::Local::now().to_rfc3339()}),
-            "system_info"=>c.telemetry.sample(),
+            "system_info"=>NativeBackend.system_info(&c.telemetry).await?,
             "cpu"=>json!({"percent":c.telemetry.sample()["cpu"]}),
             "ram"=>{let sample=c.telemetry.sample();json!({"used":sample["ram"],"total":sample["total"]})},
             "disks"=>tokio::task::spawn_blocking(||{

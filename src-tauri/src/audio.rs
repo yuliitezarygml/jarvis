@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 mod device {
     unsafe extern "C" {
         pub fn jv_mic_start(continuous: i32) -> i32;
@@ -22,28 +22,28 @@ mod device {
         pub fn jv_gpu(out: *mut i8, n: i32);
     }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn mic_start(continuous: bool) -> Result<()> {
     match unsafe { device::jv_mic_start(i32::from(continuous)) } {
         1 => Ok(()),
-        -1 => bail!("Разрешите доступ к микрофону в настройках конфиденциальности macOS"),
+        -1 => bail!("Разрешите доступ к микрофону в системных настройках конфиденциальности"),
         -2 => bail!("Истекло время ожидания разрешения микрофона"),
-        _ => bail!("Не удалось открыть устройство ввода. Проверьте выбранный микрофон macOS."),
+        _ => bail!("Не удалось открыть устройство ввода. Проверьте выбранный микрофон."),
     }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn mic_status() -> i32 {
     unsafe { device::jv_mic_status() }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn mic_end() {
     unsafe { device::jv_mic_end() }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn read(buf: &mut [f32]) -> usize {
     unsafe { device::jv_read(buf.as_mut_ptr(), buf.len() as i32) as usize }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn play(buf: &[i16]) -> Result<bool> {
     match unsafe { device::jv_play(buf.as_ptr(), buf.len() as i32) } {
         1 => Ok(true),
@@ -51,15 +51,15 @@ pub fn play(buf: &[i16]) -> Result<bool> {
         _ => bail!("Выход звука недоступен"),
     }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn stop() {
     unsafe { device::jv_stop() }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn pending() -> i32 {
     unsafe { device::jv_pending() }
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn gpu() -> String {
     let mut b = [0i8; 160];
     unsafe {
@@ -69,7 +69,7 @@ pub fn gpu() -> String {
             .into_owned()
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 mod fallback {
     use anyhow::{bail, Result};
     pub fn mic_start(continuous: bool) -> Result<()> {
@@ -93,7 +93,7 @@ mod fallback {
         String::new()
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub use fallback::*;
 pub struct Recognizer {
     root: PathBuf,

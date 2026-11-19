@@ -4,6 +4,9 @@ mod commands;
 mod core;
 mod desktop;
 mod events;
+#[cfg(windows)]
+mod kb;
+mod platform;
 mod provider;
 mod speech_normalizer;
 mod storage;

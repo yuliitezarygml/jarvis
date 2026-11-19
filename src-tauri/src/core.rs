@@ -27,6 +27,8 @@ pub struct Core {
     pub http: reqwest::Client,
     pub llm: Arc<dyn LlmProvider>,
     pub telemetry: Telemetry,
+    #[cfg(windows)]
+    pub kb: crate::kb::Knowledge,
     pub stt: Recognizer,
     active: Mutex<Option<Turn>>,
     playback_phrases: Mutex<std::collections::VecDeque<String>>,
@@ -46,6 +48,8 @@ impl Core {
             http: tts::client()?,
             llm: Arc::new(Compatible(http)),
             telemetry: Telemetry::new(),
+            #[cfg(windows)]
+            kb: crate::kb::Knowledge::start(dir.to_owned()),
             stt: Recognizer::new(
                 std::env::var_os("JARVIS_STT_DIR")
                     .map(Into::into)
@@ -170,6 +174,12 @@ impl Core {
         cancel: CancellationToken,
     ) -> Result<()> {
         let start = Instant::now();
+        #[cfg(windows)]
+        if let Some(prompt) = context.first_mut().and_then(|m| m.get_mut("content")) {
+            if let Some(template) = prompt.as_str() {
+                *prompt = json!(template.replace("{{KB_MANIFEST}}", &self.kb.manifest()));
+            }
+        }
         // Raw deltas share the 40 kB per-turn limit below. Slow audio must never abort the HUD stream.
         let (tx, rx) = mpsc::unbounded_channel();
         let speaker = if s.speak {

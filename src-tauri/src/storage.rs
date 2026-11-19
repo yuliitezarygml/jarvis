@@ -28,7 +28,13 @@ impl Default for Settings {
             url: std::env::var("GROQ_BASE_URL")
                 .unwrap_or_else(|_| "https://api.groq.com/openai/v1".into()),
             model: std::env::var("GROQ_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".into()),
-            prompt: include_str!("../config/personality.txt").trim().into(),
+            prompt: if cfg!(windows) {
+                include_str!("../config/personality-windows.txt")
+            } else {
+                include_str!("../config/personality.txt")
+            }
+            .trim()
+            .into(),
             speak: true,
             tools: true,
             silence_ms: default_silence_ms(),

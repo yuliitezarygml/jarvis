@@ -31,7 +31,7 @@ try {
   const doc = db.prepare('SELECT id,hash FROM documents WHERE repo=? AND path=?');
   const seen = db.prepare('INSERT INTO seen VALUES(?)');
   const del = db.prepare('DELETE FROM documents WHERE id=?');
-  const add = db.prepare('INSERT INTO documents(repo,path,hash,title,description,front) VALUES(?,?,?,?,?,?,?)');
+  const add = db.prepare('INSERT INTO documents(repo,path,hash,title,description,front) VALUES(?,?,?,?,?,?)');
   let changed = 0;
   const notices = [], stats = [];
   for (const s of catalog.filter(s=>!s.error)) {
@@ -58,12 +58,12 @@ try {
         seen.run(id); changed++;
         const cmd = ['commands','tldr'].includes(s.kind) || /^(?:[A-Za-z]+-[\w-]+|about_[\w-]+)$/.test(stem) ? stem : '';
         const ps = /^reference\/([\d.]+)\//.exec(path)?.[1] || 'unknown';
-        const module = meta['module name'] || (s.kind === 'modules' ? basename(dirname(file)) : 'unknown');
+        const moduleName = meta['module name'] || (s.kind === 'modules' ? basename(dirname(file)) : 'unknown');
         const applies = applicability(s.kind,front,sections);
         for (const part of sections) {
           const admin = /\brequires? (?:administrative privileges|administrator privileges|an elevated (?:command prompt|session))\b/i.test(part.text) ? 1 : null;
           // Conservative upper bound for unreviewed commands. This field never authorizes execution.
-          insert.run(id,cmd,part.heading,part.text,module,applies,ps,admin,3,'doc_derived',meta['ms.date'] || null);
+          insert.run(id,cmd,part.heading,part.text,moduleName,applies,ps,admin,3,'doc_derived',meta['ms.date'] || null);
         }
       }
     }
@@ -76,7 +76,7 @@ try {
   const manifest = {version,date:new Date().toISOString(),signature:'local_unsigned',sources:stats,missing,...counts};
   db.prepare("INSERT OR REPLACE INTO metadata VALUES('manifest',?)").run(JSON.stringify(manifest));
   const metrics = evaluate(db);
-  if (!metrics.hits || db.prepare('PRAGMA quick_check').get().quick_check !== 'ok') throw Error('Snapshot validation failed');
+  if (metrics.recall_at_5 < 0.70 || db.prepare('PRAGMA quick_check').get().quick_check !== 'ok') throw Error('Snapshot validation failed: '+JSON.stringify(metrics));
   db.close(); db=null;
   const hash = createHash('sha256');
   for await (const block of createReadStream(target)) hash.update(block);
