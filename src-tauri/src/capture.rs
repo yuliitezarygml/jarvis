@@ -13,8 +13,14 @@ use tokio::sync::watch;
 #[derive(Clone, Copy, PartialEq)]
 enum Stop {
     Live,
+    FinishPhrase,
     Submit,
     Discard,
+}
+pub enum End {
+    Submit,
+    Discard,
+    CancelPushToTalk,
 }
 #[derive(Clone, Copy)]
 struct ListenOptions {
@@ -30,6 +36,7 @@ fn wake_command(text: &str) -> Option<&str> {
 }
 
 pub struct Capture {
+    continuous: bool,
     stop: watch::Sender<Stop>,
     finished: watch::Receiver<()>,
 }
@@ -43,13 +50,21 @@ impl Capture {
         self.finished.clone()
     }
 }
-pub async fn end(c: &Arc<Core>, submit: bool) {
+pub async fn end(c: &Arc<Core>, action: End) {
     let finished = c
         .capture
         .lock()
         .await
         .as_ref()
-        .map(|job| job.request(if submit { Stop::Submit } else { Stop::Discard }));
+        .and_then(|job| match (action, job.continuous) {
+            (End::CancelPushToTalk, true) => None,
+            (End::Submit, true) => {
+                job.request(Stop::FinishPhrase);
+                None
+            }
+            (End::Submit, false) => Some(job.request(Stop::Submit)),
+            _ => Some(job.request(Stop::Discard)),
+        });
     if let Some(mut finished) = finished {
         let _ = finished.changed().await;
     }
@@ -59,7 +74,9 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     if let Some(job) = g.take() {
         let _ = job.request(Stop::Discard).changed().await;
     }
-    c.cancel();
+    if !continuous {
+        c.cancel();
+    }
     ensure!(c.stt.available(), "Русская модель STT не установлена");
     let settings = c.db.lock().unwrap().settings()?;
     let options = ListenOptions {
@@ -85,14 +102,18 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
         capture(core, session, options, rx, online, audio::read);
         drop(done);
     });
-    *g = Some(Capture { stop: tx, finished });
+    *g = Some(Capture {
+        continuous,
+        stop: tx,
+        finished,
+    });
     Ok(())
 }
 fn capture(
     c: Arc<Core>,
     session: String,
     options: ListenOptions,
-    control: watch::Receiver<Stop>,
+    mut control: watch::Receiver<Stop>,
     online: Option<Arc<OnlineRecognizer>>,
     mut read: impl FnMut(&mut [f32]) -> usize,
 ) {
@@ -126,7 +147,14 @@ fn capture(
     let mut capture_open = true;
     let opened = Instant::now();
     loop {
-        let mut mode = *control.borrow();
+        let mut mode = {
+            let request = control.borrow_and_update();
+            if *request == Stop::FinishPhrase && !request.has_changed() {
+                Stop::Live
+            } else {
+                *request
+            }
+        };
         if !continuous
             && !speaking
             && opened.elapsed() > Duration::from_secs(12)
@@ -217,7 +245,7 @@ fn capture(
         if mode == Stop::Submit && full_frame && utterance.len() < 16000 * 24 {
             continue;
         }
-        let finish = mode == Stop::Submit
+        let finish = matches!(mode, Stop::Submit | Stop::FinishPhrase)
             || (speaking && quiet >= silence_samples)
             || utterance.len() >= 16000 * 24;
         if finish {
@@ -265,7 +293,7 @@ fn capture(
             } else {
                 speech(SpeechUpdate::Cleared);
             }
-            if !continuous || mode != Stop::Live {
+            if !continuous || mode == Stop::Submit {
                 break;
             }
             speaking = false;
@@ -449,12 +477,16 @@ mod acceptance {
         };
         let engine = core.stt.streaming_engine().expect("streaming model");
         let mut pcm = Vec::new();
+        let mut manual_finish_at = None;
         for name in ["old-long", "old-short", "old-long"] {
             let wave =
                 sherpa_onnx::Wave::read(&format!("../jarvis-tts-rs/examples/audio/{name}.wav"))
                     .unwrap();
             assert_eq!(wave.sample_rate(), 24000);
             pcm.extend((0..wave.samples().len() * 2 / 3).map(|i| wave.samples()[i * 3 / 2]));
+            if manual_finish_at.is_none() {
+                manual_finish_at = pcm.iter().rposition(|v| v.abs() > 0.008).map(|i| i + 256);
+            }
             pcm.extend(std::iter::repeat_n(0.0, 24000));
         }
         let mut remaining = pcm.as_slice();
@@ -473,6 +505,10 @@ mod acceptance {
                     let n = out.len().min(remaining.len());
                     out[..n].copy_from_slice(&remaining[..n]);
                     remaining = &remaining[n..];
+                    if manual_finish_at.is_some_and(|i| pcm.len() - remaining.len() >= i) {
+                        stop.send(Stop::FinishPhrase).unwrap();
+                        manual_finish_at = None;
+                    }
                     n
                 } else {
                     stop.send(Stop::Discard).unwrap();
@@ -480,6 +516,7 @@ mod acceptance {
                 }
             },
         );
+        assert!(manual_finish_at.is_none());
         let trace = trace.lock().unwrap();
         let mut finals = Vec::new();
         let mut sent = Vec::new();

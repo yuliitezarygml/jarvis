@@ -38,13 +38,13 @@ pub fn messages(core: Shared, session: String) -> Result<Vec<Value>, String> {
 }
 #[tauri::command]
 pub async fn send_text(core: Shared<'_>, session: String, text: String) -> Result<String, String> {
-    capture::end(&core, false).await;
+    capture::end(&core, capture::End::CancelPushToTalk).await;
     core.start(session, text).map_err(error)
 }
 #[tauri::command]
 pub async fn interrupt(core: Shared<'_>) -> Result<(), String> {
     core.cancel();
-    capture::end(&core, false).await;
+    capture::end(&core, capture::End::Discard).await;
     core.cancel();
     Ok(())
 }
@@ -54,8 +54,12 @@ pub async fn microphone(core: Shared<'_>, session: String, mode: String) -> Resu
         "ptt" | "auto" => capture::start(&core, session, mode == "auto")
             .await
             .map_err(error),
-        "submit" | "off" => {
-            capture::end(&core, mode == "submit").await;
+        "submit" => {
+            capture::end(&core, capture::End::Submit).await;
+            Ok(())
+        }
+        "off" => {
+            capture::end(&core, capture::End::Discard).await;
             Ok(())
         }
         _ => Err("Некорректный режим микрофона".into()),
@@ -83,7 +87,7 @@ pub fn save_settings(core: Shared, settings: Settings) -> Result<(), String> {
 }
 #[tauri::command]
 pub async fn session_action(core: Shared<'_>, remove: Option<String>) -> Result<Value, String> {
-    capture::end(&core, false).await;
+    capture::end(&core, capture::End::Discard).await;
     core.cancel();
     let mut db = core.db.lock().unwrap();
     let id = if let Some(id) = remove {

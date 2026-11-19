@@ -120,11 +120,24 @@ export function useConsole() {
     sid = useRef(""),
     turn = useRef(""),
     liveMic = useRef("off"),
+    paused = useRef(false),
     historyVersion = useRef(0),
     micChain = useRef<Promise<void>>(Promise.resolve()),
     buffer = useRef(""),
     paint = useRef(0);
   const report = useCallback((e: unknown) => setError(String(e)), []);
+  const queueMic = useCallback((operation: () => Promise<void>) => {
+    micChain.current = micChain.current.then(operation).catch((e) => {
+      report(e);
+      setPhase("ERROR");
+    });
+    return micChain.current;
+  }, [report]);
+  const listenIfEnabled = useCallback(async (id: string) => {
+    if (id === sid.current && !paused.current) {
+      await invoke("microphone", { session: id, mode: "auto" });
+    }
+  }, []);
   const updateHistory = useCallback(async (id: string) => {
     const version = ++historyVersion.current;
     const rows = await invoke<Msg[]>("messages", { session: id });
@@ -152,11 +165,9 @@ export function useConsole() {
       setSession(sid.current);
       const initial = sid.current;
       await updateHistory(initial);
-      if (data.settings.wake_word && sid.current === initial) {
-        await invoke("microphone", { session: initial, mode: "auto" });
-      }
+      await queueMic(() => listenIfEnabled(initial));
     }
-  }, [updateHistory]);
+  }, [listenIfEnabled, queueMic, updateHistory]);
   useEffect(() => {
     if (!isTauri()) return;
     let alive = true;
@@ -295,45 +306,53 @@ export function useConsole() {
     };
   }, [load, refresh, report, updateHistory]);
   async function act<T>(cmd: string, args?: Record<string, unknown>) {
-    if (!isTauri()) throw Error("Откройте приложение Jarvis на Mac");
+    if (!isTauri()) throw Error("Откройте настольное приложение Jarvis");
     return invoke<T>(cmd, args);
   }
   async function stop() {
-    try {
+    paused.current = true;
+    await queueMic(async () => {
       await act("interrupt");
       setBusy(false);
       setPhase("STOPPED");
       energy.current = 0;
-    } catch (e) {
-      report(e);
-    }
+    });
   }
-  async function select(id: string) {
-    if (!id) return;
+  async function showSession(id: string) {
     setProposal(null);
-    await stop();
     sid.current = id;
     turn.current = "";
     buffer.current = "";
+    liveMic.current = "off";
+    setMic("off");
+    setBusy(false);
+    energy.current = 0;
+    micLevels.current.fill(0);
     setSession(id);
     setSpeech({ state: "cleared" });
-    setPhase("IDLE");
+    setPhase(paused.current ? "STOPPED" : "IDLE");
     setPartial("");
     setMessages([]);
     setError("");
     await updateHistory(id);
+    await listenIfEnabled(id);
+  }
+  async function select(id: string) {
+    if (!id || sid.current === id) return;
+    await queueMic(async () => {
+      await act("interrupt");
+      await showSession(id);
+    });
   }
   async function manage(remove?: string) {
-    try {
+    await queueMic(async () => {
       const v = await act<{ sessions: Session[]; id: string | null }>(
         "session_action",
         { remove: remove ?? null },
       );
       setSessions(v.sessions);
-      await select(v.id ?? v.sessions[0].id);
-    } catch (e) {
-      report(e);
-    }
+      await showSession(v.id ?? v.sessions[0].id);
+    });
   }
   async function send(text: string) {
     if (!text.trim()) return;
@@ -347,24 +366,22 @@ export function useConsole() {
   }
   async function capture(mode: string) {
     const id = sid.current;
-    micChain.current = micChain.current.then(async () => {
+    if (!id) return;
+    if (mode === "auto") paused.current = false;
+    await queueMic(async () => {
       if (sid.current !== id) return;
-      try {
-        setError("");
-        await act("microphone", { session: id, mode });
-      } catch (e) {
-        report(e);
-        setPhase("ERROR");
-      }
+      setError("");
+      if (mode === "auto") await listenIfEnabled(id);
+      else await act("microphone", { session: id, mode });
     });
-    await micChain.current;
   }
   async function save(s: Settings) {
     await act("save_settings", { settings: s });
     setSettings(s);
     if (liveMic.current === "auto" &&
         (s.silence_ms !== settings.silence_ms || s.wake_word !== settings.wake_word)) {
-      await capture(settings.wake_word && !s.wake_word ? "off" : "auto");
+      const id = sid.current;
+      await queueMic(() => listenIfEnabled(id));
     }
     void refresh();
   }

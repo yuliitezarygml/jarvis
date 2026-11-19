@@ -293,7 +293,7 @@ function SettingsForm({ c }: { c: Console }) {
       <label className="toggle">
         <input type="checkbox" checked={s.wake_word}
           onChange={(e) => field("wake_word", e.target.checked)} />
-        При запуске включать микрофон и ждать обращения «Джарвис»
+        Реагировать только на обращение «Джарвис»
       </label>
       <div className="actions">
         <button className="primary">Сохранить настройки</button>
@@ -418,12 +418,12 @@ export default function Hud() {
   const c = useConsole();
   const [page, tab] = useState("center"),
     [text, set] = useState("");
-  const voice = useRef(c.capture);
+  const voice = useRef({ capture: c.capture, mic: c.mic, session: c.session });
   useEffect(() => {
-    voice.current = c.capture;
-  }, [c.capture]);
+    voice.current = { capture: c.capture, mic: c.mic, session: c.session };
+  }, [c.capture, c.mic, c.session]);
   useEffect(() => {
-    let held = false;
+    let heldSession = "";
     const editable = (t: EventTarget | null) =>
       t instanceof HTMLElement &&
       (t.isContentEditable ||
@@ -433,26 +433,25 @@ export default function Hud() {
         e.code === "Space" &&
         !e.repeat &&
         !editable(e.target) &&
-        page === "center"
+        page === "center" && voice.current.mic === "off" && voice.current.session
       ) {
-        held = true;
+        heldSession = voice.current.session;
         e.preventDefault();
-        void voice.current("ptt");
+        void voice.current.capture("ptt");
       }
+    };
+    const release = (mode: "submit" | "off") => {
+      if (heldSession === voice.current.session && heldSession && voice.current.mic !== "auto")
+        void voice.current.capture(mode);
+      heldSession = "";
     };
     const up = (e: KeyboardEvent) => {
-      if (e.code === "Space" && held) {
-        held = false;
+      if (e.code === "Space" && heldSession) {
         e.preventDefault();
-        void voice.current("submit");
+        release("submit");
       }
     };
-    const blur = () => {
-      if (held) {
-        held = false;
-        void voice.current("off");
-      }
-    };
+    const blur = () => release("off");
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
@@ -560,14 +559,14 @@ export default function Hud() {
                 <div className="voiceControl">
                   <button
                     className="primary"
-                    disabled={!c.online}
-                    title={c.mic === "off" ? "Начать голосовую команду" : "Закончить запись и отправить распознанную команду"}
+                    disabled={!c.online || !c.session}
+                    title={c.mic === "off" ? "Возобновить прослушивание" : "Отправить текущую фразу"}
                     onClick={() =>
-                      void c.capture(c.mic === "off" ? "ptt" : "submit")
+                      void c.capture(c.mic === "off" ? "auto" : "submit")
                     }
                   >
                     <Icon name={c.mic === "off" ? "mic" : "stop"} />
-                    {c.mic === "off" ? "Говорить" : "Завершить"}
+                    {c.mic === "off" ? "Слушать" : "Завершить"}
                   </button>
                   <button
                     className="stopControl"
@@ -579,17 +578,6 @@ export default function Hud() {
                     Остановить
                   </button>
                 </div>
-                <label className="auto">
-                  <input
-                    type="checkbox"
-                    checked={c.mic === "auto"}
-                    disabled={!c.online}
-                    onChange={(e) =>
-                      void c.capture(e.target.checked ? "auto" : "off")
-                    }
-                  />
-                  {c.settings.wake_word ? "По обращению «Джарвис»" : "Постоянное прослушивание"}
-                </label>
               </section>
               <Transcript c={c} />
             </div>
