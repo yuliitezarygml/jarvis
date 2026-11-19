@@ -25,8 +25,8 @@ impl Telemetry {
 pub struct ToolRegistry;
 pub fn risk(name: &str) -> u8 {
     match name {
-        "window_minimize" | "window_restore" => 1,
-        "fs_move" | "fs_write" | "fs_copy" | "undo_last" => 2,
+        "window_minimize" | "window_restore" | "app_launch" | "app_close" | "volume_set" => 1,
+        "fs_move" | "fs_write" | "fs_copy" | "fs_delete" | "undo_last" => 2,
         _ if ToolRegistry::permission(name) == Permission::ReadOnly => 0,
         _ => 3,
     }
@@ -55,10 +55,13 @@ impl ToolRegistry {
                 | "kb_search"
                 | "kb_lookup_command"
                 | "command_help"
+                | "powershell_run"
                 | "fs_list"
+                | "fs_search"
                 | "fs_read"
                 | "hash"
                 | "security_log_status"
+                | "volume_get"
         ) || crate::platform::windows::DIAGNOSTICS
             .iter()
             .any(|d| d.name == name)
@@ -84,11 +87,18 @@ impl ToolRegistry {
         let schemas=schemas.chain(crate::platform::windows::DIAGNOSTICS.iter().map(|d|schema(d.name,d.description,json!({}),&[])))
             .chain([
                 schema("kb_status","Состав локальной справки Windows, версия и происхождение",json!({}),&[]),
+                schema("volume_get","Громкость основного устройства Windows",json!({}),&[]),
+                schema("volume_set","Установить и проверить громкость",json!({"percent":{"type":"integer","minimum":0,"maximum":100}}),&["percent"]),
+                schema("app_launch","Открыть стандартное приложение Windows",json!({"app":{"type":"string","enum":["character_map","windows_version","notepad"]}}),&["app"]),
+                schema("app_close","Мягко закрыть экземпляр приложения, запущенный Jarvis",json!({"app":{"type":"string","enum":["character_map","windows_version","notepad"]}}),&["app"]),
                 schema("security_log_status","Число записей в журнале Security через подключённый брокер администратора",json!({}),&[]),
                 schema("kb_search","Search local Windows documentation in English. Cite repo and path.",json!({"query":{"type":"string","maxLength":160},"version":{"type":"string"},"limit":{"type":"integer","minimum":3,"maximum":5}}),&["query"]),
                 schema("kb_lookup_command","Точная справка по имени команды",json!({"name":{"type":"string","maxLength":100}}),&["name"]),
                 schema("command_help","Проверить наличие и справку командлета в Windows PowerShell",json!({"name":{"type":"string","maxLength":80}}),&["name"]),
+                schema("powershell_run","Предложение: проверить имя одного командлета и найти типизированный инструмент. Возвращает справку, ничего не исполняет.",json!({"name":{"type":"string","maxLength":80}}),&["name"]),
                 schema("fs_list","Текстовые файлы в рабочей папке Jarvis",json!({}),&[]),
+                schema("fs_search","Поиск текстового файла по части имени в рабочей папке Jarvis",json!({"query":{"type":"string"}}),&["query"]),
+                schema("fs_delete","Переместить один текстовый файл из рабочей папки Jarvis в корзину Windows",json!({"name":{"type":"string"}}),&["name"]),
                 schema("fs_read","Прочитать текст из рабочей папки Jarvis",json!({"name":{"type":"string"}}),&["name"]),
                 schema("hash","SHA-256 текстового файла из рабочей папки Jarvis",json!({"name":{"type":"string"}}),&["name"]),
                 schema("fs_write","Записать текст в рабочей папке Jarvis после подтверждения",json!({"name":{"type":"string"},"text":{"type":"string"}}),&["name","text"]),
@@ -108,17 +118,21 @@ impl ToolRegistry {
         }
         #[cfg(windows)]
         {
+            if name == "volume_get" {
+                anyhow::ensure!(args == &json!({}), "Ожидается пустой объект");
+                return crate::platform::windows::desktop::volume(None);
+            }
             if name == "security_log_status" {
                 anyhow::ensure!(args == &json!({}), "Ожидается пустой объект");
                 return c.admin.log_status().await;
             }
-            if matches!(name, "fs_list" | "fs_read" | "hash") {
+            if matches!(name, "fs_list" | "fs_search" | "fs_read" | "hash") {
                 return c.actions.files.inspect(name, args);
             }
             if matches!(name, "kb_search" | "kb_lookup_command" | "kb_status") {
                 return c.kb.run(name, args);
             }
-            if name == "command_help"
+            if matches!(name, "command_help" | "powershell_run")
                 || crate::platform::windows::DIAGNOSTICS
                     .iter()
                     .any(|d| d.name == name)

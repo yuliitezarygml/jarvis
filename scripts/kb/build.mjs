@@ -7,6 +7,20 @@ import { parseMarkdown, applicability } from './markdown.mjs';
 import { evaluate } from './evaluate.mjs';
 
 const sql = name => readFileSync(new URL(name, import.meta.url), 'utf8');
+// Bump when parsing or metadata rules change. A previous file hash is reusable
+// only if the same indexer produced its rows.
+const indexerVersion = '2';
+function licenseRecord(file,text) {
+  const id = /Attribution 4\.0 International|creativecommons\.org\/licenses\/by\/4\.0/i.test(text)
+    ? 'CC-BY-4.0' : /MIT License|Permission is hereby granted, free of charge/i.test(text) ? 'MIT' : 'see license text';
+  return {file,id,text};
+}
+function riskCeiling(command,heading,text) {
+  if (/\b(?:remove|clear|stop|start|set|install|disable|enable|restart)-\w+|\/(?:release|renew|flushdns|registerdns)\b/i.test(text)) return 3;
+  if (/^Get-[A-Za-z0-9]+$/i.test(command) && /\/ (SYNOPSIS|SYNTAX)\b/i.test(heading)) return 0;
+  if (/^(?:hostname|whoami|systeminfo|getmac|tasklist|driverquery|ver|vol)$/i.test(command)) return 0;
+  return 3;
+}
 const root = resolve(process.argv[2] || '.kb/sources');
 const output = resolve(process.argv[3] || '.kb/local');
 const catalog = JSON.parse(readFileSync(join(root,'sources.json'),'utf8'));
@@ -22,10 +36,18 @@ try { mkdirSync(lock); } catch { rmSync(stage,{recursive:true}); throw Error('An
 let db;
 try {
   const previous = existsSync(marker) && JSON.parse(readFileSync(marker,'utf8')).version;
-  if (previous) copyFileSync(join(output,previous,dbName),target);
+  if (previous) {
+    const oldFile=join(output,previous,dbName);
+    const old=new DatabaseSync(oldFile,{readOnly:true});
+    let compatible;
+    try { compatible=old.prepare("SELECT value FROM metadata WHERE key='indexer'").get()?.value===indexerVersion; }
+    finally {old.close();}
+    if (compatible) copyFileSync(oldFile,target);
+  }
+  const fresh = !existsSync(target);
   db = new DatabaseSync(target);
   db.exec('PRAGMA foreign_keys=ON; PRAGMA trusted_schema=ON;');
-  if (!previous) db.exec(sql('schema.sql'));
+  if (fresh) db.exec(sql('schema.sql'));
   db.exec('BEGIN; CREATE TEMP TABLE seen(id INTEGER PRIMARY KEY);');
   const insert = db.prepare('INSERT INTO chunks(document,command,heading,text,module,applies,ps,admin,risk,status,date) VALUES(?,?,?,?,?,?,?,?,?,?,?)');
   const doc = db.prepare('SELECT id,hash FROM documents WHERE repo=? AND path=?');
@@ -38,11 +60,11 @@ try {
     const dir = join(root,basename(s.repo));
     const actual = execFileSync('git',['-C',dir,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
     if (actual !== s.sha || execFileSync('git',['-C',dir,'status','--porcelain'],{encoding:'utf8'}).trim()) throw Error('Source cache changed: ' + s.repo);
-    const licenses = s.licenses.map(file=>({file,text:readFileSync(join(dir,file),'utf8')}));
+    const licenses = s.licenses.map(file=>licenseRecord(file,readFileSync(join(dir,file),'utf8')));
     db.prepare('INSERT INTO sources VALUES(?,?,?,?,?) ON CONFLICT(repo) DO UPDATE SET url=excluded.url,branch=excluded.branch,sha=excluded.sha,licenses=excluded.licenses')
       .run(s.repo,s.url,s.branch,s.sha,JSON.stringify(licenses));
-    notices.push(s.repo+' · '+s.url+' · '+s.sha, ...licenses.map(l=>l.file+'\n'+l.text));
-    stats.push({repo:s.repo,url:s.url,branch:s.branch,sha:s.sha,licenses:s.licenses,sections:s.dirs});
+    notices.push(s.repo+' · '+s.url+' · '+s.sha,'Index of excerpts from the original authors and repository contributors. Section headings and provenance retained.', ...licenses.map(l=>l.file+' ('+l.id+')\n'+l.text));
+    stats.push({repo:s.repo,url:s.url,branch:s.branch,sha:s.sha,licenses:licenses.map(({file,id})=>({file,id})),sections:s.dirs});
     for (const section of s.dirs) {
       const base = join(dir,section);
       for (const item of readdirSync(base,{recursive:true,withFileTypes:true})) {
@@ -63,7 +85,7 @@ try {
         for (const part of sections) {
           const admin = /\brequires? (?:administrative privileges|administrator privileges|an elevated (?:command prompt|session))\b/i.test(part.text) ? 1 : null;
           // Conservative upper bound for unreviewed commands. This field never authorizes execution.
-          insert.run(id,cmd,part.heading,part.text,moduleName,applies,ps,admin,3,'doc_derived',meta['ms.date'] || null);
+          insert.run(id,cmd,part.heading,part.text,moduleName,applies,ps,admin,riskCeiling(cmd,part.heading,part.text),'doc_derived',meta['ms.date'] || null);
         }
       }
     }
@@ -75,6 +97,7 @@ try {
   const version = new Date().toISOString().replace(/[:.]/g,'-')+'-'+randomUUID().slice(0,8);
   const manifest = {version,date:new Date().toISOString(),signature:'local_unsigned',sources:stats,missing,...counts};
   db.prepare("INSERT OR REPLACE INTO metadata VALUES('manifest',?)").run(JSON.stringify(manifest));
+  db.prepare("INSERT OR REPLACE INTO metadata VALUES('indexer',?)").run(indexerVersion);
   const metrics = evaluate(db);
   if (metrics.recall_at_5 < 0.70 || db.prepare('PRAGMA quick_check').get().quick_check !== 'ok') throw Error('Snapshot validation failed: '+JSON.stringify(metrics));
   db.close(); db=null;

@@ -48,6 +48,11 @@ struct Request {
     sequence: u64,
     operation: Operation,
 }
+impl Request {
+    fn allowed(&self, token: &str, sequence: u64) -> bool {
+        self.token == token && self.sequence == sequence && self.operation.risk() == 0
+    }
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Reply {
@@ -251,10 +256,7 @@ async fn broker(id: Uuid, parent: u32, idle: u32) -> Result<()> {
     for sequence in 1u64.. {
         let req: Request =
             timeout(Duration::from_secs(u64::from(idle) * 60), read(&mut pipe)).await??;
-        ensure!(
-            req.token == hello.token && req.sequence == sequence && req.operation.risk() == 0,
-            "Запрос отклонён"
-        );
+        ensure!(req.allowed(&hello.token, sequence), "Запрос отклонён");
         let mut count = 0;
         let records = match req.operation {
             Operation::SecurityLogCount => {
@@ -290,6 +292,23 @@ pub fn entry() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn rejects_another_pipe_pid_forged_token_and_replay() {
+        let id = Uuid::new_v4();
+        let server = server(&id).unwrap();
+        let client = ClientOptions::new().open(address(&id)).unwrap();
+        server.connect().await.unwrap();
+        assert_eq!(unsafe { jv_verify_peer(client.as_raw_handle(), 0, 0) }, 0);
+        assert_eq!(unsafe { jv_verify_peer(server.as_raw_handle(), 0, 1) }, 0);
+        let request = Request {
+            token: "session".into(),
+            sequence: 2,
+            operation: Operation::SecurityLogCount,
+        };
+        assert!(request.allowed("session", 2));
+        assert!(!request.allowed("forged", 2));
+        assert!(!request.allowed("session", 3));
+    }
     #[test]
     fn rejects_shell_and_unknown_fields() {
         for v in [

@@ -197,18 +197,58 @@ impl Core {
                 "выключи режим администратора" => Some(false),
                 _ => None,
             };
-            if let Some(on) = on {
+            let local_reply = if let Some(on) = on {
                 let active = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),s=self.admin.set(on)=>s?};
-                let result = if active {
+                let text = if active {
                     "Режим администратора включён."
                 } else {
                     "Режим администратора выключен."
                 };
+                Some((text.to_owned(), text.to_owned()))
+            } else if s.tools && command.trim_start_matches("джарвис ") == "отмени последнее"
+            {
+                let args = json!({});
+                let record = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=crate::actions::dispatch(self,id,session,"undo_last",&args)=>r?};
+                let speech = "Предыдущее состояние файла восстановлено и проверено.";
+                Some((
+                    format!("{speech} {}", record["file"].as_str().unwrap_or("")),
+                    speech.to_owned(),
+                ))
+            } else if s.tools && command.trim_start_matches("джарвис ") == "что ты знаешь о windows"
+            {
+                let state =
+                    crate::actions::dispatch(self, id, session, "kb_status", &json!({})).await?;
+                let speech = if state["available"] == true {
+                    format!(
+                        "В локальной справке {} документов.",
+                        state["local"]["documents"]
+                    )
+                } else {
+                    "База знаний недоступна.".into()
+                };
+                Some((self.kb.manifest(), speech))
+            } else {
+                None
+            };
+            if let Some((result, speech)) = local_reply {
                 self.event(id, Kind::Delta, json!(result));
                 self.for_turn(id, || {
-                    self.db.lock().unwrap().append(session, "assistant", result)
+                    self.db
+                        .lock()
+                        .unwrap()
+                        .append(session, "assistant", &result)
                 })
                 .context("Отменено")??;
+                if s.speak {
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    let _ = tx.send(speech);
+                    drop(tx);
+                    if let Err(e) =
+                        tts::speech(self.clone(), id.into(), cancel.child_token(), rx, start).await
+                    {
+                        self.event(id, Kind::Warning, json!(e.to_string()));
+                    }
+                }
                 return Ok(());
             }
         }

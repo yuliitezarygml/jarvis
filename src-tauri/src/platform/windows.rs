@@ -22,6 +22,7 @@ use windows_sys::Win32::System::{
 };
 
 pub struct WindowsBackend;
+pub mod desktop;
 pub fn windows_family(build: u32, product: u32) -> &'static str {
     match (product, build) {
         (2 | 3, _) => "Windows Server",
@@ -85,7 +86,12 @@ fn job_for(child: &Child) -> Result<OwnedHandle> {
 }
 pub(super) async fn run_template(template: &'static str, name: Option<&str>) -> Result<Value> {
     let executable = system_dir()?.join("WindowsPowerShell/v1.0/powershell.exe");
-    let script=format!("[void][Console]::ReadLine(); $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $env:PSModulePath=Join-Path $PSHOME Modules; try {{ $result=& {{ {template} }}; ConvertTo-Json -InputObject $result -Compress -Depth 4 }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}");
+    let invoke = if template.starts_with("@(") {
+        format!("@(& {{ {template} }})")
+    } else {
+        format!("& {{ {template} }}")
+    };
+    let script=format!("[void][Console]::ReadLine(); $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $env:PSModulePath=Join-Path $PSHOME Modules; try {{ $result={invoke}; ConvertTo-Json -InputObject $result -Compress -Depth 4 }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}");
     let mut cmd = Command::new(executable);
     cmd.args([
         "-NoLogo",
@@ -133,6 +139,10 @@ macro_rules! diagnostics {
     }
 }
 diagnostics!(
+    ("env_info","Пути профиля и системных папок Windows","[pscustomobject]@{profile=[Environment]::GetFolderPath('UserProfile');desktop=[Environment]::GetFolderPath('DesktopDirectory');documents=[Environment]::GetFolderPath('MyDocuments');appdata=[Environment]::GetFolderPath('ApplicationData');localappdata=[Environment]::GetFolderPath('LocalApplicationData');programdata=[Environment]::GetFolderPath('CommonApplicationData')}"),
+    ("display_info","Разрешение экранов по данным видеодрайверов","@(Get-CimInstance Win32_VideoController | Select-Object Name,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate)"),
+    ("reg_read","Сведения о выпуске из фиксированной ветки CurrentVersion","Get-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion' | Select-Object EditionID,DisplayVersion,CurrentBuildNumber,UBR"),
+    ("wifi_info","Локальные беспроводные адаптеры","@(Get-NetAdapter -Physical | Where-Object {$_.NdisPhysicalMedium -in 1,9} | Select-Object -First 16 Name,Status,LinkSpeed)"),
     ("process_list","Процессы этого компьютера","@(Get-Process | Select-Object -First 80 Id,ProcessName,WorkingSet64)"),
     ("service_status","Состояние локальных служб","@(Get-Service | Select-Object -First 80 Name,DisplayName,@{n='Status';e={$_.Status.ToString()}})"),
     ("task_list","Зарегистрированные задачи Windows","@(Get-ScheduledTask | Select-Object -First 80 TaskName,State)"),
@@ -152,7 +162,7 @@ struct CommandName {
     name: String,
 }
 pub async fn diagnostic(name: &str, args: &Value) -> Result<Value> {
-    if name == "command_help" {
+    if matches!(name, "command_help" | "powershell_run") {
         let a: CommandName = serde_json::from_value(args.clone())?;
         ensure!(
             a.name.len() <= 80
@@ -166,7 +176,21 @@ pub async fn diagnostic(name: &str, args: &Value) -> Result<Value> {
                             .all(|c| c.is_ascii_alphanumeric())),
             "Требуется имя командлета Verb-Noun"
         );
-        return run_template("$c=Get-Command -Name $env:JARVIS_TOOL_NAME -CommandType Cmdlet,Function; $h=Get-Help -Name $c.Name; [pscustomobject]@{name=$c.Name;module=$c.ModuleName;synopsis=[string]$h.Synopsis;supports_whatif=$c.Parameters.ContainsKey('WhatIf')}",Some(&a.name)).await;
+        let help=run_template("$c=Get-Command -Name $env:JARVIS_TOOL_NAME -CommandType Cmdlet,Function; $h=Get-Help -Name $c.Name; [pscustomobject]@{name=$c.Name;module=$c.ModuleName;synopsis=[string]$h.Synopsis;supports_whatif=$c.Parameters.ContainsKey('WhatIf')}",Some(&a.name)).await?;
+        if name == "command_help" {
+            return Ok(help);
+        }
+        let typed = match a.name.to_ascii_lowercase().as_str() {
+            "get-process" => Some("process_list"),
+            "get-service" => Some("service_status"),
+            "get-volume" => Some("volume_info"),
+            "get-disk" => Some("disk_info"),
+            "get-netadapter" => Some("net_info"),
+            _ => None,
+        };
+        return Ok(
+            json!({"mode":"proposal","proposed":a.name,"executed":false,"help":help,"typed_tool":typed,"risk_ceiling":if typed.is_some(){0}else{3}}),
+        );
     }
     ensure!(args == &json!({}), "Инструмент принимает пустой объект");
     let d = DIAGNOSTICS
@@ -178,6 +202,22 @@ pub async fn diagnostic(name: &str, args: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[ignore = "Run on Windows 10/11 VM with JARVIS_TEST_VM_FAMILY set to Windows 10 or Windows 11"]
+    async fn windows_vm_diagnostics() {
+        let expected = std::env::var("JARVIS_TEST_VM_FAMILY").expect("Set the expected VM family");
+        assert!(matches!(expected.as_str(), "Windows 10" | "Windows 11"));
+        let info = WindowsBackend.system_info(&Telemetry::new()).await.unwrap();
+        assert_eq!(info["windows"]["family"], expected);
+        let help = diagnostic("command_help", &json!({"name":"Get-Process"}))
+            .await
+            .unwrap();
+        assert_eq!(help["name"], "Get-Process");
+        for name in ["process_list", "service_status", "volume_info", "net_info"] {
+            let result = diagnostic(name, &json!({})).await.unwrap();
+            assert!(result.is_array(), "{name}");
+        }
+    }
     #[test]
     fn build_and_product_type() {
         assert_eq!(windows_family(19045, 1), "Windows 10");

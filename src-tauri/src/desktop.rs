@@ -109,8 +109,12 @@ pub async fn connections(core: Shared<'_>) -> Result<Value, String> {
     )
 }
 #[tauri::command]
-pub async fn run_tool(core: Shared<'_>, name: String) -> Result<Value, String> {
-    ToolRegistry::run(&core, &name, &json!({}))
+pub async fn run_tool(
+    core: Shared<'_>,
+    name: String,
+    args: Option<Value>,
+) -> Result<Value, String> {
+    ToolRegistry::run(&core, &name, &args.unwrap_or_else(|| json!({})))
         .await
         .map_err(error)
 }

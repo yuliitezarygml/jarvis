@@ -149,7 +149,7 @@ impl SpeechNormalizer {
         if let Some((marker, size)) = self.fence {
             if trimmed.len() >= size && trimmed.chars().all(|c| c == marker) {
                 self.fence = None;
-            } else {
+            } else if !self.concise_commands {
                 self.enqueue(&words::literal(&line), ready)
             }
             return;
@@ -250,6 +250,20 @@ impl SpeechNormalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn concise_command_output_keeps_marked_paths_and_scripts_out_of_audio() {
+        let mut reader = SpeechNormalizer {
+            concise_commands: true,
+            ..Default::default()
+        };
+        let mut phrases = reader.push(
+            "Проверено. Файл `C:\\secret.txt` доступен.\n```powershell\nGet-SecretMarker\n```\n",
+        );
+        phrases.extend(reader.finish());
+        let spoken = phrases.join(" ");
+        assert!(spoken.contains("Проверено"));
+        assert!(!spoken.to_lowercase().contains("secret"));
+    }
     fn chunks(text: &str, fragmented: bool) -> Vec<String> {
         let mut r = SpeechNormalizer::default();
         let mut result = Vec::new();

@@ -211,7 +211,9 @@ impl Knowledge {
             }
             _ => bail!("Неизвестный инструмент базы знаний"),
         };
-        *last_answer = !result.is_empty();
+        if !result.is_empty() {
+            *last_answer = true;
+        }
         Ok(json!({"source":"local","fragments":result}))
     }
 }

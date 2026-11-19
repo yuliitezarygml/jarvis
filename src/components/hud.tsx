@@ -366,6 +366,7 @@ function Memory({ c }: { c: Console }) {
   );
 }
 function Diagnostics({ c }: { c: Console }) {
+  const [query,setQuery]=useState("");
   const [name, set] = useState("get_time"),
     [result, answer] = useState(""),
     [busy, working] = useState(false);
@@ -377,7 +378,7 @@ function Diagnostics({ c }: { c: Console }) {
     disks: "Диски",
     server_status: "Соединение с сервером",
     tts_status: "Готовность TTS",
-    ...(c.windows ? {kb_status:"Локальная база знаний Windows",net_info:"Сетевые адаптеры",volume_info:"Тома Windows"} : {}),
+    ...(c.windows ? {kb_status:"Локальная база знаний Windows",kb_search:"Поиск по справке Windows",kb_lookup_command:"Справка по имени команды",net_info:"Сетевые адаптеры",volume_info:"Тома Windows"} : {}),
   };
   return (
     <section className="panel formPanel">
@@ -390,13 +391,14 @@ function Diagnostics({ c }: { c: Console }) {
             </option>
           ))}
         </select>
+        {(name==="kb_search" || name==="kb_lookup_command") && <input aria-label="Запрос к локальной базе" placeholder={name==="kb_lookup_command" ? "Get-NetAdapter" : "ipconfig /all"} maxLength={160} value={query} onChange={e=>setQuery(e.target.value)} />}
         <button
-          disabled={busy}
+          disabled={busy || ((name==="kb_search" || name==="kb_lookup_command") && !query.trim())}
           onClick={async () => {
             working(true);
             try {
               answer(
-                JSON.stringify(await c.act("run_tool", { name }), null, 2),
+                JSON.stringify(await c.act("run_tool", { name, args:name==="kb_search" ? {query:query.trim()} : name==="kb_lookup_command" ? {name:query.trim()} : {} }), null, 2),
               );
             } catch (e) {
               answer(String(e));
@@ -465,7 +467,7 @@ export default function Hud() {
     <div className={page === "center" ? "shell commandCenter" : "shell"}>
       {c.proposal && <div className="actionShade"><section role="alertdialog" aria-modal="true" aria-label="Подтверждение действия" className="panel actionPrompt">
         <h2>Подтвердить действие?</h2>
-        <p>{{fs_write:"Записать файл",fs_move:"Переименовать файл",fs_copy:"Скопировать файл",undo_last:"Отменить последнее изменение"}[c.proposal.tool] ?? c.proposal.tool}</p>
+        <p>{{fs_write:"Записать файл",fs_move:"Переименовать файл",fs_copy:"Скопировать файл",fs_delete:"Переместить файл в корзину Windows",undo_last:"Отменить последнее изменение"}[c.proposal.tool] ?? c.proposal.tool}</p>
         <p>{c.proposal.detail.folder}</p>{c.proposal.detail.source && <>{c.proposal.detail.source} → </>}<strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
         {c.proposal.detail.text_after!==null && <pre>{c.proposal.detail.text_after}</pre>}
         <div><button autoFocus onClick={()=>void c.decide(false)}>Отмена</button> <button onClick={()=>void c.decide(true)}>Подтвердить</button></div>

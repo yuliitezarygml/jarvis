@@ -14,6 +14,13 @@ fn main() {
             .files(["native/audio_win.c", "native/admin_win.c"])
             .compile("jarvis_audio");
         println!("cargo:rustc-link-lib=winmm");
+        cc::Build::new()
+            .cpp(true)
+            .file("native/desktop_win.cpp")
+            .compile("jarvis_desktop");
+        println!("cargo:rustc-link-lib=ole32");
+        println!("cargo:rustc-link-lib=uuid");
+        println!("cargo:rerun-if-changed=native/desktop_win.cpp");
         println!("cargo:rustc-link-lib=wintrust");
         println!("cargo:rustc-link-lib=advapi32");
         println!("cargo:rustc-link-lib=shell32");

@@ -116,13 +116,31 @@ impl Files {
         Ok(Some(text))
     }
     pub fn inspect(&self, tool: &str, args: &Value) -> Result<Value> {
-        if tool == "fs_list" {
-            ensure!(args == &json!({}), "Ожидается пустой объект");
+        if matches!(tool, "fs_list" | "fs_search") {
+            let filter = if tool == "fs_search" {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Search {
+                    query: String,
+                }
+                let a: Search = serde_json::from_value(args.clone())?;
+                ensure!(
+                    !a.query.trim().is_empty() && a.query.len() <= 160,
+                    "Нужна часть имени файла"
+                );
+                a.query.to_lowercase()
+            } else {
+                ensure!(args == &json!({}), "Ожидается пустой объект");
+                String::new()
+            };
             let mut names = Vec::new();
             for item in fs::read_dir(&self.root)? {
                 let item = item?;
                 let name = item.file_name().to_string_lossy().into_owned();
-                if valid(&name).is_ok() && item.file_type()?.is_file() {
+                if valid(&name).is_ok()
+                    && item.file_type()?.is_file()
+                    && name.to_lowercase().contains(&filter)
+                {
                     names.push(name);
                 }
                 if names.len() == 100 {
@@ -146,6 +164,17 @@ impl Files {
     }
     pub fn plan(&self, tool: &str, args: &Value) -> Result<Change> {
         match tool {
+            "fs_delete" => {
+                let a: Named = serde_json::from_value(args.clone())?;
+                let before = self.read(&a.name)?.context("Файл отсутствует")?;
+                Ok(Change {
+                    name: a.name,
+                    before: Some(before),
+                    after: None,
+                    target: None,
+                    copy_from: None,
+                })
+            }
             "fs_write" => {
                 let a: WriteText = serde_json::from_value(args.clone())?;
                 ensure!(a.text.len() <= LIMIT, "Слишком большой файл");
@@ -256,8 +285,22 @@ impl Files {
                 fs::remove_file(&temp)?;
             }
             replace?;
-        } else {
+        } else if undo {
+            // Undo creation of the exact verified file.
             fs::remove_file(target)?;
+        } else {
+            use std::os::windows::ffi::OsStrExt;
+            let path: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+            // IFileOperation requires its own STA apartment.
+            let hr = std::thread::spawn(move || {
+                unsafe extern "C" {
+                    fn jv_recycle(path: *const u16) -> i32;
+                }
+                unsafe { jv_recycle(path.as_ptr()) }
+            })
+            .join()
+            .map_err(|_| anyhow::anyhow!("Сбой операции корзины"))?;
+            ensure!(hr >= 0, "Корзина Windows недоступна: HRESULT {hr:#x}");
         }
         ensure!(
             &self.read(&change.name)? == new,
@@ -269,14 +312,14 @@ impl Files {
         json!({"folder":self.root,"file":c.name,"source":c.copy_from,"destination":c.target,"undo":undo,"text_after":if undo {&c.before}else{&c.after}})
     }
     pub fn mutation_lock(&self) -> Result<File> {
-        Ok(OpenOptions::new()
+        OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .share_mode(0)
             .open(self.root.join(".mutation.lock"))
-            .context("Другая операция с файлами ещё выполняется")?)
+            .context("Другая операция с файлами ещё выполняется")
     }
     pub fn matches_snapshot(&self, c: &Change, after: bool) -> Result<bool> {
         let expected = if after { &c.after } else { &c.before };

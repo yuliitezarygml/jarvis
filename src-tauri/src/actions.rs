@@ -24,6 +24,7 @@ struct Ticket {
 }
 type WindowAction = Box<dyn Fn(bool) -> Result<bool> + Send + Sync>;
 pub struct Actions {
+    pub apps: crate::platform::windows::desktop::Apps,
     pub files: Files,
     pub window: OnceLock<WindowAction>,
     pending: Mutex<Option<Ticket>>,
@@ -69,6 +70,7 @@ impl Actions {
     }
     pub fn new(dir: &Path) -> Result<Self> {
         Ok(Self {
+            apps: Default::default(),
             files: Files::open(&dir.join("files"))?,
             window: OnceLock::new(),
             pending: Mutex::new(None),
@@ -111,7 +113,7 @@ async fn change(
     let (plan, original) = if tool == "undo_last" {
         ensure!(args == &json!({}), "Ожидается пустой объект");
         let row:Option<(i64,String)>=core.db.lock().unwrap().0.query_row(
-            "SELECT id,snapshot FROM action_log WHERE session=? AND state='verified' AND undone=0 AND tool IN ('fs_write','fs_copy','fs_move') ORDER BY id DESC LIMIT 1",
+            "SELECT id,snapshot FROM action_log WHERE session=? AND state='verified' AND undone=0 AND tool IN ('fs_write','fs_copy','fs_move','fs_delete') ORDER BY id DESC LIMIT 1",
             [session],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let (original, snapshot) = row.context("Нет действия для отката")?;
         (serde_json::from_str::<Change>(&snapshot)?, Some(original))
@@ -197,6 +199,14 @@ pub async fn dispatch(
     let _log = Log { core, id };
     let result = match level {
         0 => ToolRegistry::run(core, tool, args).await,
+        1 if tool == "volume_set" => core
+            .for_turn(turn, || {
+                crate::platform::windows::desktop::volume(Some(args))
+            })
+            .context("Отменено")?,
+        1 if matches!(tool, "app_launch" | "app_close") => {
+            crate::platform::windows::desktop::app_action(core, turn, tool, args).await
+        }
         1 => core
             .for_turn(turn, || -> Result<Value> {
                 ensure!(args == &json!({}), "Ожидается пустой объект");
