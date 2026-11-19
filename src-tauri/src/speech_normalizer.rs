@@ -9,6 +9,7 @@ const MIN_CHARS: usize = 38;
 
 #[derive(Default)]
 pub struct SpeechNormalizer {
+    concise_commands: bool,
     line: String,
     // Multiline markup, including formulas and tables, can span SSE messages.
     markup: String,
@@ -91,6 +92,12 @@ fn can_cut_inline(s: &str) -> bool {
 }
 
 impl SpeechNormalizer {
+    pub fn for_desktop() -> Self {
+        Self {
+            concise_commands: cfg!(windows),
+            ..Self::default()
+        }
+    }
     pub fn push(&mut self, delta: &str) -> Vec<String> {
         let mut ready = Vec::new();
         for c in delta.chars() {
@@ -120,7 +127,7 @@ impl SpeechNormalizer {
                         let raw = std::mem::take(&mut self.line);
                         self.line_chars = 0;
                         self.structured_line = false;
-                        self.enqueue(&markdown::render(&raw), &mut ready);
+                        self.enqueue(&markdown::render(&raw, self.concise_commands), &mut ready);
                     }
                 }
                 self.structured_line |= matches!(
@@ -157,7 +164,7 @@ impl SpeechNormalizer {
         if let Some(header) = &self.table {
             if trimmed.contains('|') && !trimmed.is_empty() {
                 self.table_has_rows = true;
-                let spoken = markdown::render(&format!("{header}\n{line}"));
+                let spoken = markdown::render(&format!("{header}\n{line}"), self.concise_commands);
                 self.enqueue(&spoken, ready);
                 return;
             }
@@ -190,13 +197,13 @@ impl SpeechNormalizer {
     }
 
     fn emit_markup(&mut self, ready: &mut Vec<String>) {
-        let spoken = markdown::render(&std::mem::take(&mut self.markup));
+        let spoken = markdown::render(&std::mem::take(&mut self.markup), self.concise_commands);
         self.enqueue(&spoken, ready);
     }
     fn close_table(&mut self, ready: &mut Vec<String>) {
         if let Some(header) = self.table.take() {
             if !self.table_has_rows {
-                self.enqueue(&markdown::render(&header), ready)
+                self.enqueue(&markdown::render(&header, self.concise_commands), ready)
             }
         }
     }

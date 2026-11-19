@@ -22,32 +22,50 @@ struct Ticket {
     until: Instant,
     sender: oneshot::Sender<bool>,
 }
-type WindowAction=Box<dyn Fn(bool)->Result<bool>+Send+Sync>;
+type WindowAction = Box<dyn Fn(bool) -> Result<bool> + Send + Sync>;
 pub struct Actions {
     pub files: Files,
     pub window: OnceLock<WindowAction>,
     pending: Mutex<Option<Ticket>>,
 }
 impl Actions {
-    pub fn recover(&self,store:&mut crate::storage::Store)->Result<()>{
-        let _guard=self.files.mutation_lock()?;
+    pub fn recover(&self, store: &mut crate::storage::Store) -> Result<()> {
+        let _guard = self.files.mutation_lock()?;
         store.0.execute_batch("CREATE TABLE IF NOT EXISTS action_undo(change_id INTEGER PRIMARY KEY,original INTEGER NOT NULL);")?;
-        let tx=store.0.transaction()?;
+        let tx = store.0.transaction()?;
         {
             let mut stmt=tx.prepare("SELECT a.id,a.snapshot,u.original FROM action_log a LEFT JOIN action_undo u ON u.change_id=a.id WHERE a.state='prepared' ORDER BY a.id")?;
-            let mut rows=stmt.query([])?;
-            while let Some(row)=rows.next()?{
-                let id:i64=row.get(0)?;
-                let plan:Change=serde_json::from_str(&row.get::<_,String>(1)?)?;
-                let undo:Option<i64>=row.get(2)?;
-                let state=if self.files.matches_snapshot(&plan,undo.is_none()).unwrap_or(false) {
-                    if let Some(original)=undo{tx.execute("UPDATE action_log SET undone=1 WHERE id=?",[original])?;}
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let id: i64 = row.get(0)?;
+                let plan: Change = serde_json::from_str(&row.get::<_, String>(1)?)?;
+                let undo: Option<i64> = row.get(2)?;
+                let state = if self
+                    .files
+                    .matches_snapshot(&plan, undo.is_none())
+                    .unwrap_or(false)
+                {
+                    if let Some(original) = undo {
+                        tx.execute("UPDATE action_log SET undone=1 WHERE id=?", [original])?;
+                    }
                     "verified"
-                }else if self.files.matches_snapshot(&plan,undo.is_some()).unwrap_or(false){"interrupted"}else{"conflict"};
-                tx.execute("UPDATE action_log SET state=?,result=? WHERE id=?",params![state,"Проверено после перезапуска",id])?;
+                } else if self
+                    .files
+                    .matches_snapshot(&plan, undo.is_some())
+                    .unwrap_or(false)
+                {
+                    "interrupted"
+                } else {
+                    "conflict"
+                };
+                tx.execute(
+                    "UPDATE action_log SET state=?,result=? WHERE id=?",
+                    params![state, "Проверено после перезапуска", id],
+                )?;
             }
         }
-        tx.commit()?; Ok(())
+        tx.commit()?;
+        Ok(())
     }
     pub fn new(dir: &Path) -> Result<Self> {
         Ok(Self {
@@ -129,12 +147,14 @@ async fn change(
     core.event(turn, Kind::Confirmation, Value::Null);
     ensure!(matches!(decision, Ok(Ok(true))), "Действие не подтверждено");
     core.for_turn(turn, || -> Result<()> {
-        let _guard=core.actions.files.mutation_lock()?;
+        let _guard = core.actions.files.mutation_lock()?;
         let mut db = core.db.lock().unwrap();
         ensure!(!db.settings()?.read_only, "Включён режим только чтения");
         // Commit the before-image before touching the filesystem.
-        let journal=db.0.transaction()?;
-        if let Some(original)=original{journal.execute("INSERT INTO action_undo VALUES(?,?)",params![id,original])?;}
+        let journal = db.0.transaction()?;
+        if let Some(original) = original {
+            journal.execute("INSERT INTO action_undo VALUES(?,?)", params![id, original])?;
+        }
         journal.execute(
             "UPDATE action_log SET confirmation=?,snapshot=?,state='prepared' WHERE id=?",
             params![digest, snapshot, id],
@@ -202,4 +222,57 @@ pub async fn dispatch(
         params![state, output, code, id],
     )?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn screen_decision_is_bound_to_turn_digest_and_deadline() {
+        let dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let actions = Actions::new(&dir).unwrap();
+        let (sender, mut rx) = oneshot::channel();
+        *actions.pending.lock().unwrap() = Some(Ticket {
+            turn: "turn".into(),
+            digest: "digest".into(),
+            until: Instant::now() + Duration::from_secs(5),
+            sender,
+        });
+        assert!(actions.decide("wrong", "digest", true).is_err());
+        assert!(actions.decide("turn", "forged", true).is_err());
+        actions.decide("turn", "digest", false).unwrap();
+        assert!(!rx.try_recv().unwrap());
+        assert!(actions.decide("turn", "digest", true).is_err());
+        let (sender, _) = oneshot::channel();
+        *actions.pending.lock().unwrap() = Some(Ticket {
+            turn: "turn".into(),
+            digest: "digest".into(),
+            until: Instant::now(),
+            sender,
+        });
+        assert!(actions.decide("turn", "digest", true).is_err());
+        drop(actions);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn reconciles_a_crash_after_atomic_file_creation() {
+        let dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let actions = Actions::new(&dir).unwrap();
+        let mut db = crate::storage::Store::open(&dir.join("test.sqlite3")).unwrap();
+        actions.recover(&mut db).unwrap();
+        let plan = actions
+            .files
+            .plan("fs_write", &json!({"name":"test.md","text":"данные"}))
+            .unwrap();
+        db.0.execute("INSERT INTO action_log(session,request,tool,args,risk,state,snapshot) VALUES('s','text','fs_write','{}',2,'prepared',?)",[serde_json::to_string(&plan).unwrap()]).unwrap();
+        actions.files.apply(&plan, false).unwrap();
+        actions.recover(&mut db).unwrap();
+        let state: String =
+            db.0.query_row("SELECT state FROM action_log", [], |r| r.get(0))
+                .unwrap();
+        assert_eq!(state, "verified");
+        drop(actions);
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

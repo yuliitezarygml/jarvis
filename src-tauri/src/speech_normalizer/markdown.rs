@@ -87,7 +87,7 @@ fn tex_delimiters(src: &str) -> String {
     result
 }
 
-pub(super) fn render(src: &str) -> String {
+pub(super) fn render(src: &str, concise_commands: bool) -> String {
     let src = tex_delimiters(src);
     let mut out = String::new();
     let mut text = String::new();
@@ -165,6 +165,8 @@ pub(super) fn render(src: &str) -> String {
                 dest.push_str(&words::prose(&text));
                 text.clear();
                 match other {
+                    Event::Code(_) if concise_commands => dest.push_str(" в интерфейсе "),
+                    Event::Text(_) if concise_commands && code => (),
                     Event::Code(s) | Event::Text(s) => dest.push_str(&words::literal(&s)),
                     Event::InlineMath(s) | Event::DisplayMath(s) => {
                         dest.push_str(&words::math_tex(&s))

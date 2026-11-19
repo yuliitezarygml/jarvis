@@ -57,7 +57,7 @@ pub async fn speech(
 ) -> Result<()> {
     let mut seq = 0;
     let mut first = true;
-    let mut reader = crate::speech_normalizer::SpeechNormalizer::default();
+    let mut reader = crate::speech_normalizer::SpeechNormalizer::for_desktop();
     loop {
         let delta = tokio::select! {biased; _=cancel.cancelled()=>return Ok(()), p=rx.recv()=>p};
         let phrases = match &delta {

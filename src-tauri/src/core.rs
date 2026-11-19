@@ -47,7 +47,7 @@ impl Core {
             dotenvy::from_path(env)?;
         }
         let http = provider::client()?;
-        let core=Arc::new(Self {
+        let core = Arc::new(Self {
             db: Mutex::new(Store::open(&dir.join("jarvis.sqlite3"))?),
             http: tts::client()?,
             llm: Arc::new(Compatible(http)),

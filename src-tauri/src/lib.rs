@@ -43,9 +43,13 @@ pub fn run() {
             )?;
             #[cfg(windows)]
             if let Some(w) = app.get_webview_window("main") {
-                let _ = core.actions.window.set(Box::new(move|minimize|{
-                    if minimize{w.minimize()?}else{w.unminimize()?}
-                    Ok(w.is_minimized()?==minimize)
+                let _ = core.actions.window.set(Box::new(move |minimize| {
+                    if minimize {
+                        w.minimize()?
+                    } else {
+                        w.unminimize()?
+                    }
+                    Ok(w.is_minimized()? == minimize)
                 }));
             }
             app.manage(core);
