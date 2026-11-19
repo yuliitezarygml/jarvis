@@ -433,7 +433,8 @@ export default function Hud() {
         e.code === "Space" &&
         !e.repeat &&
         !editable(e.target) &&
-        page === "center" && voice.current.mic === "off" && voice.current.session
+        page === "center" && c.paused.current &&
+        voice.current.mic === "off" && voice.current.session
       ) {
         heldSession = voice.current.session;
         e.preventDefault();
@@ -441,7 +442,7 @@ export default function Hud() {
       }
     };
     const release = (mode: "submit" | "off") => {
-      if (heldSession === voice.current.session && heldSession && voice.current.mic !== "auto")
+      if (heldSession && heldSession === voice.current.session && c.paused.current)
         void voice.current.capture(mode);
       heldSession = "";
     };
@@ -461,7 +462,7 @@ export default function Hud() {
       window.removeEventListener("blur", blur);
       blur();
     };
-  }, [page]);
+  }, [page, c.paused]);
   return (
     <div className={page === "center" ? "shell commandCenter" : "shell"}>
       {c.proposal && <div className="actionShade"><section role="alertdialog" aria-modal="true" aria-label="Подтверждение действия" className="panel actionPrompt">

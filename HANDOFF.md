@@ -49,8 +49,10 @@
 
 | Файл | Байт | SHA-256 |
 |---|---:|---|
-| [jarvis.exe](src-tauri/target/release/jarvis.exe) | 46 711 808 | `a604eb15ba7a82223bcaa4239772edb58d3e17badc3a02c91bf03b84e6e81ea5` |
-| [Jarvis_0.1.0_x64-setup.exe](src-tauri/target/release/bundle/nsis/Jarvis_0.1.0_x64-setup.exe) | 11 818 234 | `31966c57de92fca5fca7f011331134210e021b06194f6d1c2bd060dd185dbf53` |
+| [jarvis.exe](src-tauri/target/release/jarvis.exe) | 46 714 368 | `3ff8f9e88dd70709a7530a27ac87d20da3cfc3cc68c678f3abaae0102c0aabd9` |
+| [Jarvis_0.1.0_x64-setup.exe](src-tauri/target/release/bundle/nsis/Jarvis_0.1.0_x64-setup.exe) | 11 822 879 | `fde31ae43c4379c71912329cee92222f0e99511393cf3e50fbdb29c4f42ff52f` |
+
+Микрофон включается при открытии пульта. По умолчанию команда принимается без обращения «Джарвис». Тест интерфейса с имитацией событий Tauri проверил запуск, отправку текста, переход между диалогами, остановку и возобновление микрофона. Тест с записями русской речи проверил отправку первой фразы по кнопке, второй после паузы и отмену третьей. Физический микрофон Windows в этом прогоне не использовался.
 
 Пройдены `npm run check`, экспорт Next.js с Webpack, `cargo fmt --check` и release Clippy для всех целей с `-D warnings`. В release-наборе Rust прошли 26 тестов, девять приёмочных тестов пропущены. Ещё три теста Node проверяют структуру Markdown, выбор версий и поиск через тот же SQL, что используется клиентом.
 

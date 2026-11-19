@@ -319,6 +319,18 @@ mod acceptance {
     use super::*;
     use std::sync::Mutex;
 
+    fn close_fixture(core: Arc<Core>, dir: std::path::PathBuf) {
+        core.cancel();
+        // Dispatched commands hold the SQLite connection until their tasks exit.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Arc::strong_count(&core) > 1 {
+            assert!(Instant::now() < deadline, "command still owns the fixture");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(core);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn wake_word_requires_a_complete_address_and_command() {
         assert_eq!(
@@ -437,8 +449,7 @@ mod acceptance {
                 }
             }
         }
-        drop(core);
-        std::fs::remove_dir_all(dir).unwrap();
+        close_fixture(core, dir);
     }
     #[test]
     #[ignore = "Requires JARVIS_STT_DIR with both installed Russian models"]
@@ -547,7 +558,7 @@ mod acceptance {
         assert_eq!(trace.last().unwrap().data["state"], "cleared");
         let rows = core.db.lock().unwrap().history(&session, 20).unwrap();
         assert_eq!(rows.iter().filter(|r| r["role"] == "user").count(), 2);
-        drop(core);
-        std::fs::remove_dir_all(dir).unwrap();
+        drop(trace);
+        close_fixture(core, dir);
     }
 }
