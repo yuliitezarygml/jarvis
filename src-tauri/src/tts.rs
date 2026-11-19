@@ -48,67 +48,31 @@ pub async fn ready(http: &Client) -> Result<Value> {
     provider::status(r.status())?;
     Ok(r.json().await?)
 }
-pub struct Sentences(String);
-impl Sentences {
-    pub fn new() -> Self {
-        Self(String::new())
-    }
-    pub fn push(&mut self, s: &str, flush: bool) -> Vec<String> {
-        self.0.push_str(s);
-        let mut out = vec![];
-        loop {
-            let mut cut = None;
-            let mut iter = self.0.char_indices().peekable();
-            let mut last_space = None;
-            let mut prev = ' ';
-            for (count, (i, c)) in std::iter::from_fn(|| iter.next()).enumerate() {
-                let end = i + c.len_utf8();
-                let next = self.0[end..].chars().next();
-                if c.is_whitespace() {
-                    last_space = Some(end);
-                }
-                let decimal =
-                    c == '.' && prev.is_ascii_digit() && next.is_some_and(|v| v.is_ascii_digit());
-                if !decimal
-                    && ((matches!(c, '!' | '?' | '…' | '\n'))
-                        || (c == '.' && (next.is_some_and(char::is_whitespace) || flush)))
-                {
-                    cut = Some(end);
-                    break;
-                }
-                if count >= 240 {
-                    cut = Some(last_space.filter(|p| *p > 0).unwrap_or(end));
-                    break;
-                }
-                prev = c;
-            }
-            let n = match cut {
-                Some(n) => n,
-                None if flush && !self.0.is_empty() => self.0.len(),
-                _ => break,
-            };
-            let part = self.0.drain(..n).collect::<String>();
-            if part.chars().any(char::is_alphanumeric) {
-                out.push(part.trim().to_owned());
-            }
-        }
-        out
-    }
-}
 pub async fn speech(
     core: Arc<Core>,
     turn: String,
     cancel: CancellationToken,
-    mut rx: mpsc::Receiver<String>,
+    mut rx: mpsc::UnboundedReceiver<String>,
     start: Instant,
 ) -> Result<()> {
     let mut seq = 0;
     let mut first = true;
-    while let Some(text) = tokio::select! {_=cancel.cancelled()=>None,p=rx.recv()=>p} {
-        seq += 1;
-        let id = format!("{turn}-{seq}");
-        let play = phrase(&core, &turn, &id, &text, &mut first, start);
-        tokio::select! {biased;_=cancel.cancelled()=>{if let Ok(req)=request(&core.http,reqwest::Method::DELETE,&format!("/tts/{id}")){let _=req.timeout(Duration::from_secs(2)).send().await;}bail!("Отменено")},r=play=>r?}
+    let mut reader = crate::speech_normalizer::SpeechNormalizer::default();
+    loop {
+        let delta = tokio::select! {biased; _=cancel.cancelled()=>return Ok(()), p=rx.recv()=>p};
+        let phrases = match &delta {
+            Some(raw) => reader.push(raw),
+            None => reader.finish(),
+        };
+        for text in phrases {
+            seq += 1;
+            let id = format!("{turn}-{seq}");
+            let play = phrase(&core, &turn, &id, &text, &mut first, start);
+            tokio::select! {biased;_=cancel.cancelled()=>{if let Ok(req)=request(&core.http,reqwest::Method::DELETE,&format!("/tts/{id}")){let _=req.timeout(Duration::from_secs(2)).send().await;}bail!("Отменено")},r=play=>r?}
+        }
+        if delta.is_none() {
+            break;
+        }
     }
     let drain = Instant::now();
     while !cancel.is_cancelled() && audio::pending() > 0 {
@@ -133,7 +97,7 @@ async fn phrase(
         .json(&json!({"text":text,"format":"pcm"}))
         .send()
         .await
-        .context("TTS недоступен. Проверьте SSH-туннель")?;
+        .context("Нет соединения с API голосового сервера")?;
     provider::status(r.status())?;
     ensure!(
         r.headers()
@@ -196,15 +160,4 @@ async fn phrase(
     }
     ensure!(heard && low.is_none(), "Получен неполный поток PCM");
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn text_before_final_token() {
-        let mut b = Sentences::new();
-        assert!(b.push("Температура 2.", false).is_empty());
-        assert_eq!(b.push("5. След", false), ["Температура 2.5."]);
-        assert_eq!(b.push("ом!", false), ["Следом!"]);
-    }
 }

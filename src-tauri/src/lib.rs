@@ -5,6 +5,7 @@ mod core;
 mod desktop;
 mod events;
 mod provider;
+mod speech_normalizer;
 mod storage;
 mod tools;
 mod tts;

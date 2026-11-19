@@ -170,7 +170,8 @@ impl Core {
         cancel: CancellationToken,
     ) -> Result<()> {
         let start = Instant::now();
-        let (tx, rx) = mpsc::channel(48);
+        // Raw deltas share the 40 kB per-turn limit below. Slow audio must never abort the HUD stream.
+        let (tx, rx) = mpsc::unbounded_channel();
         let speaker = if s.speak {
             let core = self.clone();
             let turn = id.to_owned();
@@ -186,7 +187,6 @@ impl Core {
             None
         };
         let mut text = String::new();
-        let mut splitter = tts::Sentences::new();
         let mut first = true;
         let mut schemas = if s.tools {
             ToolRegistry::schemas()
@@ -208,12 +208,7 @@ impl Core {
                 current.push_str(value);
                 self.event(id, Kind::Delta, json!(value));
                 if s.speak && !tx.is_closed() {
-                    for sentence in splitter.push(value, false) {
-                        match tx.try_send(sentence) {
-                            Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => (),
-                            Err(_) => bail!("Очередь озвучивания заполнена"),
-                        }
-                    }
+                    let _ = tx.send(value.to_owned());
                 }
                 Ok(())
             };
@@ -255,11 +250,6 @@ impl Core {
             self.db.lock().unwrap().append(session, "assistant", &text)
         })
         .context("Отменено")??;
-        for sentence in splitter.push("", true) {
-            if tx.send(sentence).await.is_err() {
-                break;
-            }
-        }
         drop(tx);
         if let Some(worker) = speaker {
             worker.await?;
@@ -283,7 +273,7 @@ mod acceptance {
     /// Tests the same queue, provider, STT, audio renderer and event stream as the desktop commands.
     /// Uses a fresh SQLite database, existing operator credentials and the original audio fixture.
     #[test]
-    #[ignore = "Live Groq, forwarded TTS, Mac output device and STT assets required"]
+    #[ignore = "Live Groq, HTTPS TTS, Mac output device and STT assets required"]
     fn recorded_russian_turn_reaches_speakers() {
         tauri::async_runtime::block_on(async {
             let config = std::env::var_os("JARVIS_BACKEND_ENV").expect("JARVIS_BACKEND_ENV");
