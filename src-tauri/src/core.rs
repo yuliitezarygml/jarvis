@@ -270,6 +270,66 @@ fn normalize_speech(text: &str) -> String {
 #[cfg(test)]
 mod acceptance {
     use super::*;
+    #[test]
+    #[ignore = "Live Groq, original Rust TTS and real Mac output required"]
+    fn formatted_groq_answer_reaches_output() {
+        tauri::async_runtime::block_on(async {
+            dotenvy::from_path(std::env::var_os("JARVIS_BACKEND_ENV").unwrap()).unwrap();
+            let folder = std::env::temp_dir().join(format!("jarvis-formatted-{}", Uuid::new_v4()));
+            let (events, mut rx) = mpsc::unbounded_channel();
+            let c = Core::open(
+                &folder,
+                Arc::new(move |e| {
+                    let _ = events.send(serde_json::to_value(e).unwrap());
+                }),
+            )
+            .unwrap();
+            let s = c.db.lock().unwrap().new_session().unwrap();
+            let prompt="Ответь на русском. Для проверки формата воспроизведи следующий Markdown дословно, без блока кода и без вступления:\n## Проверка связи\nСначала проверим защищённое соединение с сервером.\n\n- Wi-Fi поддерживает WPA3.\n- VPN-протоколы защищают данные.\n\n| Формула | Результат |\n|---|---|\n| 3³ | 27 |\n| √16 | 4 |\n\nИтак, 2^10 = 1024. Проверка завершена.";
+            c.start(s.clone(), prompt.into()).unwrap();
+            let mut display = String::new();
+            let mut speaking = false;
+            let mut empty_since = None;
+            let mut gaps = Vec::new();
+            let mut blocks = 0;
+            let mut max_queue = 0;
+            let mut poll = tokio::time::interval(std::time::Duration::from_millis(5));
+            tokio::time::timeout(std::time::Duration::from_secs(120),async {
+                loop {
+                    tokio::select! {
+                        Some(e)=rx.recv()=> match e["kind"].as_str().unwrap() {
+                            "first_text" => println!("Groq first delta {} ms", e["data"]),
+                            "delta" =>display.push_str(e["data"].as_str().unwrap()),
+                            "speaking"=>{speaking=true;println!("First PCM {} ms",e["data"]["ms"])},
+                            "level"=> blocks+=1,
+                            "error"|"warning"=>panic!("{}",e["data"]),
+                            "done"=>break,
+                            _=>()
+                        },
+                        _=poll.tick(),if speaking=> {
+                            let q=audio::pending();
+                            max_queue=max_queue.max(q);
+                            if q==0 { empty_since.get_or_insert_with(Instant::now); }
+                            else if let Some(at)=empty_since.take(){ gaps.push(at.elapsed().as_millis()); }
+                        }
+                    }
+                }
+            }).await.unwrap();
+            println!("Queued {blocks} PCM buffers, peak {max_queue}, empty intervals (ms): {gaps:?}; HUD: {display}");
+            assert!(speaking && blocks > 5 && max_queue <= 5 && audio::pending() == 0);
+            assert!(
+                display.contains("Wi-Fi")
+                    && display.contains("WPA3")
+                    && display.contains('|')
+                    && display.contains("2^10")
+            );
+            let history = c.db.lock().unwrap().history(&s, 10).unwrap();
+            assert_eq!(history[1]["content"], display);
+            drop(c);
+            let _ = std::fs::remove_dir_all(folder);
+        });
+    }
+
     /// Tests the same queue, provider, STT, audio renderer and event stream as the desktop commands.
     /// Uses a fresh SQLite database, existing operator credentials and the original audio fixture.
     #[test]

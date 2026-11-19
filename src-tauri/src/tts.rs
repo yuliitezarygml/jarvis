@@ -161,3 +161,67 @@ async fn phrase(
     ensure!(heard && low.is_none(), "Получен неполный поток PCM");
     Ok(())
 }
+
+#[cfg(test)]
+mod acceptance {
+    use super::*;
+    use crate::speech_normalizer::SpeechNormalizer;
+    #[test]
+    #[ignore = "Requires the real Xeon TTS API and installed Russian Zipformer"]
+    fn compare_original_and_normalized_audio() {
+        tauri::async_runtime::block_on(async {
+            dotenvy::from_path(std::env::var_os("JARVIS_BACKEND_ENV").unwrap()).unwrap();
+            let stt = audio::Recognizer::new(std::env::var_os("JARVIS_STT_DIR").unwrap().into());
+            let http = client().unwrap();
+            let folder =
+                std::env::temp_dir().join(format!("jarvis-speech-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&folder).unwrap();
+            println!("Audio comparison: {}", folder.display());
+            for (label, raw, expected) in [
+                ("math", "3³ = 27. √16 = 4.", &["куб", "корень"][..]),
+                ("network", "Wi-Fi, VPN-протоколы и WPA3.", &["протокол"][..]),
+            ] {
+                let mut reader = SpeechNormalizer::default();
+                let mut parts = reader.push(raw);
+                parts.extend(reader.finish());
+                let normalized = parts.join(" ");
+                for (version, input) in [("before", raw), ("after", normalized.as_str())] {
+                    let resp = request(&http, reqwest::Method::POST, "/tts/stream")
+                        .unwrap()
+                        .json(&json!({"text":input,"format":"pcm"}))
+                        .send()
+                        .await
+                        .unwrap()
+                        .error_for_status()
+                        .unwrap();
+                    assert_eq!(
+                        resp.headers()["x-audio-format"],
+                        "s16le;rate=24000;channels=1"
+                    );
+                    let bytes = resp.bytes().await.unwrap();
+                    assert_eq!(bytes.len() % 2, 0);
+                    let samples: Vec<f32> = bytes
+                        .chunks_exact(2)
+                        .map(|v| i16::from_le_bytes([v[0], v[1]]) as f32 / 32768.)
+                        .collect();
+                    assert!(samples.iter().any(|s| s.abs() > 0.01));
+                    let path = folder.join(format!("{label}-{version}.wav"));
+                    assert!(sherpa_onnx::write(path.to_str().unwrap(), &samples, 24000));
+                    let pcm: Vec<f32> = (0..samples.len() * 2 / 3)
+                        .map(|i| samples[i * 3 / 2])
+                        .collect();
+                    let transcript = stt.recognize(&pcm).unwrap();
+                    println!(
+                        "{label} {version}, {:.2}s: {input} -> {transcript}",
+                        samples.len() as f64 / 24000.
+                    );
+                    if version == "after" {
+                        for word in expected {
+                            assert!(transcript.contains(word), "{transcript}")
+                        }
+                    }
+                }
+            }
+        });
+    }
+}

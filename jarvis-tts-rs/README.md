@@ -1,6 +1,6 @@
 # Jarvis TTS · Rust
 
-Самостоятельный сервер русской речи. Процесс Rust загружает исходные веса Shtorm-PocketTTS-RU fast, SentencePiece и голос Jarvis, подготавливает текст, получает акустические кадры и возвращает звук. Основное приложение Tauri/Next.js подключается позже.
+Самостоятельный сервер русской речи. Процесс Rust загружает исходные веса Shtorm-PocketTTS-RU fast, SentencePiece и голос Jarvis, подготавливает текст, получает акустические кадры и возвращает звук. Основное приложение Tauri получает звук по HTTPS.
 
 ## Запуск в этом проекте
 
@@ -22,29 +22,15 @@ ssh root@192.168.50.38 'tar -C /opt/jarvis-tts-rs/model -cf - .' | tar -C .asset
 (cd .assets && shasum -a 256 -c ../audit/model.sha256)
 ```
 
-## Проверочный экземпляр на Xeon
+## Рабочий экземпляр на Xeon
 
-Каталог на сервере — `/opt/jarvis-tts-rs`. Бинарник — `bin/jarvis-tts-rs`, автономный набор моделей — `model/`. Проверочный unit `jarvis-tts-rs-preview.service` слушает **127.0.0.1:8181** и требует Bearer-токен. Это временный unit systemd, без автозапуска после перезагрузки. Исходный API имеет отдельный адрес `192.168.50.38:8080/api/tts`.
+Служба `jarvis-tts-rs.service` запускает `/opt/jarvis-tts-rs/bin/jarvis-tts-rs` и слушает `https://192.168.50.38:8443`. Для сетевого интерфейса задайте `JARVIS_BIND`, `JARVIS_TLS_CERT`, `JARVIS_TLS_KEY` и `JARVIS_BEARER_TOKEN` в закрытом файле окружения службы. Сертификат частного центра для клиента находится в `src-tauri/config/xeon-tts-ca.pem`. Прежняя Python-служба и тестовый экземпляр Rust остановлены.
 
-Проверить новый сервер через SSH с машины разработки, используя токен из закрытого файла на сервере:
-
-```sh
-ssh root@192.168.50.38
-# Следующие команды выполняются в открытой сессии на сервере.
-set -a
-. /opt/jarvis-tts-rs/test-config/preview.env
-set +a
-/opt/jarvis-tts-rs/build-tools/node -e 'fetch("http://127.0.0.1:8181/ready",{headers:{Authorization:"Bearer "+process.env.JARVIS_BEARER_TOKEN}}).then(async r=>console.log(r.status,await r.text()))'
-exit
-```
-
-Для интерактивного клиента с Mac можно открыть SSH-туннель:
+На настроенном Mac из корня проекта можно проверить готовность оригинального голоса. Команда читает токен из файла настроек и выводит HTTP-статус и результат проверки.
 
 ```sh
-ssh -N -L 18181:127.0.0.1:8181 root@192.168.50.38
+NODE_EXTRA_CA_CERTS=src-tauri/config/xeon-tts-ca.pem node   --env-file="$HOME/Library/Application Support/com.jarvis.desktop/backend.env"   -e 'fetch(process.env.JARVIS_TTS_URL+"/ready",{headers:{Authorization:"Bearer "+process.env.JARVIS_TTS_TOKEN}}).then(async r=>console.log(r.status,await r.text()))'
 ```
-
-В этом случае базовый URL клиента — `http://127.0.0.1:18181`. Токен передаётся в `Authorization: Bearer …`. В локальном запуске из первой секции адрес по умолчанию — `127.0.0.1:8181`, секрет опционален. При привязке к сетевому интерфейсу программа требует секрет длиной от 24 байт. Для передачи через недоверенную сеть используйте SSH-туннель или TLS на прокси.
 
 ## API
 
@@ -79,7 +65,7 @@ curl --fail --no-buffer -H 'X-Request-Id: demo-1' \
 
 ## Эксплуатация и проверки
 
-Для постоянной установки есть [systemd unit](deploy/jarvis-tts-rs.service). На целевой машине создайте системного пользователя `jarvis-rust-tts`, разместите исполняемые файлы в `/opt/jarvis-tts-rs/bin`, дайте группе сервиса доступ на чтение `model/`. В `/etc/jarvis-tts-rs.env` с правами 0600 задайте `JARVIS_BEARER_TOKEN`. Для одновременного запуска с preview задайте постоянному экземпляру другой `JARVIS_BIND`. Unit ограничивает память 6 GiB и вычисления десятью эквивалентами логического CPU. Число тензорных потоков по умолчанию — четыре. На Linux для сборки под этот Xeon использовалось `RUSTFLAGS="-C target-cpu=haswell"`. Отдельная проверочная установка заняла около 5,2 GiB вместе с компилятором и кэшем.
+Для постоянной установки есть [systemd unit](deploy/jarvis-tts-rs.service). На целевой машине создайте системного пользователя `jarvis-rust-tts`, разместите исполняемые файлы в `/opt/jarvis-tts-rs/bin`, дайте группе сервиса доступ на чтение `model/`. В `/etc/jarvis-tts-rs.env` с правами 0600 задайте `JARVIS_BEARER_TOKEN`. На LAN укажите в настройках службы пути к сертификату и закрытому ключу TLS. Unit ограничивает память 6 GiB и вычисления десятью эквивалентами логического CPU. Число тензорных потоков по умолчанию — четыре. На Linux для сборки под этот Xeon использовалось `RUSTFLAGS="-C target-cpu=haswell"`. Отдельная проверочная установка заняла около 5,2 GiB вместе с компилятором и кэшем.
 
 ```sh
 cargo fmt --check
@@ -104,9 +90,9 @@ sudo systemctl enable --now jarvis-tts-rs.service
 sudo systemctl status jarvis-tts-rs.service
 ```
 
-Проверьте `/ready` с учётными данными нового экземпляра и запрос WAV. Для диагностики используйте `journalctl -u jarvis-tts-rs.service`. Текущий тестовый экземпляр работает под именем `jarvis-tts-rs-preview.service`.
+Проверьте `/ready` с учётными данными нового экземпляра и запрос WAV. Для диагностики используйте `journalctl -u jarvis-tts-rs.service`.
 
-## План подключения к J.A.R.V.I.S.
+## Архив первоначального плана подключения
 
 1. Согласовать голос на [парных аудиозаписях](examples/audio/). Затем в Rust Core определить интерфейсы для VAD/STT, потока текста LLM, клиента TTS и вывода PCM. Адрес TTS и выбор провайдера/модели читать из конфигурации, токены брать из защищённого хранилища на стороне Rust.
 2. Проверить доступный идентификатор DeepSeek V4.1 Flash и поддержку потокового вывода в аккаунте OmniRouter. Первый адаптер возвращает текстовые фрагменты и поддерживает отмену. Тот же интерфейс позволяет выбрать другой доступный LLM. Разделитель завершённых фраз добавляет перевод строки и отправляет текст в один двунаправленный HTTP-запрос.
