@@ -1,0 +1,10 @@
+PRAGMA user_version=1;
+CREATE TABLE sources(repo TEXT PRIMARY KEY,url TEXT NOT NULL,branch TEXT NOT NULL,sha TEXT NOT NULL,licenses TEXT NOT NULL);
+CREATE TABLE documents(id INTEGER PRIMARY KEY,repo TEXT NOT NULL REFERENCES sources(repo),path TEXT NOT NULL,hash TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,front TEXT NOT NULL,UNIQUE(repo,path));
+CREATE TABLE chunks(id INTEGER PRIMARY KEY,document INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,command TEXT NOT NULL COLLATE NOCASE,heading TEXT NOT NULL,text TEXT NOT NULL,module TEXT NOT NULL,applies TEXT NOT NULL,build TEXT NOT NULL DEFAULT 'unknown',ps TEXT NOT NULL,admin INTEGER,risk INTEGER NOT NULL CHECK(risk BETWEEN 0 AND 3),status TEXT NOT NULL CHECK(status IN ('doc_derived','vm_verified')),date TEXT);
+CREATE INDEX chunks_document ON chunks(document);
+CREATE INDEX chunks_command ON chunks(command);
+CREATE VIRTUAL TABLE search USING fts5(command,heading,text,content='chunks',content_rowid='id',prefix='2 3');
+CREATE TRIGGER insert_chunk AFTER INSERT ON chunks BEGIN INSERT INTO search(rowid,command,heading,text) VALUES(new.id,new.command,new.heading,new.text); END;
+CREATE TRIGGER delete_chunk AFTER DELETE ON chunks BEGIN INSERT INTO search(search,rowid,command,heading,text) VALUES('delete',old.id,old.command,old.heading,old.text); END;
+CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
