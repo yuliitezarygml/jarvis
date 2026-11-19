@@ -75,6 +75,21 @@ fn open_markup(s: &str) -> bool {
             .any(|(l, r)| s.matches(l).count() > s.matches(r).count())
 }
 
+// A logical Markdown line can contain several complete sentences. Release them
+// as soon as their inline delimiters close, leaving table and block syntax intact.
+fn can_cut_inline(s: &str) -> bool {
+    !s.contains('|')
+        && !s.trim_start().starts_with(['#', '<', '~'])
+        && !s.contains("<script")
+        && !s.contains("<style")
+        && s.matches('[').count() == s.matches(']').count()
+        && s.matches('(').count() == s.matches(')').count()
+        && s.matches("**").count().is_multiple_of(2)
+        && s.matches('*').count().is_multiple_of(2)
+        && s.matches('_').count().is_multiple_of(2)
+        && !open_markup(s)
+}
+
 impl SpeechNormalizer {
     pub fn push(&mut self, delta: &str) -> Vec<String> {
         let mut ready = Vec::new();
@@ -85,7 +100,6 @@ impl SpeechNormalizer {
                 // Look ahead by one separator so a period inside a decimal,
                 // version, URL or list marker cannot end the spoken phrase.
                 if c.is_whitespace()
-                    && !self.structured_line
                     && self.markup.is_empty()
                     && self.table.is_none()
                     && self.fence.is_none()
@@ -100,10 +114,12 @@ impl SpeechNormalizer {
                             .bytes()
                             .all(|b| b.is_ascii_digit());
                     let long = self.line_chars >= TARGET_CHARS
+                        && (!self.structured_line || self.line_chars % 64 < 8)
                         && (last == ',' || last.is_alphabetic() && !last.is_ascii());
-                    if sentence || long {
+                    if (sentence || long) && (!self.structured_line || can_cut_inline(&self.line)) {
                         let raw = std::mem::take(&mut self.line);
                         self.line_chars = 0;
+                        self.structured_line = false;
                         self.enqueue(&markdown::render(&raw), &mut ready);
                     }
                 }
@@ -167,7 +183,8 @@ impl SpeechNormalizer {
         }
         self.markup.push_str(&line);
         let html_block = self.markup.trim_start().starts_with('<') && !trimmed.is_empty();
-        if !html_block && !open_markup(&self.markup) && !trimmed.contains('|') {
+        let unfinished_math = trimmed.ends_with(['^', '=', '×', '÷', '√', '≥', '≤', '−']);
+        if !html_block && !unfinished_math && !open_markup(&self.markup) && !trimmed.contains('|') {
             self.emit_markup(ready)
         }
     }
@@ -275,6 +292,29 @@ mod tests {
     }
 
     #[test]
+    fn preserves_meaning_at_format_boundaries() {
+        says("2*3*4", "два умножить на три умножить на четыре");
+        says(
+            "2^\n10 = 1024",
+            "два в десятой степени равно тысяче двадцати четырём",
+        );
+        says("1 024 000", "один миллион двадцать четыре тысячи");
+        says("Раздел 2/3", "Раздел два слэш три");
+        says("AES-256", "эй и эс двести пятьдесят шесть");
+        says("На 2 устройствах", "На 2 устройствах");
+        says(
+            "[https://x.ru/api/2](https://x.ru/api/2)",
+            "эйч-ти-ти-пи-эс двоеточие слэш слэш x точка ru слэш эй-пи-ай слэш два",
+        );
+        let mut reader = SpeechNormalizer::default();
+        let early = reader.push("**Проверка сети** завершилась успешно, соединение работает. ");
+        assert_eq!(
+            early,
+            ["Проверка сети завершилась успешно, соединение работает."]
+        );
+    }
+
+    #[test]
     fn technical_reading_is_separate() {
         for name in ["Wi-Fi", "Wi‑Fi", "Wi–Fi", "Wi—Fi"] {
             says(name, "вай-фай")
@@ -317,6 +357,8 @@ mod tests {
             "Текст важен, а код скрыт.",
         );
         says("```sh\ncurl --version\n```", "curl дефис дефис version");
+        says("Команда <code>2/3</code>.", "Команда два слэш три.");
+        says("<table><tr><th>Сеть</th><th>Режим</th></tr><tr><td>Wi-Fi</td><td>WPA3</td></tr></table>","Сеть: вай-фай, Режим: дабл-ю пи эй три.");
         says(
             r"$\frac{2}{3}$ и \(\sqrt{16} = 4\)",
             "две третьих и квадратный корень из шестнадцати равен четырём",

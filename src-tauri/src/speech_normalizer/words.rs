@@ -8,7 +8,7 @@ static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(?P<literal>(?:https?://|www\.)[^\s<>()]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]+|",
         r"\b[0-9]{4}-[0-9]{2}-[0-9]{2}\b|\b[0-9]{1,2}[./][0-9]{1,2}[./][0-9]{2,4}\b|",
-        r"\b[vV][0-9]+(?:\.[0-9]+)+|\b[0-9]+(?:\.[0-9]+){2,}(?:[-+][A-Za-z0-9.-]+)?|",
+        r"\b[0-9]+(?:\.[0-9]+)+[A-Za-z][A-Za-z0-9_-]*|\b[vV][0-9]+(?:\.[0-9]+)+|\b[0-9]+(?:\.[0-9]+){2,}(?:[-+][A-Za-z0-9.-]+)?|",
         r"[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_.-]+)+|/[A-Za-z_][A-Za-z0-9_./-]*|",
         r"[A-Za-z_][A-Za-z0-9_]*(?:[._][A-Za-z0-9_]+)+|--[a-zA-Z][a-zA-Z0-9-]*)|",
         r"(?P<tech>(?i:\bwi[-‐‑‒–—]?fi\b)|[A-Za-z_][A-Za-z0-9_]*(?:[-‐‑][A-Za-z0-9_]+)*)|",
@@ -18,7 +18,7 @@ static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
 });
 static ATOM: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
-        r"^(?P<sign>[-−+]?)\s*(?P<root>√\s*)?(?P<value>[0-9]+(?:[.,][0-9]+)?|π|∞)",
+        r"^(?P<sign>[-−+]?)\s*(?P<root>√\s*)?(?P<value>(?:[0-9]{1,3}(?:[ \x{a0}\x{202f}][0-9]{3}\b)+|[0-9]+)(?:[.,][0-9]+)?|π|∞)",
         r"(?P<modifier>\s*\^\s*[-−+]?[0-9]+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+|\s*%|/[0-9]+)?"
     ))
     .unwrap()
@@ -57,13 +57,12 @@ pub(super) fn math_tex(src: &str) -> String {
         }
         .to_owned()
     });
-    if s.contains(['\\', '{', '}']) {
+    // Unknown symbolic algebra is read literally, including every operator.
+    // Do not assign numerical semantics to variables, functions or subscripts.
+    if s.contains(['\\', '{', '}', '(', ')']) || s.bytes().any(|b| b.is_ascii_alphabetic()) {
         return literal(src);
     }
-    prose(
-        &s.replace('(', " открыть скобку ")
-            .replace(')', " закрыть скобку "),
-    )
+    prose(&s)
 }
 
 fn acronym(s: &str) -> Option<String> {
@@ -149,7 +148,14 @@ fn technical(s: &str) -> String {
         }
         return parts.join(" ");
     }
-    if s.contains('_') || s.contains(['-', '‐', '‑']) {
+    if s.contains(['-', '‐', '‑']) {
+        return s
+            .split(['-', '‐', '‑'])
+            .map(technical)
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+    if s.contains('_') {
         return literal(s);
     }
     s.to_owned()
@@ -193,6 +199,12 @@ pub(super) fn literal(s: &str) -> String {
             '_' => "нижнее подчёркивание",
             '=' => "знак равно",
             '^' => "знак степени",
+            '×' | '·' => "умножить на",
+            '÷' => "разделить на",
+            '−' => "минус",
+            '√' => "корень",
+            '²' => "в квадрате",
+            '³' => "в кубе",
             '*' => "звёздочка",
             '&' => "амперсанд",
             '@' => "собака",
@@ -229,7 +241,8 @@ fn atom(s: &str, case: &str) -> Option<(usize, String, bool)> {
     let c = ATOM.captures(s)?;
     let root = c.name("root").is_some();
     let case = if root { "g" } else { case };
-    let val = &c["value"];
+    let value = c["value"].replace(char::is_whitespace, "");
+    let val = value.as_str();
     let sign = match &c["sign"] {
         "-" | "−" => "минус ",
         "+" => "плюс ",
@@ -367,10 +380,15 @@ pub(super) fn prose(s: &str) -> String {
                 .next_back()
                 .unwrap_or("")
                 .to_lowercase();
-            if prefix.starts_with("верси") || prefix == "version" {
+            if prefix.starts_with("верси")
+                || matches!(
+                    prefix.as_str(),
+                    "version" | "раздел" | "путь" | "сборка" | "страница" | "идентификатор"
+                )
+            {
                 let tail = &s[m.start()..];
                 let size = tail
-                    .find(|c: char| !c.is_ascii_digit() && c != '.')
+                    .find(|c: char| !c.is_ascii_digit() && !matches!(c, '.' | '/'))
                     .unwrap_or(tail.len());
                 let token = tail[..size].trim_end_matches('.');
                 if !token.is_empty() {
@@ -381,7 +399,15 @@ pub(super) fn prose(s: &str) -> String {
             }
             if let Some((n, spoken)) = expression(&s[m.start()..]) {
                 i = m.start() + n;
-                out.push_str(&spoken);
+                let raw = &s[m.start()..i];
+                let standalone = s.trim().trim_end_matches(['.', '!', '?', ':', ';']) == raw;
+                // Leave unadorned prose numbers to the voice's existing RUNorm
+                // context model (e.g. «на 2 устройствах», dates, time and money).
+                if !standalone && raw.bytes().all(|b| b.is_ascii_digit()) {
+                    out.push_str(raw)
+                } else {
+                    out.push_str(&spoken)
+                }
             } else {
                 out.push_str(token)
             }

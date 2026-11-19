@@ -29,7 +29,9 @@ ssh root@192.168.50.38 'tar -C /opt/jarvis-tts-rs/model -cf - .' | tar -C .asset
 На настроенном Mac из корня проекта можно проверить готовность оригинального голоса. Команда читает токен из файла настроек и выводит HTTP-статус и результат проверки.
 
 ```sh
-NODE_EXTRA_CA_CERTS=src-tauri/config/xeon-tts-ca.pem node   --env-file="$HOME/Library/Application Support/com.jarvis.desktop/backend.env"   -e 'fetch(process.env.JARVIS_TTS_URL+"/ready",{headers:{Authorization:"Bearer "+process.env.JARVIS_TTS_TOKEN}}).then(async r=>console.log(r.status,await r.text()))'
+NODE_EXTRA_CA_CERTS=src-tauri/config/xeon-tts-ca.pem node \
+  --env-file="$HOME/Library/Application Support/com.jarvis.desktop/backend.env" \
+  -e 'fetch(process.env.JARVIS_TTS_URL+"/ready",{headers:{Authorization:"Bearer "+process.env.JARVIS_TTS_TOKEN}}).then(async r=>console.log(r.status,await r.text()))'
 ```
 
 ## API

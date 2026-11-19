@@ -201,7 +201,9 @@ mod acceptance {
                     let bytes = resp.bytes().await.unwrap();
                     assert_eq!(bytes.len() % 2, 0);
                     let samples: Vec<f32> = bytes
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|v| i16::from_le_bytes([v[0], v[1]]) as f32 / 32768.)
                         .collect();
                     assert!(samples.iter().any(|s| s.abs() > 0.01));

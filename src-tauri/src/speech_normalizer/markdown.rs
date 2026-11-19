@@ -11,9 +11,47 @@ fn sentence(out: &mut String) {
     out.push(' ');
 }
 
+fn row_sentence(out: &mut String, headers: &[String], cells: &[String]) {
+    for (index, value) in cells.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ")
+        }
+        if let Some(label) = headers.get(index).filter(|s| !s.is_empty()) {
+            out.push_str(label);
+            out.push_str(": ");
+        }
+        out.push_str(value);
+    }
+    sentence(out);
+}
+
 pub(super) fn html(src: &str) -> String {
     let doc = Document::fragment(src);
     doc.select("script,style,template,head").remove();
+    for code in doc.select("code").iter() {
+        code.set_text(&words::literal(&code.text()));
+    }
+    for table in doc.select("table").iter().rev() {
+        let mut spoken = String::new();
+        let mut headers = Vec::new();
+        for row in table.select("tr").iter() {
+            let cells: Vec<_> = row
+                .children()
+                .filter("th,td")
+                .iter()
+                .map(|cell| cell.formatted_text().to_string())
+                .collect();
+            if headers.is_empty() && !row.select("th").is_empty() && row.select("td").is_empty() {
+                headers = cells
+            } else {
+                row_sentence(&mut spoken, &headers, &cells)
+            }
+        }
+        if spoken.is_empty() {
+            spoken = headers.join(", ")
+        }
+        table.set_text(&spoken);
+    }
     words::prose(&doc.formatted_text())
 }
 
@@ -62,10 +100,12 @@ pub(super) fn render(src: &str) -> String {
     let mut cell = String::new();
     let mut hidden_tag = None::<String>;
     let mut rows = 0;
-    for event in Parser::new_ext(
+    for (event, range) in Parser::new_ext(
         &src,
         Options::ENABLE_TABLES | Options::ENABLE_MATH | Options::ENABLE_STRIKETHROUGH,
-    ) {
+    )
+    .into_offset_iter()
+    {
         let dest = if in_cell { &mut cell } else { &mut out };
         match event {
             Event::Start(Tag::HtmlBlock) => html_block = Some(String::new()),
@@ -85,6 +125,12 @@ pub(super) fn render(src: &str) -> String {
                         || lower.starts_with(&format!("<{name} "))
                 }) {
                     hidden_tag = Some(name.to_string());
+                } else if lower == "<code>" || lower.starts_with("<code ") {
+                    dest.push_str(&words::prose(&text));
+                    text.clear();
+                    code = true;
+                } else if lower == "</code>" {
+                    code = false
                 } else if lower.starts_with("<br") {
                     text.push(' ')
                 }
@@ -98,6 +144,15 @@ pub(super) fn render(src: &str) -> String {
                 cell.clear();
             }
             Event::Start(Tag::CodeBlock(_)) => code = true,
+            // CommonMark parses the middle of 2*3*4 as emphasis. Restore its
+            // delimiters only when this span occurs between numeric operands.
+            Event::Start(Tag::Emphasis) | Event::End(TagEnd::Emphasis)
+                if src[range.clone()].starts_with('*')
+                    && src[..range.start].ends_with(|c: char| c.is_ascii_digit())
+                    && src[range.end..].starts_with(|c: char| c.is_ascii_digit()) =>
+            {
+                text.push('×')
+            }
             Event::Start(_) => (),
             Event::End(
                 TagEnd::Strong
@@ -129,17 +184,8 @@ pub(super) fn render(src: &str) -> String {
                     Event::End(TagEnd::TableHead) => head = false,
                     Event::End(TagEnd::TableRow) => {
                         rows += 1;
-                        for (index, value) in row.drain(..).enumerate() {
-                            if index > 0 {
-                                out.push_str(", ")
-                            }
-                            if let Some(title) = headers.get(index).filter(|s| !s.is_empty()) {
-                                out.push_str(title);
-                                out.push_str(": ")
-                            }
-                            out.push_str(&value)
-                        }
-                        sentence(&mut out);
+                        row_sentence(&mut out, &headers, &row);
+                        row.clear();
                     }
                     Event::End(TagEnd::Table) => {
                         if rows == 0 {
