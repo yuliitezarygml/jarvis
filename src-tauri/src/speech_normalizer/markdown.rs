@@ -39,7 +39,7 @@ pub(super) fn html(src: &str) -> String {
                 .children()
                 .filter("th,td")
                 .iter()
-                .map(|cell| cell.formatted_text().to_string())
+                .map(|cell| cell.formatted_text().trim().to_owned())
                 .collect();
             if headers.is_empty() && !row.select("th").is_empty() && row.select("td").is_empty() {
                 headers = cells

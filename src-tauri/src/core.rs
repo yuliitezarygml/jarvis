@@ -330,6 +330,70 @@ mod acceptance {
         });
     }
 
+    #[test]
+    #[ignore = "Requires Xeon TTS and real Mac audio output"]
+    fn speech_starts_while_text_input_is_still_open() {
+        tauri::async_runtime::block_on(async {
+            dotenvy::from_path(std::env::var_os("JARVIS_BACKEND_ENV").unwrap()).unwrap();
+            let folder = std::env::temp_dir().join(format!("jarvis-stream-{}", Uuid::new_v4()));
+            let (started, mut playback) = mpsc::unbounded_channel();
+            let core = Core::open(
+                &folder,
+                Arc::new(move |event| {
+                    if matches!(event.kind, Kind::Speaking) {
+                        let _ = started.send(event.data);
+                    }
+                }),
+            )
+            .unwrap();
+            let turn = Uuid::new_v4().to_string();
+            let cancel = CancellationToken::new();
+            *core.active.lock().unwrap() = Some(Turn {
+                id: turn.clone(),
+                session: "stream-test".into(),
+                cancel: cancel.clone(),
+            });
+            let (input, queue) = mpsc::unbounded_channel();
+            let worker = tokio::spawn(tts::speech(
+                core.clone(),
+                turn,
+                cancel,
+                queue,
+                Instant::now(),
+            ));
+            for piece in ["Первый пример: $2^", "{10}", " = 1024$. "] {
+                input.send(piece.to_owned()).unwrap()
+            }
+            let first = tokio::time::timeout(std::time::Duration::from_secs(15), playback.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            println!("First PCM with final delta withheld: {} ms", first["ms"]);
+            input.send("Теперь √16 = 4.".into()).unwrap();
+            drop(input);
+            tokio::time::timeout(std::time::Duration::from_secs(45), worker)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(audio::pending(), 0);
+            let heard = core.playback_phrases.lock().unwrap().clone();
+            assert_eq!(heard.len(), 2);
+            assert_eq!(
+                heard[0],
+                normalize_speech(
+                    "Первый пример: два в десятой степени равно тысяче двадцати четырём."
+                )
+            );
+            assert_eq!(
+                heard[1],
+                normalize_speech("Теперь квадратный корень из шестнадцати равен четырём.")
+            );
+            drop(core);
+            let _ = std::fs::remove_dir_all(folder);
+        });
+    }
+
     /// Tests the same queue, provider, STT, audio renderer and event stream as the desktop commands.
     /// Uses a fresh SQLite database, existing operator credentials and the original audio fixture.
     #[test]
