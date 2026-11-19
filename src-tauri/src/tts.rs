@@ -10,8 +10,30 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+const XEON_API: &str = "https://192.168.50.38:8443";
+
+fn api_url() -> String {
+    std::env::var("JARVIS_TTS_URL").unwrap_or_else(|_| XEON_API.to_owned())
+}
+
+pub fn client() -> Result<Client> {
+    let url = provider::base(&api_url())?;
+    let mut builder = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(90));
+    if url.origin().ascii_serialization() == XEON_API {
+        let ca = reqwest::Certificate::from_pem(include_bytes!("../config/xeon-tts-ca.pem"))?;
+        builder = builder
+            .no_proxy()
+            .tls_built_in_root_certs(false)
+            .add_root_certificate(ca);
+    }
+    Ok(builder.build()?)
+}
+
 fn request(http: &Client, method: reqwest::Method, path: &str) -> Result<RequestBuilder> {
-    let url = std::env::var("JARVIS_TTS_URL").unwrap_or_else(|_| "http://127.0.0.1:18181".into());
+    let url = api_url();
     provider::base(&url)?;
     Ok(http
         .request(method, format!("{}{path}", url.trim_end_matches('/')))
@@ -22,7 +44,7 @@ pub async fn ready(http: &Client) -> Result<Value> {
         .timeout(Duration::from_secs(4))
         .send()
         .await
-        .context("TTS недоступен. Проверьте SSH-туннель")?;
+        .context("Нет соединения с API голосового сервера")?;
     provider::status(r.status())?;
     Ok(r.json().await?)
 }

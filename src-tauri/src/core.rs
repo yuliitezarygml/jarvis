@@ -43,7 +43,7 @@ impl Core {
         let http = provider::client()?;
         Ok(Arc::new(Self {
             db: Mutex::new(Store::open(&dir.join("jarvis.sqlite3"))?),
-            http: http.clone(),
+            http: tts::client()?,
             llm: Arc::new(Compatible(http)),
             telemetry: Telemetry::new(),
             stt: Recognizer::new(
