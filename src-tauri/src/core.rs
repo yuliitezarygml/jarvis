@@ -29,6 +29,7 @@ pub struct Core {
     pub telemetry: Telemetry,
     pub stt: Recognizer,
     active: Mutex<Option<Turn>>,
+    playback_phrases: Mutex<std::collections::VecDeque<String>>,
     pub capture: tokio::sync::Mutex<Option<crate::capture::Capture>>,
     pub bus: Bus,
 }
@@ -51,6 +52,7 @@ impl Core {
                     .unwrap_or_else(|| dir.join("stt")),
             ),
             active: Mutex::new(None),
+            playback_phrases: Default::default(),
             capture: Default::default(),
             bus,
         }))
@@ -82,6 +84,34 @@ impl Core {
                 Value::Null,
             ));
         }
+    }
+    pub fn remember_playback(&self, text: &str) {
+        let mut recent = self.playback_phrases.lock().unwrap();
+        if recent.len() == 3 {
+            recent.pop_front();
+        }
+        recent.push_back(normalize_speech(text));
+    }
+    pub fn is_playback_echo(&self, text: &str) -> bool {
+        let heard = normalize_speech(text);
+        let recent = self.playback_phrases.lock().unwrap();
+        let reference = recent
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if heard.is_empty() || reference.contains(&heard) {
+            return true;
+        }
+        let mut total = 0;
+        let mut hits = 0;
+        for word in heard.split_whitespace() {
+            total += 1;
+            if reference.split_whitespace().any(|w| w == word) {
+                hits += 1;
+            }
+        }
+        total >= 3 && hits * 4 >= total * 3
     }
     pub fn start(self: &Arc<Self>, session: String, text: String) -> Result<String> {
         let text = text.trim();
@@ -236,6 +266,15 @@ impl Core {
         }
         Ok(())
     }
+}
+
+fn normalize_speech(text: &str) -> String {
+    text.to_lowercase()
+        .replace('ё', "е")
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

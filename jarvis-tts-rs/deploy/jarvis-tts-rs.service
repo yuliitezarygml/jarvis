@@ -1,13 +1,16 @@
 [Unit]
 Description=Jarvis native Russian speech synthesis
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 User=jarvis-rust-tts
 Group=jarvis-rust-tts
 WorkingDirectory=/opt/jarvis-tts-rs
 ExecStart=/opt/jarvis-tts-rs/bin/jarvis-tts-rs
-Environment=JARVIS_BIND=127.0.0.1:8181
+Environment=JARVIS_BIND=192.168.50.38:8443
+Environment=JARVIS_TLS_CERT=/etc/jarvis-tts-rs/tls/server.pem
+Environment=JARVIS_TLS_KEY=/etc/jarvis-tts-rs/tls/server.key
 Environment=JARVIS_THREADS=4
 Environment=JARVIS_ASSETS=/opt/jarvis-tts-rs/model
 Environment=JARVIS_FFMPEG=/opt/jarvis-tts-rs/bin/ffmpeg

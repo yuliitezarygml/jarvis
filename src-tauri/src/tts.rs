@@ -147,6 +147,9 @@ async fn phrase(
                     .for_turn(turn, || audio::play(block))
                     .context("Отменено")??;
                 if accepted {
+                    if !heard {
+                        core.remember_playback(text);
+                    }
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;

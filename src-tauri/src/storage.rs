@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
 use uuid::Uuid;
+fn default_silence_ms() -> u32 {
+    1000
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -13,6 +16,10 @@ pub struct Settings {
     pub prompt: String,
     pub speak: bool,
     pub tools: bool,
+    #[serde(default = "default_silence_ms")]
+    pub silence_ms: u32,
+    #[serde(default)]
+    pub wake_word: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -24,6 +31,8 @@ impl Default for Settings {
             prompt: include_str!("../config/personality.txt").trim().into(),
             speak: true,
             tools: true,
+            silence_ms: default_silence_ms(),
+            wake_word: false,
         }
     }
 }
@@ -109,6 +118,10 @@ impl Store {
         })
     }
     pub fn save(&self, s: &Settings) -> Result<()> {
+        ensure!(
+            (800..=1200).contains(&s.silence_ms),
+            "Пауза после речи должна составлять от 800 до 1200 мс"
+        );
         ensure!(
             !s.model.trim().is_empty()
                 && s.model.len() <= 200

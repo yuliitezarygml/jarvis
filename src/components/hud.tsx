@@ -13,7 +13,7 @@ const states: Record<Phase, string> = {
   IDLE: "Ожидаю команду",
   STOPPED: "Остановлено",
   LISTENING: "Слушаю вас",
-  THINKING: "Обрабатываю запрос",
+  PROCESSING: "Обрабатываю запрос",
   SPEAKING: "Говорю",
   EXECUTING: "Выполняю действие",
   ERROR: "Требуется внимание",
@@ -282,6 +282,17 @@ function SettingsForm({ c }: { c: Console }) {
         />
         Разрешить модели диагностические инструменты
       </label>
+      <label>
+        Пауза после речи
+        <select value={s.silence_ms} onChange={(e) => field("silence_ms", Number(e.target.value))}>
+          {[800, 900, 1000, 1100, 1200].map((ms) => <option key={ms} value={ms}>{ms} мс</option>)}
+        </select>
+      </label>
+      <label className="toggle">
+        <input type="checkbox" checked={s.wake_word}
+          onChange={(e) => field("wake_word", e.target.checked)} />
+        При запуске включать микрофон и ждать обращения «Джарвис»
+      </label>
       <div className="actions">
         <button className="primary">Сохранить настройки</button>
         <span role="status">{saved}</span>
@@ -533,7 +544,7 @@ export default function Hud() {
                   speech={c.speech}
                   levels={c.micLevels}
                   active={c.mic !== "off"}
-                  recognizing={c.phase === "THINKING" && !c.busy}
+                  recognizing={c.phase === "PROCESSING" && !c.busy}
                 />
                 <div className="voiceControl">
                   <button
@@ -550,7 +561,7 @@ export default function Hud() {
                   <button
                     className="stopControl"
                     title="Отменить запись и остановить генерацию и озвучивание"
-                    disabled={!c.online || (c.mic === "off" && !c.busy && c.phase !== "THINKING")}
+                    disabled={!c.online || (c.mic === "off" && !c.busy && c.phase !== "PROCESSING")}
                     onClick={() => void c.stop()}
                   >
                     <Icon name="stop" />
@@ -566,7 +577,7 @@ export default function Hud() {
                       void c.capture(e.target.checked ? "auto" : "off")
                     }
                   />
-                  Постоянное прослушивание
+                  {c.settings.wake_word ? "По обращению «Джарвис»" : "Постоянное прослушивание"}
                 </label>
               </section>
               <Transcript c={c} />

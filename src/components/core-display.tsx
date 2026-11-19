@@ -5,7 +5,7 @@ const speed: Record<Phase, number> = {
   IDLE: 0.17,
   STOPPED: 0.12,
   LISTENING: 0.32,
-  THINKING: 0.56,
+  PROCESSING: 0.56,
   SPEAKING: 0.4,
   EXECUTING: 0.65,
   ERROR: 0.12,

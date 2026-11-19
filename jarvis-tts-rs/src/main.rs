@@ -23,6 +23,10 @@ fn main() -> Result<()> {
         bind.ip().is_loopback() || secret.is_some(),
         "non-loopback bind requires JARVIS_BEARER_TOKEN"
     );
+    let cert = std::env::var_os("JARVIS_TLS_CERT");
+    let key = std::env::var_os("JARVIS_TLS_KEY");
+    ensure!(cert.is_some() == key.is_some(), "configure both TLS files");
+    ensure!(bind.ip().is_loopback() || cert.is_some(), "LAN API requires TLS");
     let threads: usize = std::env::var("JARVIS_THREADS")
         .unwrap_or_else(|_| "4".into())
         .parse()?;
@@ -54,9 +58,17 @@ fn main() -> Result<()> {
             pool: scheduler::Pool::new(engine, frontend, load_ms),
             secret,
         };
-        let listener = tokio::net::TcpListener::bind(bind).await?;
-        tracing::info!(%bind,threads,load_ms,"ready");
-        axum::serve(listener, api::router(state)).await?;
+        let router = api::router(state);
+        if let (Some(cert), Some(key)) = (cert, key) {
+            rustls::crypto::ring::default_provider().install_default().ok();
+            let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
+            tracing::info!(%bind,threads,load_ms,"HTTPS ready");
+            axum_server::bind_rustls(bind, tls).serve(router.into_make_service()).await?;
+        } else {
+            let listener = tokio::net::TcpListener::bind(bind).await?;
+            tracing::info!(%bind,threads,load_ms,"ready");
+            axum::serve(listener, router).await?;
+        }
         Ok(())
     })
 }

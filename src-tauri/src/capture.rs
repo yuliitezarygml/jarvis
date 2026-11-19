@@ -16,6 +16,19 @@ enum Stop {
     Submit,
     Discard,
 }
+#[derive(Clone, Copy)]
+struct ListenOptions {
+    continuous: bool,
+    silence_ms: u32,
+    wake_word: bool,
+}
+
+fn wake_command(text: &str) -> Option<&str> {
+    let (name, rest) = text.split_once(|c: char| !c.is_alphanumeric())?;
+    let command = rest.trim_start_matches(|c: char| !c.is_alphanumeric());
+    (name.to_lowercase() == "джарвис" && !command.is_empty()).then_some(command)
+}
+
 pub struct Capture {
     stop: watch::Sender<Stop>,
     finished: watch::Receiver<()>,
@@ -48,6 +61,12 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     }
     c.cancel();
     ensure!(c.stt.available(), "Русская модель STT не установлена");
+    let settings = c.db.lock().unwrap().settings()?;
+    let options = ListenOptions {
+        continuous,
+        silence_ms: settings.silence_ms,
+        wake_word: continuous && settings.wake_word,
+    };
     let core = c.clone();
     let online = tokio::task::spawn_blocking(move || -> Result<_> {
         let online = core.stt.streaming_engine();
@@ -63,7 +82,7 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
     let (done, finished) = watch::channel(());
     let core = c.clone();
     tokio::task::spawn_blocking(move || {
-        capture(core, session, continuous, rx, online, audio::read);
+        capture(core, session, options, rx, online, audio::read);
         drop(done);
     });
     *g = Some(Capture { stop: tx, finished });
@@ -72,11 +91,12 @@ pub async fn start(c: &Arc<Core>, session: String, continuous: bool) -> Result<(
 fn capture(
     c: Arc<Core>,
     session: String,
-    continuous: bool,
+    options: ListenOptions,
     control: watch::Receiver<Stop>,
     online: Option<Arc<OnlineRecognizer>>,
     mut read: impl FnMut(&mut [f32]) -> usize,
 ) {
+    let continuous = options.continuous;
     let emit =
         |kind: Kind, data: serde_json::Value| (c.bus)(Event::new(&session, None, kind, data));
     emit(Kind::Mic, json!(if continuous { "auto" } else { "ptt" }));
@@ -88,13 +108,20 @@ fn capture(
     };
     speech(listening);
     let mut live = online.as_ref().map(audio::LiveUtterance::new);
-    let mut buffer = vec![0f32; 4096];
+    let mut buffer = [0f32; 256]; // Earshot consumes 16 ms frames at 16 kHz.
+    let mut filled = 0;
+    let mut detector = earshot::Detector::default();
+    let silence_samples = options.silence_ms as usize * 16;
     let mut pre: VecDeque<f32> = VecDeque::new();
     let mut utterance = vec![];
     let mut loud = 0;
     let mut quiet = 0;
     let mut speaking = false;
-    let mut noise = 0.002f32;
+    let mut voiced_samples = 0;
+    let mut quietest_voice = f32::INFINITY;
+    let mut loudest_voice = 0.0f32;
+    let mut playback_tail = None;
+    let mut verify_barge_in = false;
     let mut meter = Instant::now();
     let mut capture_open = true;
     let opened = Instant::now();
@@ -111,44 +138,59 @@ fn capture(
             speech(SpeechUpdate::Cleared);
             break;
         }
-        let n = read(&mut buffer);
-        let chunk = &buffer[..n];
+        let n = read(&mut buffer[filled..]);
+        filled += n;
+        if filled < buffer.len() && mode == Stop::Live {
+            std::thread::sleep(Duration::from_millis(4));
+            continue;
+        }
+        let chunk = &buffer[..filled];
         let level = audio::level(chunk);
-        if n > 0 {
+        if !chunk.is_empty() {
             let previous_len = utterance.len();
             if meter.elapsed() > Duration::from_millis(65) {
                 emit(Kind::MicLevel, json!(level));
                 meter = Instant::now();
             }
-            let voiced = level > (noise * 3.3).clamp(0.008, 0.048);
+            let voiced =
+                filled == buffer.len() && detector.predict_f32(chunk) >= 0.5 && level > 0.001;
             if voiced {
-                loud += n;
+                loud += filled;
+                voiced_samples += filled;
+                quietest_voice = quietest_voice.min(level);
+                loudest_voice = loudest_voice.max(level);
                 quiet = 0;
             } else {
                 loud = 0;
-                quiet += n;
+                quiet += filled;
                 if !speaking {
-                    noise = noise * 0.96 + level * 0.04;
+                    voiced_samples = 0;
+                    quietest_voice = f32::INFINITY;
+                    loudest_voice = 0.0;
                 }
             }
-            if !continuous {
-                // Push-to-talk preserves quiet syllables until the button is released.
-                utterance.extend_from_slice(chunk);
-                if !speaking && loud >= 1200 {
-                    speaking = true;
-                    emit(Kind::VoiceStart, json!(true));
-                }
-            } else if !speaking {
+            if continuous && audio::pending() > 0 {
+                playback_tail = Some(Instant::now());
+            }
+            if !speaking {
                 pre.extend(chunk);
-                while pre.len() > 4800 {
+                while pre.len() > 9600 {
                     pre.pop_front();
                 }
-                if loud >= 1200 {
+                // A steady fan or hum can transiently score as speech at startup.
+                // Require a changing envelope as well as consecutive voiced frames.
+                if loud >= 1024 && loudest_voice > quietest_voice * 1.6 {
                     speaking = true;
                     utterance.extend(pre.drain(..));
-                    c.cancel();
-                    emit(Kind::VoiceStart, json!(true));
-                    speech(listening);
+                    verify_barge_in = continuous
+                        && playback_tail.is_some_and(|t| t.elapsed() < Duration::from_millis(500));
+                    if continuous && !options.wake_word && !verify_barge_in {
+                        c.cancel();
+                    }
+                    if !verify_barge_in {
+                        emit(Kind::VoiceStart, json!(true));
+                        speech(listening);
+                    }
                 }
             } else {
                 utterance.extend_from_slice(chunk);
@@ -158,59 +200,85 @@ fn capture(
                     .as_mut()
                     .and_then(|s| s.push(&utterance[previous_len..]))
                 {
-                    (c.bus)(Event::speech(&session, SpeechUpdate::Partial(text)));
+                    if !verify_barge_in || !c.is_playback_echo(text) {
+                        (c.bus)(Event::speech(&session, SpeechUpdate::Partial(text)));
+                        if verify_barge_in
+                            && !options.wake_word
+                            && text.split_whitespace().count() >= 2
+                        {
+                            c.cancel();
+                        }
+                    }
                 }
             }
         }
-        if mode == Stop::Submit && n == buffer.len() && utterance.len() < 16000 * 24 {
+        let full_frame = filled == buffer.len();
+        filled = 0;
+        if mode == Stop::Submit && full_frame && utterance.len() < 16000 * 24 {
             continue;
         }
         let finish = mode == Stop::Submit
-            || (continuous && speaking && quiet >= 10400)
+            || (speaking && quiet >= silence_samples)
             || utterance.len() >= 16000 * 24;
         if finish {
+            let has_speech = speaking && voiced_samples >= 1536;
+            if has_speech && (!continuous || (!verify_barge_in && !options.wake_word)) {
+                emit(Kind::Recognizing, json!(true));
+            }
             if !continuous || mode == Stop::Submit {
                 audio::mic_end();
                 capture_open = false;
                 emit(Kind::Mic, json!("off"));
             }
-            if utterance.len() > 2400 {
-                if continuous && quiet < utterance.len() {
+            if has_speech {
+                if quiet < utterance.len() {
                     utterance.truncate(utterance.len() - quiet.saturating_sub(3200));
                 }
-                emit(Kind::Recognizing, json!(true));
                 let result = c.stt.finalize(&utterance, live.take());
-                if *control.borrow() == Stop::Discard {
+                let decision = control.borrow();
+                if *decision == Stop::Discard {
                     speech(SpeechUpdate::Cleared);
                     break;
                 }
                 match result {
-                    Ok(text) if !text.is_empty() => {
+                    Ok(text)
+                        if !text.is_empty() && !(verify_barge_in && c.is_playback_echo(&text)) =>
+                    {
                         (c.bus)(Event::speech(&session, SpeechUpdate::Final(&text)));
-                        if let Err(e) = c.start(session.clone(), text) {
-                            emit(Kind::MicError, json!(e.to_string()));
+                        let command = if options.wake_word {
+                            wake_command(&text)
+                        } else {
+                            Some(text.as_str())
+                        };
+                        if let Some(command) =
+                            command.filter(|s| s.chars().any(char::is_alphanumeric))
+                        {
+                            if let Err(e) = c.start(session.clone(), command.to_owned()) {
+                                emit(Kind::MicError, json!(e.to_string()));
+                            }
                         }
                     }
+                    Ok(_) if verify_barge_in => (),
                     Ok(_) => emit(Kind::MicError, json!("Речь не распознана")),
                     Err(e) => emit(Kind::MicError, json!(e.to_string())),
                 }
-            } else if mode == Stop::Submit {
-                emit(
-                    Kind::MicError,
-                    json!("Сигнал речи слишком короткий или микрофон не получил звук"),
-                );
+            } else {
+                speech(SpeechUpdate::Cleared);
             }
             if !continuous || mode != Stop::Live {
                 break;
             }
             speaking = false;
+            voiced_samples = 0;
+            quietest_voice = f32::INFINITY;
+            loudest_voice = 0.0;
+            detector.reset();
             loud = 0;
             quiet = 0;
             pre.clear();
             utterance.clear();
             live = online.as_ref().map(audio::LiveUtterance::new);
         }
-        std::thread::sleep(Duration::from_millis(15));
     }
     if capture_open {
         audio::mic_end();
@@ -223,6 +291,127 @@ mod acceptance {
     use super::*;
     use std::sync::Mutex;
 
+    #[test]
+    fn wake_word_requires_a_complete_address_and_command() {
+        assert_eq!(
+            wake_command("Джарвис, сколько сейчас времени?"),
+            Some("сколько сейчас времени?")
+        );
+        for other in [
+            "Джарвис",
+            "Джарвис!",
+            "расскажи о Джарвисе",
+            "джарвисов вопрос",
+        ] {
+            assert_eq!(wake_command(other), None);
+        }
+    }
+
+    #[test]
+    #[ignore = "Requires JARVIS_STT_DIR and the Russian test WAVs"]
+    fn one_shot_endpoints_pause_noise_and_cancel() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = events.clone();
+        let dir = std::env::temp_dir().join(format!("jarvis-endpoint-{}", uuid::Uuid::new_v4()));
+        let core = Core::open(&dir, Arc::new(move |e| recorded.lock().unwrap().push(e))).unwrap();
+        let session = {
+            let db = core.db.lock().unwrap();
+            let mut s = db.settings().unwrap();
+            s.url.clear();
+            s.speak = false;
+            db.save(&s).unwrap();
+            db.new_session().unwrap()
+        };
+        let engine = core.stt.streaming_engine().expect("T-one");
+        let wav = |name| {
+            let wave =
+                sherpa_onnx::Wave::read(&format!("../jarvis-tts-rs/examples/audio/{name}.wav"))
+                    .unwrap();
+            let mut data: Vec<_> = (0..wave.samples().len() * 2 / 3)
+                .map(|i| wave.samples()[i * 3 / 2])
+                .collect();
+            let start = data.iter().position(|v| v.abs() > 0.008).unwrap();
+            let end = data.iter().rposition(|v| v.abs() > 0.008).unwrap() + 1;
+            data.truncate(end);
+            data.drain(..start);
+            data
+        };
+        let short = wav("old-short");
+        let long = wav("old-long");
+        let mut combined = short.clone();
+        combined.extend(std::iter::repeat_n(0., 7200)); // 450 ms inside a single utterance
+        combined.extend_from_slice(&short);
+        let mut seed = 29u32;
+        let noise: Vec<f32> = (0..48000)
+            .map(|i| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let hiss = (seed as f32 / u32::MAX as f32 - 0.5) * 0.07;
+                hiss + 0.025 * (i as f32 * 0.02).sin()
+            })
+            .collect();
+        for (name, mut pcm, ms, end_input, expected) in [
+            ("short", short.clone(), 800, Stop::Discard, 1),
+            ("long", long, 1200, Stop::Discard, 1),
+            ("pause", combined, 1000, Stop::Discard, 1),
+            ("noise", noise, 1000, Stop::Submit, 0),
+            ("cancel", short.clone(), 1000, Stop::Discard, 0),
+            ("manual", short, 1000, Stop::Submit, 1),
+        ] {
+            events.lock().unwrap().clear();
+            let speech_end = pcm.len();
+            if matches!(name, "short" | "long" | "pause") {
+                pcm.extend(std::iter::repeat_n(0., 32000));
+            }
+            let (tx, rx) = watch::channel(Stop::Live);
+            let mut offset = 0;
+            capture(
+                core.clone(),
+                session.clone(),
+                ListenOptions {
+                    continuous: false,
+                    silence_ms: ms,
+                    wake_word: false,
+                },
+                rx,
+                Some(engine.clone()),
+                |out| {
+                    let n = out.len().min(pcm.len() - offset);
+                    out[..n].copy_from_slice(&pcm[offset..offset + n]);
+                    offset += n;
+                    if n == 0 {
+                        tx.send(end_input).unwrap();
+                    }
+                    n
+                },
+            );
+            let log = events.lock().unwrap();
+            let commands: Vec<_> = log
+                .iter()
+                .filter(|e| matches!(e.kind, Kind::Start))
+                .collect();
+            assert_eq!(commands.len(), expected, "{name}");
+            if expected > 0 {
+                let text = commands[0].data.as_str().unwrap();
+                let tail_ms = offset.saturating_sub(speech_end) / 16;
+                println!("{name}: {tail_ms} ms after last audible sample; {text}");
+                if name != "manual" {
+                    assert!(
+                        (ms as usize - 80..=ms as usize + 300).contains(&tail_ms),
+                        "{name}: {tail_ms}"
+                    );
+                    assert!(
+                        offset < pcm.len(),
+                        "reached end of fixture without automatic endpoint"
+                    );
+                }
+                if name == "pause" {
+                    assert_eq!(text.matches("добрый вечер").count(), 2);
+                }
+            }
+        }
+        drop(core);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     #[ignore = "Requires JARVIS_STT_DIR with both installed Russian models"]
     fn continuous_speech_submits_only_finals_and_discards_last_command() {
@@ -266,19 +455,25 @@ mod acceptance {
                     .unwrap();
             assert_eq!(wave.sample_rate(), 24000);
             pcm.extend((0..wave.samples().len() * 2 / 3).map(|i| wave.samples()[i * 3 / 2]));
-            pcm.extend(std::iter::repeat_n(0.0, 16000));
+            pcm.extend(std::iter::repeat_n(0.0, 24000));
         }
-        let mut frames = pcm.chunks(320);
+        let mut remaining = pcm.as_slice();
         capture(
             core.clone(),
             session.clone(),
-            true,
+            ListenOptions {
+                continuous: true,
+                silence_ms: 1000,
+                wake_word: false,
+            },
             control,
             Some(engine),
             |out| {
-                if let Some(frame) = frames.next() {
-                    out[..frame.len()].copy_from_slice(frame);
-                    frame.len()
+                if !remaining.is_empty() {
+                    let n = out.len().min(remaining.len());
+                    out[..n].copy_from_slice(&remaining[..n]);
+                    remaining = &remaining[n..];
+                    n
                 } else {
                     stop.send(Stop::Discard).unwrap();
                     0

@@ -10,6 +10,8 @@ export type Settings = {
   prompt: string;
   speak: boolean;
   tools: boolean;
+  silence_ms: number;
+  wake_word: boolean;
 };
 export type Msg = { role: "user" | "assistant"; content: string };
 export type Session = { id: string; title: string };
@@ -17,7 +19,7 @@ type Pref = { id: number; body: string };
 export type Phase =
   | "IDLE"
   | "LISTENING"
-  | "THINKING"
+  | "PROCESSING"
   | "SPEAKING"
   | "EXECUTING"
   | "STOPPED"
@@ -75,6 +77,8 @@ export const defaults: Settings = {
   prompt: "",
   speak: true,
   tools: false,
+  silence_ms: 1000,
+  wake_word: false,
 };
 export function useConsole() {
   const [online, setOnline] = useState(false),
@@ -129,7 +133,11 @@ export function useConsole() {
     if (!sid.current && data.sessions.length) {
       sid.current = data.sessions[0].id;
       setSession(sid.current);
-      await updateHistory(sid.current);
+      const initial = sid.current;
+      await updateHistory(initial);
+      if (data.settings.wake_word && sid.current === initial) {
+        await invoke("microphone", { session: initial, mode: "auto" });
+      }
     }
   }, [updateHistory]);
   useEffect(() => {
@@ -146,7 +154,7 @@ export function useConsole() {
           setPartial("");
           setError("");
           setFirstMs(null);
-          setPhase("THINKING");
+          setPhase("PROCESSING");
           setBusy(true);
           setMessages((m) => [...m, { role: "user", content: String(e.data) }]);
           return;
@@ -166,7 +174,7 @@ export function useConsole() {
             setFirstMs((e.data as { ms: number }).ms);
             break;
           case "thinking":
-            setPhase("THINKING");
+            setPhase("PROCESSING");
             break;
           case "executing":
             setPhase("EXECUTING");
@@ -185,7 +193,7 @@ export function useConsole() {
             micLevels.current.fill(0);
             setPermission(3);
             if (liveMic.current !== "off") setPhase("LISTENING");
-            else if (!turn.current) setPhase("IDLE");
+            else if (!turn.current) setPhase((last) => last === "PROCESSING" ? last : "IDLE");
             break;
           case "speech":
             if (e.data.state === "cleared") {
@@ -198,7 +206,7 @@ export function useConsole() {
             setPhase("LISTENING");
             break;
           case "recognizing":
-            setPhase("THINKING");
+            setPhase("PROCESSING");
             break;
           case "mic_error":
             setSpeech({ state: "cleared" });
@@ -331,6 +339,10 @@ export function useConsole() {
   async function save(s: Settings) {
     await act("save_settings", { settings: s });
     setSettings(s);
+    if (liveMic.current === "auto" &&
+        (s.silence_ms !== settings.silence_ms || s.wake_word !== settings.wake_word)) {
+      await capture(settings.wake_word && !s.wake_word ? "off" : "auto");
+    }
     void refresh();
   }
   async function preference(text?: string, forget?: number) {
