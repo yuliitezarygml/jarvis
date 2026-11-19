@@ -493,24 +493,22 @@ export default function Hud() {
           <Clock />
         </div>
       </header>
-      <main>
-        <div className="pageTitle">
-          <div>
-            <small className="kicker">
-              <i /> JARVIS OS <span>/</span>{" "}
-              {page === "center"
-                ? "VOICE INTERFACE"
-                : page === "memory"
-                  ? "MEMORY"
-                  : "CONFIGURATION"}
-            </small>
-            <h1>{page === "center" ? "Голосовой пульт" : titles[page]}</h1>
+      <main aria-label={titles[page]}>
+        {page !== "center" && (
+          <div className="pageTitle">
+            <div>
+              <small className="kicker">
+                <i /> JARVIS OS <span>/</span>{" "}
+                {page === "memory" ? "MEMORY" : "CONFIGURATION"}
+              </small>
+              <h1>{titles[page]}</h1>
+            </div>
+            <div className="host">
+              <Icon name="shield" size={15} />
+              {c.stats?.host || "Локальный клиент"}
+            </div>
           </div>
-          <div className="host">
-            <Icon name="shield" size={15} />
-            {c.stats?.host || "Локальный клиент"}
-          </div>
-        </div>
+        )}
         {c.error && (
           <div role="alert" className="alert">
             <span>{c.error}</span>
