@@ -831,3 +831,6 @@ footer span:first-child {
     transition: none !important;
   }
 }
+.actionShade {position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#03090dd9;}
+.actionPrompt {max-width:min(40rem,92vw);max-height:85vh;overflow:auto;padding:1.5rem;overflow-wrap:anywhere;}
+.actionPrompt pre {white-space:pre-wrap;max-height:40vh;overflow:auto;}

@@ -280,8 +280,9 @@ function SettingsForm({ c }: { c: Console }) {
           checked={s.tools}
           onChange={(e) => field("tools", e.target.checked)}
         />
-        Разрешить модели диагностические инструменты
+        {c.windows ? "Разрешить модели инструменты Windows" : "Разрешить модели диагностические инструменты"}
       </label>
+      {c.windows && <label className="auto"><input type="checkbox" checked={s.read_only} onChange={e=>field("read_only",e.target.checked)} />Только чтение</label>}
       <label>
         Пауза после речи
         <select value={s.silence_ms} onChange={(e) => field("silence_ms", Number(e.target.value))}>
@@ -298,7 +299,7 @@ function SettingsForm({ c }: { c: Console }) {
         <span role="status">{saved}</span>
       </div>
       <p className="hint">
-        Ключи и доверенные адреса провайдеров задаются в backend.env на Mac.
+        Ключи и доверенные адреса провайдеров задаются в backend.env приложения.
       </p>
     </form>
   );
@@ -460,6 +461,13 @@ export default function Hud() {
   }, [page]);
   return (
     <div className={page === "center" ? "shell commandCenter" : "shell"}>
+      {c.proposal && <div className="actionShade"><section role="alertdialog" aria-modal="true" aria-label="Подтверждение действия" className="panel actionPrompt">
+        <h2>Подтвердить действие?</h2>
+        <p>{{fs_write:"Записать файл",fs_move:"Переименовать файл",fs_copy:"Скопировать файл",undo_last:"Отменить последнее изменение"}[c.proposal.tool] ?? c.proposal.tool}</p>
+        <p>{c.proposal.detail.folder}</p><strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
+        {c.proposal.detail.text_after!==null && <pre>{c.proposal.detail.text_after}</pre>}
+        <div><button autoFocus onClick={()=>void c.decide(false)}>Отмена</button> <button onClick={()=>void c.decide(true)}>Подтвердить</button></div>
+      </section></div>}
       <header>
         <div className="brand">
           <span className="brandMark">

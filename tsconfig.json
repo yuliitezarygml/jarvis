@@ -36,6 +36,7 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
+    ".kb",
     "node_modules",
     "src-tauri",
     "jarvis-tts-rs"

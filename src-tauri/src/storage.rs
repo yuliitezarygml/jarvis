@@ -7,6 +7,9 @@ use uuid::Uuid;
 fn default_silence_ms() -> u32 {
     1000
 }
+fn read_only_default() -> bool {
+    true
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -16,6 +19,8 @@ pub struct Settings {
     pub prompt: String,
     pub speak: bool,
     pub tools: bool,
+    #[serde(default = "read_only_default")]
+    pub read_only: bool,
     #[serde(default = "default_silence_ms")]
     pub silence_ms: u32,
     #[serde(default)]
@@ -37,12 +42,13 @@ impl Default for Settings {
             .into(),
             speak: true,
             tools: true,
+            read_only: true,
             silence_ms: default_silence_ms(),
             wake_word: false,
         }
     }
 }
-pub struct Store(Connection);
+pub struct Store(pub(crate) Connection);
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -53,6 +59,8 @@ impl Store {
         CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY CHECK(id=1),data TEXT);
         CREATE TABLE IF NOT EXISTS preferences(id INTEGER PRIMARY KEY,body TEXT UNIQUE);")?;
         let db = Self(conn);
+        #[cfg(windows)]
+        db.0.execute_batch("CREATE TABLE IF NOT EXISTS action_log(id INTEGER PRIMARY KEY,created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,session TEXT NOT NULL,request TEXT NOT NULL,tool TEXT NOT NULL,args TEXT NOT NULL,risk INTEGER NOT NULL,confirmation TEXT,result TEXT,exit_code INTEGER,state TEXT NOT NULL DEFAULT 'started',snapshot TEXT,undone INTEGER NOT NULL DEFAULT 0);")?;
         if db.sessions()?.is_empty() {
             db.new_session()?;
         }

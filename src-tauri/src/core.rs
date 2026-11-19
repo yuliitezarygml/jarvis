@@ -29,6 +29,8 @@ pub struct Core {
     pub telemetry: Telemetry,
     #[cfg(windows)]
     pub kb: crate::kb::Knowledge,
+    #[cfg(windows)]
+    pub actions: crate::actions::Actions,
     pub stt: Recognizer,
     active: Mutex<Option<Turn>>,
     playback_phrases: Mutex<std::collections::VecDeque<String>>,
@@ -50,6 +52,8 @@ impl Core {
             telemetry: Telemetry::new(),
             #[cfg(windows)]
             kb: crate::kb::Knowledge::start(dir.to_owned()),
+            #[cfg(windows)]
+            actions: crate::actions::Actions::new(dir)?,
             stt: Recognizer::new(
                 std::env::var_os("JARVIS_STT_DIR")
                     .map(Into::into)
@@ -200,6 +204,12 @@ impl Core {
         let mut first = true;
         let mut schemas = if s.tools {
             ToolRegistry::schemas()
+                .into_iter()
+                .filter(|t| {
+                    !s.read_only
+                        || crate::tools::risk(t["function"]["name"].as_str().unwrap_or("")) == 0
+                })
+                .collect()
         } else {
             vec![]
         };
@@ -241,7 +251,10 @@ impl Core {
             if calls.is_empty() {
                 break;
             }
-            ensure!(s.tools && round < 3, "Превышен лимит вызовов инструментов");
+            ensure!(
+                s.tools && !schemas.is_empty() && round < 3,
+                "Превышен лимит вызовов инструментов"
+            );
             context.push(json!({"role":"assistant","content":current,"tool_calls":calls}));
             for call in calls {
                 let name = call["function"]["name"]
@@ -250,7 +263,17 @@ impl Core {
                 self.event(id, Kind::Executing, json!(name));
                 let args: Value =
                     serde_json::from_str(call["function"]["arguments"].as_str().unwrap_or("{}"))?;
-                let data = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=ToolRegistry::run(self,name,&args)=>r.unwrap_or_else(|e|json!({"error":e.to_string()}))};
+                ensure!(
+                    schemas
+                        .iter()
+                        .any(|schema| schema["function"]["name"] == name),
+                    "Модель запросила недоступный инструмент"
+                );
+                #[cfg(windows)]
+                let execution = crate::actions::dispatch(self, id, session, name, &args);
+                #[cfg(not(windows))]
+                let execution = ToolRegistry::run(self, name, &args);
+                let data = tokio::select! {_=cancel.cancelled()=>bail!("Отменено"),r=execution=>r.unwrap_or_else(|e|json!({"error":e.to_string()}))};
                 context.push(json!({"role":"tool","tool_call_id":call["id"],"content":serde_json::to_string(&data)?}));
             }
             self.event(id, Kind::Thinking, Value::Null);

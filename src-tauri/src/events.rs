@@ -12,6 +12,8 @@ pub enum Kind {
     Cancelled,
     Thinking,
     Executing,
+    #[cfg(windows)]
+    Confirmation,
     Speaking,
     Level,
     FirstText,

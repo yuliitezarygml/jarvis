@@ -10,6 +10,7 @@ export type Settings = {
   prompt: string;
   speak: boolean;
   tools: boolean;
+  read_only: boolean;
   silence_ms: number;
   wake_word: boolean;
 };
@@ -25,6 +26,7 @@ export type Phase =
   | "STOPPED"
   | "ERROR";
 type Bootstrap = {
+  windows: boolean;
   sessions: Session[];
   settings: Settings;
   preferences: Pref[];
@@ -67,7 +69,8 @@ type Event = { session: string; turn?: string } & ({
     | "mic_level"
     | "mic_error"
     | "voice_start"
-    | "recognizing";
+    | "recognizing"
+    | "confirmation";
   data?: unknown;
 } | { kind: "speech"; data: SpeechUpdate });
 export const defaults: Settings = {
@@ -77,10 +80,14 @@ export const defaults: Settings = {
   prompt: "",
   speak: true,
   tools: false,
+  read_only: true,
   silence_ms: 1000,
   wake_word: false,
 };
 export function useConsole() {
+  const [windows,setWindows]=useState(false);
+  type Proposal={turn:string;digest:string;tool:string;detail:{folder:string;file:string;destination:string|null;undo:boolean;text_after:string|null}};
+  const [proposal,setProposal]=useState<Proposal|null>(null);
   const [online, setOnline] = useState(false),
     [sessions, setSessions] = useState<Session[]>([]),
     [session, setSession] = useState(""),
@@ -124,6 +131,7 @@ export function useConsole() {
   }, [report]);
   const load = useCallback(async () => {
     const data = await invoke<Bootstrap>("bootstrap");
+    setWindows(data.windows);
     setSessions(data.sessions);
     setSettings(data.settings);
     setPrefs(data.preferences);
@@ -148,6 +156,7 @@ export function useConsole() {
       const off = await listen<Event>("jarvis-event", ({ payload: e }) => {
         if (e.session !== sid.current) return;
         if (e.kind === "start") {
+          setProposal(null);
           historyVersion.current++;
           turn.current = e.turn ?? "";
           buffer.current = "";
@@ -161,6 +170,9 @@ export function useConsole() {
         }
         if (e.turn && e.turn !== turn.current) return;
         switch (e.kind) {
+          case "confirmation":
+            setProposal(e.data as Proposal|null);
+            break;
           case "delta":
             buffer.current += String(e.data);
             if (!paint.current)
@@ -219,6 +231,7 @@ export function useConsole() {
           case "done":
           case "cancelled":
           case "error":
+            setProposal(null);
             turn.current = "";
             setBusy(false);
             if (e.kind === "done" && buffer.current) {
@@ -353,6 +366,13 @@ export function useConsole() {
     setPrefs(p);
   }
   return {
+    windows,proposal,
+    decide:async (allow:boolean)=>{
+      if(!proposal)return;
+      try {await invoke("confirm_action",{turn:proposal.turn,digest:proposal.digest,allow});}
+      catch(e){report(e);}
+      finally{setProposal(null);}
+    },
     online,
     sessions,
     session,

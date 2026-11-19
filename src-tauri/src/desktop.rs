@@ -10,7 +10,7 @@ fn error(e: anyhow::Error) -> String {
 pub fn bootstrap(core: Shared) -> Result<Value, String> {
     let db = core.db.lock().unwrap();
     Ok(
-        json!({"sessions":db.sessions().map_err(error)?,"settings":db.settings().map_err(error)?,"preferences":db.prefs().map_err(error)?,"stt":core.stt.available(),"streamingStt":core.stt.streaming_available(),"microphone":audio::mic_status()}),
+        json!({"windows":cfg!(windows),"sessions":db.sessions().map_err(error)?,"settings":db.settings().map_err(error)?,"preferences":db.prefs().map_err(error)?,"stt":core.stt.available(),"streamingStt":core.stt.streaming_available(),"microphone":audio::mic_status()}),
     )
 }
 #[tauri::command]
@@ -98,4 +98,21 @@ pub async fn run_tool(core: Shared<'_>, name: String) -> Result<Value, String> {
     ToolRegistry::run(&core, &name, &json!({}))
         .await
         .map_err(error)
+}
+#[tauri::command]
+pub fn confirm_action(
+    core: Shared,
+    turn: String,
+    digest: String,
+    allow: bool,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        core.actions.decide(&turn, &digest, allow).map_err(error)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (core, turn, digest, allow);
+        Err("Недоступно на этой платформе".into())
+    }
 }

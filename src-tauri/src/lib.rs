@@ -1,9 +1,13 @@
+#[cfg(windows)]
+mod actions;
 mod audio;
 mod capture;
 mod commands;
 mod core;
 mod desktop;
 mod events;
+#[cfg(windows)]
+mod files;
 #[cfg(windows)]
 mod kb;
 mod platform;
@@ -26,6 +30,10 @@ pub fn run() {
                     let _ = app_handle.emit("jarvis-event", event);
                 }),
             )?;
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = core.actions.window.set(w);
+            }
             app.manage(core);
             Ok(())
         })
@@ -42,6 +50,7 @@ pub fn run() {
             desktop::session_action,
             desktop::telemetry,
             desktop::connections,
+            desktop::confirm_action,
             desktop::run_tool
         ])
         .run(tauri::generate_context!())
