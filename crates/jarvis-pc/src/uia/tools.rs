@@ -358,7 +358,7 @@ impl Tool for UiFocusWindow {
     }
 }
 
-pub(crate) struct UiWindowList(pub Arc<PcShared>);
+pub(crate) struct UiWindowList;
 
 fn fmt_window(w: &win::WindowInfo) -> String {
     let Rect { x, y, w: ww, h } = w.rect;

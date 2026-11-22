@@ -100,6 +100,7 @@ pub fn do_emergency_stop(app: &AppHandle, source: &str) {
         }
     }
     if let Some(id) = pending {
+        app.state::<AppHooks>().confirm(&id, false);
         sink.emit(Event::ConfirmResolved { id, approved: false });
     }
     sink.emit(Event::ControlStop);
@@ -107,11 +108,51 @@ pub fn do_emergency_stop(app: &AppHandle, source: &str) {
     let _ = app.emit(EMERGENCY_EVENT, serde_json::json!({ "source": source }));
 }
 
-/// Ответ на `ConfirmRequest` (кнопки «Да/Нет» в HUD или истёкший таймер → `approved: false`).
+/// Ответ на `ConfirmRequest` (кнопки «Да/Нет» в HUD). Ответ на уже закрытый запрос — ошибка.
 #[tauri::command]
-pub fn confirm_respond(app: AppHandle, id: String, approved: bool) {
-    app.state::<AppHooks>().confirm(&id, approved);
-    app.state::<SinkState>().0.emit(Event::ConfirmResolved { id, approved });
+pub fn confirm_respond(app: AppHandle, id: String, approved: bool) -> CmdResult<()> {
+    resolve_confirm(&app, &id, approved).then_some(()).ok_or_else(|| "Этот запрос уже закрыт".to_string())
+}
+
+/// Закрыть открытый запрос подтверждения: хук бэкенда + событие `ConfirmResolved`. false — запрос уже не открыт.
+pub fn resolve_confirm(app: &AppHandle, id: &str, approved: bool) -> bool {
+    let sink = &app.state::<SinkState>().0;
+    if sink.cache().lock().unwrap().pending_confirm_id().as_deref() != Some(id) {
+        return false;
+    }
+    app.state::<AppHooks>().confirm(id, approved);
+    sink.emit(Event::ConfirmResolved { id: id.to_string(), approved });
+    true
+}
+
+/// Таймаут подтверждения на стороне оболочки: если за `timeout_ms` (+1,5 с запаса) никто не ответил —
+/// «нет» (fail-closed), чтобы запрос не висел, даже если бэкенд не следит за временем.
+pub struct ConfirmTimeouts;
+
+impl crate::sink::SinkEffects<tauri::Wry> for ConfirmTimeouts {
+    fn on_event(&self, app: &AppHandle, event: &Event) {
+        if let Event::ConfirmRequest { id, timeout_ms, .. } = event {
+            let (app, id, wait) = (app.clone(), id.clone(), *timeout_ms + 1_500);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(wait));
+                resolve_confirm(&app, &id, false);
+            });
+        }
+    }
+}
+
+/// Открыть ссылку (источник, статья KB) в браузере по умолчанию. Только http(s).
+#[tauri::command]
+pub fn open_url(url: String) -> CmdResult<()> {
+    let ok = url.starts_with("https://") || url.starts_with("http://");
+    if !ok || url.chars().any(|c| c.is_control() || c == '"') {
+        return Err("Открываются только ссылки http:// и https://".into());
+    }
+    #[cfg(windows)]
+    let cmd = std::process::Command::new("explorer").arg(&url).spawn();
+    #[cfg(not(windows))]
+    let cmd = std::process::Command::new("xdg-open").arg(&url).spawn();
+    cmd.map(|_| ()).map_err(err)
 }
 
 /// Снимок текущего состояния интерфейса — новое окно прогоняет его через свой редьюсер.

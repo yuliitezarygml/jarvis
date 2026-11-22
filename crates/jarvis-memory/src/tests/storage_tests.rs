@@ -215,12 +215,14 @@ fn export_contains_everything() {
     let _: Vec<Message> = serde_json::from_value(e["messages"].clone()).unwrap();
 }
 
-/// Уникальное «слово» из латиницы для теста конкурентности (чтобы факты не сливались дедупом).
+/// Уникальное «слово» для теста конкурентности (чтобы факты не сливались дедупом).
+/// Только согласные без `y`: английский стеммер не должен свести два кода к одной основе.
 fn code(mut n: usize) -> String {
+    const ALPHA: &[u8] = b"bcdfghjklmnpqrtvwxz";
     let mut s = String::new();
     loop {
-        s.push((b'a' + (n % 26) as u8) as char);
-        n /= 26;
+        s.push(ALPHA[n % ALPHA.len()] as char);
+        n /= ALPHA.len();
         if n == 0 {
             break;
         }

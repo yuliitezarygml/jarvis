@@ -200,6 +200,28 @@ impl Kb {
             size_bytes,
         })
     }
+
+    /// По `per_source` URL документов каждого источника, равномерно по алфавиту (для проверки ссылок в `kb-build`).
+    pub fn sample_urls(&self, per_source: usize) -> Result<Vec<(String, String)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare("SELECT DISTINCT source, url FROM chunks ORDER BY source, url")?;
+        let all = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < all.len() {
+            let src = &all[i].0;
+            let j = all[i..].iter().position(|(s, _)| s != src).map_or(all.len(), |p| i + p);
+            let n = j - i;
+            let take = per_source.min(n);
+            for t in 0..take {
+                out.push(all[i + (t * n) / take.max(1)].clone());
+            }
+            i = j;
+        }
+        Ok(out)
+    }
 }
 
 /// Текущее время UTC в RFC 3339 (`2026-11-22T16:05:00Z`) без внешних зависимостей.
@@ -265,6 +287,9 @@ mod tests {
         assert_eq!(st.sources.len(), 4);
         assert!(st.built_at.ends_with('Z'));
         assert!(st.size_bytes > 0);
+        let sample = kb.sample_urls(2).unwrap();
+        assert_eq!(sample.iter().filter(|(s, _)| s == "windows-commands").count(), 2);
+        assert_eq!(sample.iter().filter(|(s, _)| s == "seed").count(), 1);
 
         // Пересборка, пока база открыта: на Windows rename поверх открытого файла падает → .new + reload().
         let tmp = dir.path().join("kb2.sqlite");

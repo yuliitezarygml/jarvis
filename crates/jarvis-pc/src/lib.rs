@@ -6,6 +6,8 @@
 
 pub mod control;
 pub mod input;
+pub mod screen;
+pub mod terminal;
 pub mod uia;
 pub mod win;
 
@@ -19,6 +21,9 @@ use std::sync::Arc;
 
 pub use control::{ControlSession, GlowControl, GlowHold};
 pub use input::{INJECTED_TAG, release_all_held};
+pub use terminal::{
+    HookShell, PtySessions, TerminalContext, shell_hook_install, shell_hook_script, shell_hook_uninstall,
+};
 pub use uia::{UiElement, UiSnapshot, Uia};
 pub use win::{exclude_from_capture, include_in_capture};
 
@@ -58,10 +63,9 @@ impl PcOptions {
 pub(crate) struct PcShared {
     pub(crate) glow: Arc<GlowControl>,
     pub(crate) uia: Arc<Uia>,
-    #[allow(dead_code)]
     pub(crate) data_dir: PathBuf,
-    #[allow(dead_code)]
     pub(crate) classifier: CommandClassifier,
+    pub(crate) pty: Arc<PtySessions>,
 }
 
 /// Набор инструментов ПК с общим состоянием (поток UIA, свечение, PTY-сессии).
@@ -78,6 +82,7 @@ impl PcToolkit {
                 uia: Uia::new(),
                 data_dir: opts.data_dir,
                 classifier: opts.classifier,
+                pty: PtySessions::new(),
             }),
         }
     }
@@ -85,6 +90,8 @@ impl PcToolkit {
     /// Все инструменты модуля (для `ToolRegistry::extend`).
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
         use input::tools::*;
+        use screen::tools::*;
+        use terminal::tools::*;
         use uia::tools::*;
         let s = &self.shared;
         vec![
@@ -104,7 +111,15 @@ impl PcToolkit {
             Arc::new(UiSelect(s.clone())),
             Arc::new(UiScroll(s.clone())),
             Arc::new(UiFocusWindow(s.clone())),
-            Arc::new(UiWindowList(s.clone())),
+            Arc::new(UiWindowList),
+            Arc::new(ScreenCapture),
+            Arc::new(ScreenMarks(s.clone())),
+            Arc::new(ScreenOcr),
+            Arc::new(TerminalContextTool(s.clone())),
+            Arc::new(TerminalRun(s.clone())),
+            Arc::new(TerminalType(s.clone())),
+            Arc::new(ShellHookInstall(s.clone())),
+            Arc::new(ShellHookUninstall(s.clone())),
         ]
     }
 
@@ -116,5 +131,14 @@ impl PcToolkit {
     /// Поток UI Automation (последний снимок — [`Uia::last_snapshot`]).
     pub fn uia(&self) -> Arc<Uia> {
         self.shared.uia.clone()
+    }
+
+    /// Запуски `terminal_run` (источник №1 для `terminal_context`).
+    pub fn pty_sessions(&self) -> Arc<PtySessions> {
+        self.shared.pty.clone()
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.shared.data_dir
     }
 }

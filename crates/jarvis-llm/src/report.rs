@@ -72,25 +72,96 @@ fn pre_score(m: &ModelInfo) -> i64 {
     m.quality as i64 * 10 + if m.tools { 6 } else { 0 } + if ctx_ok { 3 } else { 0 } + speed + i64::from(m.vision)
 }
 
-/// Кого проверять: лучшие по метаданным + несколько vision-моделей; детерминированно.
-pub fn select_candidates<'a>(models: &'a [ModelInfo], spec: &ProviderSpec, max: usize, vision_slots: usize) -> Vec<&'a ModelInfo> {
-    let mut pool: Vec<&ModelInfo> = models.iter().filter(|m| !spec.skip_probe(&m.id)).collect();
-    pool.sort_by(|a, b| pre_score(b).cmp(&pre_score(a)).then_with(|| a.id.cmp(&b.id)));
-    let vision_slots = vision_slots.min(max);
-    let mut picked: Vec<&ModelInfo> = pool.iter().copied().take(max - vision_slots).collect();
-    // Зарезервированные места — лучшим vision-моделям, ещё не попавшим в список.
-    let extra: Vec<&ModelInfo> =
-        pool.iter().copied().filter(|m| m.vision && !picked.iter().any(|p| p.id == m.id)).take(vision_slots).collect();
-    picked.extend(extra);
-    for m in &pool {
-        if picked.len() >= max {
-            break;
-        }
-        if !picked.iter().any(|p| p.id == m.id) {
-            picked.push(m);
+/// Сравнение с учётом чисел: `gpt-5.10` > `gpt-5.9`, `claude-sonnet-5-5` > `claude-sonnet-5`.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i].is_ascii_digit() && b[j].is_ascii_digit() {
+            let (si, sj) = (i, j);
+            while i < a.len() && a[i].is_ascii_digit() {
+                i += 1;
+            }
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            let (na, nb) = (&a[si..i], &b[sj..j]);
+            let na = std::str::from_utf8(na).unwrap_or("0").trim_start_matches('0');
+            let nb = std::str::from_utf8(nb).unwrap_or("0").trim_start_matches('0');
+            let o = na.len().cmp(&nb.len()).then_with(|| na.cmp(nb));
+            if o != Ordering::Equal {
+                return o;
+            }
+        } else {
+            if a[i] != b[j] {
+                return a[i].cmp(&b[j]);
+            }
+            i += 1;
+            j += 1;
         }
     }
-    picked.truncate(max);
+    (a.len() - i).cmp(&(b.len() - j))
+}
+
+fn blended_price(m: &ModelInfo) -> Option<f64> {
+    Some(m.price_in? * 0.6 + m.price_out? * 0.4)
+}
+
+/// Кого проверять вживую (детерминированно), чтобы покрыть все роли:
+/// лучшие по метаданным (по одной на семейство, новые версии первыми) + места под зрение, самую быструю и самую дешёвую.
+pub fn select_candidates<'a>(models: &'a [ModelInfo], spec: &ProviderSpec, max: usize, vision_slots: usize) -> Vec<&'a ModelInfo> {
+    let mut pool: Vec<&ModelInfo> = models.iter().filter(|m| !spec.skip_probe(&m.id)).collect();
+    pool.sort_by(|a, b| pre_score(b).cmp(&pre_score(a)).then_with(|| natural_cmp(&b.id, &a.id)));
+    let family = |m: &ModelInfo| m.family.clone().unwrap_or_else(|| m.id.clone());
+
+    let mut picked: Vec<&ModelInfo> = Vec::new();
+    let push = |picked: &mut Vec<&'a ModelInfo>, m: &'a ModelInfo, unique_family: bool| -> bool {
+        let dup = picked.iter().any(|p| p.id == m.id || (unique_family && family(p) == family(m)));
+        if picked.len() < max && !dup {
+            picked.push(m);
+            true
+        } else {
+            false
+        }
+    };
+
+    let vision_slots = vision_slots.min(max);
+    let special = 2usize.min(max.saturating_sub(vision_slots)); // быстрая + дешёвая
+    let top_n = max.saturating_sub(vision_slots + special).max(1);
+    for m in &pool {
+        if picked.len() >= top_n {
+            break;
+        }
+        push(&mut picked, m, true);
+    }
+    let mut added = 0;
+    for m in pool.iter().filter(|m| m.vision) {
+        if added >= vision_slots {
+            break;
+        }
+        if push(&mut picked, m, true) {
+            added += 1;
+        }
+    }
+    // Самая быстрая (по подсказке каталога) с инструментами.
+    if let Some(m) = pool.iter().find(|m| m.speed == crate::SpeedHint::Fast && m.tools && !picked.iter().any(|p| p.id == m.id)) {
+        push(&mut picked, m, false);
+    }
+    // Самая дешёвая из моделей с известной ценой.
+    let mut priced: Vec<&&ModelInfo> = pool.iter().filter(|m| blended_price(m).is_some()).collect();
+    priced.sort_by(|a, b| {
+        blended_price(a).unwrap_or(0.0).total_cmp(&blended_price(b).unwrap_or(0.0)).then_with(|| pre_score(b).cmp(&pre_score(a)))
+    });
+    if let Some(m) = priced.into_iter().find(|m| !picked.iter().any(|p| p.id == m.id)) {
+        push(&mut picked, m, false);
+    }
+    // Добрать: сначала новые семейства, потом что угодно.
+    for unique in [true, false] {
+        for m in &pool {
+            push(&mut picked, m, unique);
+        }
+    }
     picked
 }
 

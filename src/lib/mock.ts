@@ -69,7 +69,7 @@ export function maskKey(key: string): string {
     head.push(c);
   }
   const tail = chars.slice(-4).join('');
-  return `${head.length < chars.length / 2 ? head.join('') : ''}…${tail}`;
+  return `${head.length < Math.floor(chars.length / 2) ? head.join('') : ''}…${tail}`;
 }
 
 let storedConfig: Config | null = null;
@@ -178,6 +178,9 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
       return r(null);
     case 'events_replay':
       return r([]);
+    case 'open_url':
+      if (/^https?:\/\//.test(String(a.url))) window.open(String(a.url), '_blank', 'noopener');
+      return r(null);
     case 'simulate_demo':
       stopDemo?.();
       stopDemo = playDemo(emitEvent);

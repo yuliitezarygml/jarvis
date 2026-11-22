@@ -62,7 +62,7 @@ fn mapping_note(origin: Rect, scale: f64) -> String {
     }
 }
 
-pub(crate) struct ScreenCapture(pub Arc<PcShared>);
+pub(crate) struct ScreenCapture;
 
 #[async_trait]
 impl Tool for ScreenCapture {
@@ -173,7 +173,7 @@ impl Tool for ScreenMarks {
     }
 }
 
-pub(crate) struct ScreenOcr(pub Arc<PcShared>);
+pub(crate) struct ScreenOcr;
 
 /// Строк OCR в ответе модели не больше этого.
 const MAX_OCR_LINES: usize = 300;

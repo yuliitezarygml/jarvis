@@ -498,11 +498,6 @@ impl UiaState {
         }
     }
 
-    pub(crate) fn focus(&self, id: u32) -> Result<(), ToolError> {
-        // SAFETY: вызов COM.
-        unsafe { self.element(id)?.SetFocus() }.map_err(uia_err)
-    }
-
     /// Текст окна терминала через TextPattern: видимая область + `scrollback` строк выше неё.
     pub(crate) fn terminal_text(&self, win: &WindowInfo, scrollback: i32) -> Result<String, ToolError> {
         let root = self.root(win)?;

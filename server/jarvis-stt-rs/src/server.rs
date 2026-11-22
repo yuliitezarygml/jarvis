@@ -356,18 +356,25 @@ impl Session {
         Ok(())
     }
 
+    /// Новая фраза. Половинку сэмпла в декодере не трогаем: при автоматическом final посреди кадра
+    /// она относится уже к следующей фразе (её сбрасывают только явные `end`/`reset`).
     fn clear(&mut self) {
         self.samples = 0;
         self.last_partial.clear();
-        self.dec.clear();
     }
 
     async fn handle(&mut self, socket: &mut WebSocket, msg: Message) -> Result<bool, Fatal> {
         match msg {
             Message::Binary(b) => self.audio(socket, &b).await?,
             Message::Text(t) => match serde_json::from_str::<ClientMsg>(t.as_str()) {
-                Ok(ClientMsg::End) => self.end(socket).await?,
-                Ok(ClientMsg::Reset) => self.reset().await?,
+                Ok(ClientMsg::End) => {
+                    self.dec.clear();
+                    self.end(socket).await?
+                }
+                Ok(ClientMsg::Reset) => {
+                    self.dec.clear();
+                    self.reset().await?
+                }
                 Err(_) => {
                     send(
                         socket,

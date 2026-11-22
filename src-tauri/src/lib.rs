@@ -45,7 +45,9 @@ pub fn run() {
         .manage(demo::MemoryStore::default())
         .setup(move |app| {
             let handle = app.handle().clone();
-            let sink = TauriSink::new(handle.clone()).with_effects(Arc::new(WindowEffects));
+            let sink = TauriSink::new(handle.clone())
+                .with_effects(Arc::new(WindowEffects))
+                .with_effects(Arc::new(commands::ConfirmTimeouts));
             app.manage(SinkState(sink.clone()));
 
             windows_manager::create_windows(&handle, &initial)?;
@@ -73,6 +75,7 @@ pub fn run() {
             commands::config_path_get,
             commands::emergency_stop,
             commands::confirm_respond,
+            commands::open_url,
             commands::events_replay,
             commands::simulate_demo,
             commands::simulate_stop,

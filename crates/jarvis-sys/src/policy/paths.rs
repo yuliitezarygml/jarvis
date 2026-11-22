@@ -219,8 +219,8 @@ fn expand_vars(raw: &str, expandable: bool, ctx: &PolicyCtx) -> Option<String> {
                 i += end + 2;
                 continue;
             }
-            out.push(c);
-            i += 1;
+            // одиночный `%i` — переменная цикла for
+            return None;
         } else if c == '!' && chars[i + 1..].contains(&'!') {
             return None; // отложенное раскрытие cmd
         } else if c == '$' {

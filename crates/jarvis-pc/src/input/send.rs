@@ -63,10 +63,6 @@ impl InputRunner {
         Self { cancel, local: HeldTracker::new(), vs: virtual_screen(), _dpi: dpi }
     }
 
-    pub(crate) fn virtual_screen(&self) -> Rect {
-        self.vs
-    }
-
     pub(crate) fn check(&self) -> Result<(), ToolError> {
         if self.cancel.is_cancelled() { Err(ToolError::Cancelled) } else { Ok(()) }
     }

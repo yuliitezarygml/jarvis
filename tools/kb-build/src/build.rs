@@ -380,9 +380,11 @@ pub fn run(opts: &BuildOptions) -> Result<BuildReport, String> {
     }
     let mut reports: Vec<SourceReport> = acquired.into_iter().map(|a| a.report).collect();
     if opts.only.is_some() {
-        for id in carried_ids.iter().filter(|id| !reports.iter().any(|r| &r.id == *id)) {
-            reports.push(SourceReport { id: id.clone(), status: "kept".into(), ..Default::default() });
-        }
+        let mut kept: Vec<&String> = carried_ids.iter().filter(|id| !reports.iter().any(|r| &r.id == *id)).collect();
+        kept.sort();
+        let kept: Vec<SourceReport> =
+            kept.into_iter().map(|id| SourceReport { id: id.clone(), status: "kept".into(), ..Default::default() }).collect();
+        reports.extend(kept);
     }
     let total = w.chunk_count().map_err(|e| e.to_string())?;
     let out = w.finish().map_err(|e| e.to_string())?;

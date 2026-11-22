@@ -128,9 +128,20 @@ pub(crate) struct Acc {
     pub tier: Option<RiskTier>,
     pub reasons: Vec<String>,
     pub protected: bool,
+    /// Смена текущего каталога внутри команды (`cd`, `Set-Location`, `pushd`):
+    /// `Some(Some(p))` — известный каталог, `Some(None)` — неизвестный (относительные пути → T3).
+    pub cwd: Option<Option<PathBuf>>,
 }
 
 impl Acc {
+    /// Окружение с учётом `cd` внутри команды.
+    pub fn effective<'a>(&self, ctx: &'a PolicyCtx) -> std::borrow::Cow<'a, PolicyCtx> {
+        match &self.cwd {
+            None => std::borrow::Cow::Borrowed(ctx),
+            Some(c) => std::borrow::Cow::Owned(PolicyCtx { cwd: c.clone(), ..ctx.clone() }),
+        }
+    }
+
     pub fn raise(&mut self, tier: RiskTier, why: impl Into<String>) {
         let why = why.into();
         if tier > RiskTier::T0 && !self.reasons.contains(&why) {

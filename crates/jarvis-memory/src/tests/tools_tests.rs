@@ -1,4 +1,4 @@
-use jarvis_core::{RiskTier, Tool, ToolCtx, ToolError, ToolRegistry};
+use jarvis_core::{RiskTier, ToolCtx, ToolError, ToolRegistry};
 use serde_json::json;
 
 use super::temp_mem;
@@ -53,8 +53,11 @@ async fn remember_recall_forget_flow() {
     assert!(out.content.starts_with("В памяти ничего не нашлось"));
 
     // неуверенное совпадение — ничего не удаляется, возвращаются кандидаты
-    let out = forget.call(json!({"query": "кофейные зёрна и кофемашина"}), &ctx).await.unwrap();
+    let out = forget.call(json!({"query": "кофе и погода в Москве"}), &ctx).await.unwrap();
     assert!(out.content.contains("ничего не удалено"), "{}", out.content);
+    assert!(out.content.contains("чёрный кофе"), "кандидаты перечислены: {}", out.content);
+    let out = forget.call(json!({"query": "квантовая физика"}), &ctx).await.unwrap();
+    assert!(out.content.starts_with("В памяти нет ничего"), "{}", out.content);
     assert_eq!(mem.stats().unwrap().facts, 2);
     // уверенное — удаляется
     let out = forget.call(json!({"query": "что я пью кофе"}), &ctx).await.unwrap();

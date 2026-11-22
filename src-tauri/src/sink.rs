@@ -126,7 +126,7 @@ pub trait SinkEffects<R: Runtime>: Send + Sync {
 pub struct TauriSink<R: Runtime> {
     app: AppHandle<R>,
     cache: Arc<Mutex<EventCache>>,
-    effects: Option<Arc<dyn SinkEffects<R>>>,
+    effects: Vec<Arc<dyn SinkEffects<R>>>,
 }
 
 impl<R: Runtime> Clone for TauriSink<R> {
@@ -137,11 +137,12 @@ impl<R: Runtime> Clone for TauriSink<R> {
 
 impl<R: Runtime> TauriSink<R> {
     pub fn new(app: AppHandle<R>) -> Self {
-        Self { app, cache: Arc::new(Mutex::new(EventCache::default())), effects: None }
+        Self { app, cache: Arc::new(Mutex::new(EventCache::default())), effects: Vec::new() }
     }
 
+    /// Добавить обработчик побочных эффектов (вызываются по порядку добавления).
     pub fn with_effects(mut self, effects: Arc<dyn SinkEffects<R>>) -> Self {
-        self.effects = Some(effects);
+        self.effects.push(effects);
         self
     }
 
@@ -157,7 +158,7 @@ impl<R: Runtime> TauriSink<R> {
 impl<R: Runtime> EventSink for TauriSink<R> {
     fn emit(&self, event: Event) {
         self.cache.lock().unwrap().record(&event);
-        if let Some(fx) = &self.effects {
+        for fx in &self.effects {
             fx.on_event(&self.app, &event);
         }
         if let Err(e) = self.app.emit(EVENT_NAME, &event) {

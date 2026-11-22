@@ -83,7 +83,7 @@ fn first_command_of_line(line: &str, known: &HashSet<String>) -> Option<String> 
 /// Команды фрагмента в порядке появления, без повторов (без учёта регистра).
 pub fn chunk_commands(code: &[(String, String)], prose: &str, known_exes: &HashSet<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut push = |c: String, out: &mut Vec<String>| {
+    let push = |c: String, out: &mut Vec<String>| {
         if !out.iter().any(|o| o.eq_ignore_ascii_case(&c)) {
             out.push(c);
         }

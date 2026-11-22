@@ -152,12 +152,13 @@ fn score(m: &ModelInfo, p: &ProbeResult, role: ModelRole) -> Option<Recommendati
                 (Some(i), Some(o)) => Some(i * 0.6 + o * 0.4),
                 _ => None,
             };
+            // Главное — цена и контекст; качество вторично (рефлектор пишет короткий JSON).
             let cheap = match blended {
-                Some(b) if b == 0.0 => 30.0,
-                Some(b) => (30.0 - 10.0 * (1.0 + b * 4.0).log10()).max(0.0),
-                None => 10.0,
+                Some(b) if b == 0.0 => 40.0,
+                Some(b) => (40.0 - 10.0 * (1.0 + b * 4.0).log10()).max(0.0),
+                None => 15.0,
             };
-            s = cheap + ctx_bonus(m.ctx, 4.0, 20.0) + q * 6.0 - (ttft * 2.0).min(10.0);
+            s = cheap + ctx_bonus(m.ctx, 5.0, 25.0) + q * 5.0 - (ttft * 2.0).min(10.0);
             match fmt_price(m.price_in, m.price_out) {
                 Some(pr) => reasons.push(format!("цена {pr}")),
                 None => reasons.push("цена неизвестна".into()),

@@ -2,7 +2,8 @@
 //!
 //! Нормализация (одинаково для эталона и гипотезы): нижний регистр, «ё»→«е», числа цифрами → словами
 //! (именительный падеж), «%»→«процентов», «+»→«плюс», дефис склеивает слова («вай-фай»→«вайфай»),
-//! прочая пунктуация удаляется, латинские написания частых слов приводятся к русским («wi-fi»→«вайфай»).
+//! прочая пунктуация удаляется, латинские написания частых слов и названия букв приводятся к одному
+//! написанию («Wi-Fi»/«вай фай»→«вайфай», «D»/«де»→«дэ»). Ошибки распознавания («джарвиз») не прощаются.
 
 const ALIASES: &[(&str, &str)] = &[
     ("wifi", "вайфай"),
@@ -11,7 +12,15 @@ const ALIASES: &[(&str, &str)] = &[
     ("chrome", "хром"),
     ("google", "гугл"),
     ("rust", "раст"),
-    ("джарвиз", "джарвис"),
+    ("d", "дэ"),
+    ("де", "дэ"),
+];
+
+/// Слитные написания, которые модели иногда разбивают на два слова.
+const COMPOUNDS: &[(&str, &str, &str)] = &[
+    ("вай", "фай", "вайфай"),
+    ("wi", "fi", "вайфай"),
+    ("блю", "туз", "блютуз"),
 ];
 
 const UNITS: [&str; 10] = [
@@ -179,12 +188,24 @@ pub fn normalize_words(text: &str) -> Vec<String> {
             words.push(buf);
         }
     }
-    for w in words.iter_mut() {
+    let mut merged: Vec<String> = Vec::with_capacity(words.len());
+    for w in words {
+        if let Some(prev) = merged.last_mut()
+            && let Some((_, _, joined)) = COMPOUNDS
+                .iter()
+                .find(|(a, b, _)| *a == prev.as_str() && *b == w.as_str())
+        {
+            *prev = (*joined).to_string();
+            continue;
+        }
+        merged.push(w);
+    }
+    for w in merged.iter_mut() {
         if let Some((_, to)) = ALIASES.iter().find(|(from, _)| *from == w.as_str()) {
             *w = (*to).to_string();
         }
     }
-    words
+    merged
 }
 
 /// Расстояние Левенштейна между последовательностями.
@@ -267,6 +288,9 @@ mod tests {
         );
         assert_eq!(normalize_words("Включи вай-фай"), ["включи", "вайфай"]);
         assert_eq!(normalize_words("включи Wi-Fi."), ["включи", "вайфай"]);
+        assert_eq!(normalize_words("включи вай фай"), ["включи", "вайфай"]);
+        assert_eq!(normalize_words("на диске D"), ["на", "диске", "дэ"]);
+        assert_eq!(normalize_words("джарвиз"), ["джарвиз"]); // ошибки не прощаем
         assert_eq!(normalize_words("на 30%"), ["на", "тридцать", "процентов"]);
         assert_eq!(
             normalize_words("Ещё раз — и всё"),

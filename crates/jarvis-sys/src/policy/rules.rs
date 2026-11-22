@@ -237,7 +237,7 @@ fn target(acc: &mut Acc, ctx: &PolicyCtx, shell: Shell, a: &Arg, op: Op, what: &
         return;
     }
     if let Some(reg) = parse_reg_path(&a.text) {
-        let key = if reg.key.is_empty() { a.text.clone() } else { a.text.clone() };
+        let key = &a.text;
         let user = reg.hive == Hive::CurrentUser && !reg.sensitive();
         match op {
             Op::Read => {}
@@ -260,7 +260,8 @@ fn target(acc: &mut Acc, ctx: &PolicyCtx, shell: Shell, a: &Arg, op: Op, what: &
         }
         return;
     }
-    let (zone, _) = zone_of(&a.text, a.expandable && !a.quoted || a.expandable && a.text.contains('$'), ctx);
+    let eff = acc.effective(ctx);
+    let (zone, _) = zone_of(&a.text, a.expandable, &eff);
     let pop = match op {
         Op::Write => PathOp::Write,
         Op::Delete { recursive } => PathOp::Delete { recursive },
@@ -276,11 +277,16 @@ fn target(acc: &mut Acc, ctx: &PolicyCtx, shell: Shell, a: &Arg, op: Op, what: &
     }
 }
 
-fn zone(ctx: &PolicyCtx, a: &Arg) -> PathZone {
-    if a.group {
-        return PathZone::Unknown;
+/// Нормализованный путь аргумента (для `cd`), `None` — не вычислить заранее.
+fn resolve_dir(acc: &Acc, ctx: &PolicyCtx, a: &Arg) -> Option<std::path::PathBuf> {
+    if a.group || parse_reg_path(&a.text).is_some() {
+        return None;
     }
-    zone_of(&a.text, a.expandable, ctx).0
+    let eff = acc.effective(ctx);
+    match zone_of(&a.text, a.expandable, &eff) {
+        (PathZone::Unknown, _) | (_, None) => None,
+        (_, Some(p)) => Some(p.into()),
+    }
 }
 
 // ───────────────────────────── классификация сегментов ─────────────────────────────
@@ -362,6 +368,8 @@ impl Cx<'_> {
                             let name = text.clone();
                             self.command(&name, &toks[2..], piped);
                         }
+                        // `& { … }` — блок уже проверен как вложенный код
+                        Some(Tok::Group { kind: GroupKind::Block, .. }) => {}
                         Some(_) => self.acc.raise(T3, "вызов команды из переменной/выражения (&) — нельзя проверить"),
                     }
                     return;
@@ -425,9 +433,6 @@ impl Cx<'_> {
                     self.acc.raise(T3, format!("using {what}: загрузка внешнего кода"));
                 }
             }
-            "foreach" if rest.first().is_some_and(|t| t.is_bare() && t.word().is_some_and(|w| !w.starts_with('-'))) => {
-                // `foreach` как псевдоним ForEach-Object с аргументом-командой — блоки уже проверены
-            }
             _ => {}
         }
     }
@@ -437,9 +442,6 @@ impl Cx<'_> {
         for i in 1..toks.len() {
             let Tok::Group { kind: GroupKind::Paren, attached: true, .. } = &toks[i] else { continue };
             let Some(prev) = toks[i - 1].word() else { continue };
-            if !toks[i - 1].is_bare() && !prev.contains("::") {
-                continue;
-            }
             let (receiver, method) = match (prev.rfind("::"), prev.rfind('.')) {
                 (Some(a), Some(b)) if b > a + 1 => (&prev[..b], &prev[b + 1..]),
                 (Some(a), _) => (&prev[..a], &prev[a + 2..]),
@@ -571,7 +573,10 @@ impl Cx<'_> {
 
     fn command(&mut self, raw: &str, toks: &[Tok], piped: bool) {
         let args: Vec<Arg> = toks.iter().map(Arg::from_tok).collect();
-        let trimmed = raw.trim_matches(['"', '\'']);
+        let mut trimmed = raw.trim_matches(['"', '\'']);
+        if self.shell == Shell::Cmd {
+            trimmed = trimmed.trim_start_matches('@');
+        }
         let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed).to_lowercase();
         if base.is_empty() {
             return;
@@ -581,9 +586,11 @@ impl Cx<'_> {
             return;
         }
         let mut name = base.clone();
+        let mut had_ext = false;
         for ext in [".exe", ".com"] {
             if let Some(n) = name.strip_suffix(ext) {
                 name = n.to_string();
+                had_ext = true;
             }
         }
         if name.ends_with(".msc") {
@@ -594,9 +601,31 @@ impl Cx<'_> {
             self.acc.raise(T3, format!("передача данных из конвейера в интерпретатор {name} (скачать-и-выполнить)"));
             return;
         }
-        let canon: String = if self.shell == Shell::PowerShell { ps_alias(&name).unwrap_or(&name).to_string() } else { name.clone() };
+        // `sc.exe`/`curl.exe` с расширением — это программа, а не псевдоним PowerShell
+        let canon: String = if self.shell == Shell::PowerShell && !had_ext {
+            ps_alias(&name).unwrap_or(&name).to_string()
+        } else {
+            name.clone()
+        };
         let inv = Inv { name: &canon, args: &args, piped };
-        self.dispatch(&inv, raw);
+        self.dispatch(&inv, trimmed);
+    }
+
+    /// `cd`/`Set-Location`/`pushd`: дальнейшие относительные пути считаются от нового каталога.
+    fn rule_cd(&mut self, inv: &Inv) {
+        if matches!(inv.name, "pop-location" | "popd") {
+            self.acc.cwd = Some(None);
+            return;
+        }
+        let p = ps_parse(inv.args, &[("path", Role::Path), ("literalpath", Role::Path), ("stackname", Role::Value), ("passthru", Role::Switch)], &[("path", Role::Path)]);
+        let dirs: Vec<&Arg> = p.role(Role::Path).into_iter().filter(|a| !a.slash_flag()).collect();
+        let Some(d) = dirs.first() else { return };
+        if d.text == "-" || d.text == "+" {
+            self.acc.cwd = Some(None);
+            return;
+        }
+        let new = resolve_dir(self.acc, self.ctx, d);
+        self.acc.cwd = Some(new);
     }
 
     fn dispatch(&mut self, inv: &Inv, raw: &str) {
@@ -671,6 +700,19 @@ impl Cx<'_> {
             }
 
             // ── чтение и безопасное ──
+            "set-location" | "push-location" | "pop-location" | "cd" | "chdir" | "pushd" | "popd" => self.rule_cd(inv),
+            "new-scheduledtaskaction" => {
+                // действие задачи выполнится позже — проверяем его как команду
+                let p = ps_parse(a, &[("execute", Role::Value), ("argument", Role::Value), ("workingdirectory", Role::Value), ("id", Role::Value)], &[("execute", Role::Value), ("argument", Role::Value)]);
+                let exe = p.val("execute").map(|x| x.text.clone()).unwrap_or_default();
+                let arg = p.val("argument").map(|x| x.text.clone()).unwrap_or_default();
+                if exe.contains('$') || p.val("execute").is_some_and(|x| x.group) {
+                    self.acc.raise(T3, "действие задачи из переменной");
+                } else if !exe.is_empty() {
+                    let script = format!("{} {arg}", quote_prog(&exe));
+                    self.sub_script(Shell::Cmd, &script);
+                }
+            }
             n if T0_NAMES.contains(&n) => {}
             "write-eventlog" | "send-mailmessage" => self.acc.raise(T2, n.to_string()),
 
@@ -994,7 +1036,7 @@ impl Cx<'_> {
 
             // ── GUI и открытие ──
             n if GUI_APPS.contains(&n) => {
-                if matches!(n, "explorer" | "control") && a.iter().any(|x| !x.is_flag() && script_ext(&x.low).is_some()) {
+                if matches!(n, "explorer" | "control") && a.iter().any(|x| !x.is_flag() && exec_like(&x.low)) {
                     self.acc.raise(T3, format!("запуск исполняемого файла через {n}"));
                 } else {
                     self.acc.raise(T1, format!("запуск приложения {n}"));
@@ -1172,13 +1214,10 @@ impl Cx<'_> {
 
     fn rule_move(&mut self, inv: &Inv) {
         let a = inv.args;
-        let (srcs, dest): (Vec<&Arg>, Option<&Arg>) = if self.shell == Shell::Cmd || a.iter().any(|x| x.slash_flag()) {
-            let paths: Vec<&Arg> = a.iter().filter(|x| !x.is_flag()).collect();
-            if paths.len() >= 2 {
-                (paths[..paths.len() - 1].to_vec(), Some(paths[paths.len() - 1]))
-            } else {
-                (paths, None)
-            }
+        let (srcs, dest): (Vec<Arg>, Option<Arg>) = if self.shell == Shell::Cmd || a.iter().any(|x| x.slash_flag()) {
+            let mut paths: Vec<Arg> = a.iter().filter(|x| !x.is_flag()).cloned().collect();
+            let dest = if paths.len() >= 2 { paths.pop() } else { None };
+            (paths, dest)
         } else {
             let p = ps_parse(
                 a,
@@ -1195,14 +1234,10 @@ impl Cx<'_> {
                 ],
                 &[("path", Role::Path), ("destination", Role::Dest)],
             );
-            let p_dest = p.role(Role::Dest);
-            let srcs: Vec<Arg> = p.role(Role::Path).into_iter().cloned().collect();
-            let dest = p_dest.first().map(|d| (*d).clone());
-            // переносим владение, чтобы вернуть ссылки
-            return self.move_targets(&srcs, dest.as_ref(), inv.piped);
+            let srcs = p.role(Role::Path).into_iter().cloned().collect();
+            let dest = p.role(Role::Dest).first().map(|d| (*d).clone());
+            (srcs, dest)
         };
-        let srcs: Vec<Arg> = srcs.into_iter().cloned().collect();
-        let dest = dest.cloned();
         self.move_targets(&srcs, dest.as_ref(), inv.piped);
     }
 
@@ -1457,7 +1492,7 @@ impl Cx<'_> {
         let n = name.trim_end_matches(".exe");
         if n.contains('*') || n.contains('?') {
             self.acc.raise(T3, format!("завершение процессов по маске {name}"));
-        } else if crate::policy::rules::CRITICAL_PROCESSES.contains(&n) {
+        } else if CRITICAL_PROCESSES.contains(&n) {
             self.acc.raise(T3, format!("завершение системного процесса {n}"));
         } else {
             self.acc.raise(T2, format!("завершение процесса {n}"));
@@ -1526,7 +1561,7 @@ impl Cx<'_> {
             self.acc.raise(T1, "новое окно командной строки");
             return;
         };
-        let args: Vec<String> = a[i + 1..].iter().map(|x| quote_if_needed(&x.text)).collect();
+        let args: Vec<String> = a[i + 1..].iter().map(|x| x.text.clone()).collect();
         let prog = prog.clone();
         self.launch(&prog, &args);
     }
@@ -1558,10 +1593,8 @@ impl Cx<'_> {
             return;
         }
         // программа: классифицируем её как команду с аргументами
-        let script = format!("{} {}", quote_if_needed(&prog.text), args.join(" "));
-        let before = self.acc.tier;
+        let script = format!("{} {}", quote_prog(&prog.text), args.join(" "));
         self.sub_script(Shell::Cmd, &script);
-        let _ = before;
         self.acc.raise(T1, format!("запуск программы {}", prog.text));
     }
 
@@ -1726,8 +1759,8 @@ impl Cx<'_> {
             self.acc.raise(T3, "показ паролей Wi-Fi");
             return;
         }
-        let modify = ["set", "add", "delete", "reset", "import", "install", "uninstall", "flush", "dump", "exec"];
-        let read = has("show") || has("dump") && false;
+        let modify = ["set", "add", "delete", "reset", "import", "install", "uninstall", "flush", "exec"];
+        let read = has("show") || has("dump");
         if w.first().is_some_and(|x| x == "wlan") && (has("connect") || has("disconnect")) && !w.iter().any(|x| modify.contains(&x.as_str())) {
             self.acc.raise(T1, "подключение к Wi-Fi");
             return;
@@ -1788,7 +1821,7 @@ impl Cx<'_> {
             Some(
                 "query" | "queryex" | "qc" | "qdescription" | "qfailure" | "qfailureflag" | "qsidtype" | "qprivs"
                 | "qtriggerinfo" | "qpreferrednode" | "qmanagedaccount" | "qprotection" | "quserservice"
-                | "enumdepend" | "getdisplayname" | "getkeyname" | "sdshow" | "showsid" | "interrogate" | "query" ,
+                | "enumdepend" | "getdisplayname" | "getkeyname" | "sdshow" | "showsid" | "interrogate",
             ) => {}
             Some(other) => self.acc.raise(T3, format!("sc {other}: управление службами")),
         }
@@ -1849,6 +1882,11 @@ impl Cx<'_> {
             return;
         }
         if has("create") {
+            // команда задачи выполнится позже — классифицируем её сейчас
+            for tr in values_after(a, &["/tr"]) {
+                let t = tr.text.clone();
+                self.sub_script(Shell::Cmd, &t);
+            }
             let user = values_after(a, &["/ru", "/u"]);
             let system = user.iter().any(|u| u.low.contains("system") || u.low.contains("nt authority") || u.low.contains("localservice") || u.low.contains("networkservice"));
             let highest = values_after(a, &["/rl"]).iter().any(|v| v.low == "highest");
@@ -1879,7 +1917,8 @@ impl Cx<'_> {
     }
 
     fn rule_powercfg(&mut self, inv: &Inv) {
-        for f in flag_names(inv.args) {
+        // значим только первый флаг — это подкоманда; остальные (`-monitor-timeout-ac`) — её параметры
+        if let Some(f) = flag_names(inv.args).into_iter().next() {
             match f.as_str() {
                 "l" | "list" | "getactivescheme" | "q" | "query" | "qh" | "a" | "availablesleepstates" | "requests"
                 | "lastwake" | "devicequery" | "waketimers" | "batteryreport" | "energy" | "sleepstudy" | "srumutil"
@@ -1913,7 +1952,9 @@ impl Cx<'_> {
             "wevtutil" => matches!(first, "qe" | "query-events" | "el" | "enum-logs" | "gl" | "get-log" | "gli" | "get-log-info" | "ep" | "enum-publishers" | "gp" | "get-publisher"),
             "fsutil" => first == "fsinfo" || w.iter().any(|x| x == "query" || x == "queryflags" || x == "info"),
             "sfc" => fl.iter().all(|f| f == "verifyonly" || f == "verifyfile"),
-            "dism" => fl.iter().all(|f| f.starts_with("get-") || f == "online" || f == "checkhealth" || f == "scanhealth" || f == "english" || f == "format" || f == "cleanup-image" && false) && !fl.iter().any(|f| f == "restorehealth" || f == "startcomponentcleanup"),
+            "dism" => fl.iter().all(|f| {
+                f.starts_with("get-") || matches!(f.as_str(), "online" | "english" | "format" | "cleanup-image" | "checkhealth" | "scanhealth" | "image" | "?")
+            }),
             "chkdsk" => !fl.iter().any(|f| matches!(f.as_str(), "f" | "r" | "x" | "b" | "spotfix" | "offlinescanandfix" | "forceofflinefix" | "perf" | "l")),
             "defrag" => fl.iter().any(|f| f == "a" || f == "analyze") && !fl.iter().any(|f| matches!(f.as_str(), "o" | "x" | "l" | "k" | "g" | "b" | "d" | "t")),
             "cipher" => fl.is_empty() || fl.iter().all(|f| f == "s" || f == "h" || f == "c" || f == "?"),
@@ -2240,22 +2281,23 @@ fn values_after<'a>(args: &'a [Arg], flags: &[&str]) -> Vec<&'a Arg> {
     out
 }
 
+/// Склейка аргументов как у powershell.exe/cmd.exe: кавычки уже сняты разбором командной строки,
+/// аргументы соединяются пробелами и разбираются заново. Это консервативно: путь с пробелом распадается
+/// на части, каждая из которых проверяется отдельно.
 fn join_args(args: &[Arg]) -> String {
-    args.iter()
-        .map(|a| if a.group { a.text.clone() } else { quote_if_needed(&a.text) })
-        .collect::<Vec<_>>()
-        .join(" ")
+    args.iter().map(|a| a.text.as_str()).collect::<Vec<_>>().join(" ")
 }
 
-/// Аргумент из одного слова с пробелами при склейке нужно взять в кавычки — иначе `-Command "a b"` развалится,
-/// но внутренний текст команды (`-Command "Remove-Item x"`) должен остаться командой, поэтому кавычки
-/// добавляем только к путям/значениям без пробелов-разделителей команд.
-fn quote_if_needed(s: &str) -> String {
-    if s.contains(' ') && !s.contains(['"', ';', '|', '&']) && (s.contains('\\') || s.contains(':')) && !s.contains(" -") {
-        format!("\"{s}\"")
-    } else {
-        s.to_string()
-    }
+/// Имя программы с пробелами — в кавычки, чтобы оно осталось одним словом для cmd-лексера.
+fn quote_prog(s: &str) -> String {
+    if s.contains(' ') && !s.contains('"') { format!("\"{s}\"") } else { s.to_string() }
+}
+
+/// Аргумент — исполняемый файл (для explorer/control).
+fn exec_like(low: &str) -> bool {
+    [".exe", ".com", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".msi", ".reg", ".scr", ".hta", ".wsf", ".jar"]
+        .iter()
+        .any(|e| low.ends_with(e))
 }
 
 fn join_arg(base: &Arg, name: &Arg) -> Arg {
@@ -2324,14 +2366,13 @@ const T0_NAMES: &[&str] = &[
     "get-acl", "get-pssession", "exit-pssession", "update-typedata", "update-formatdata", "get-psbreakpoint",
     "get-pscallstack", "new-scheduledtaskaction", "new-scheduledtasktrigger", "new-scheduledtaskprincipal",
     "new-scheduledtasksettingsset", "export-scheduledtask", "export-modulemember", "trace-command", "get-error",
-    "out-string", "tee-object-variable", "where", "foreach",
+    "where", "foreach",
     // cmd / утилиты
-    "dir", "type", "echo", "cd", "chdir", "pushd", "popd", "cls", "title", "color", "chcp", "ver", "vol", "tree", "more",
+    "dir", "type", "echo", "cls", "title", "color", "chcp", "ver", "vol", "tree", "more",
     "find", "findstr", "fc", "comp", "where", "whoami", "hostname", "systeminfo", "tasklist", "ping", "tracert",
     "pathping", "nslookup", "netstat", "getmac", "set", "path", "prompt", "exit", "rem", "pause", "goto", "shift",
     "setlocal", "endlocal", "timeout", "choice", "break", "verify", "driverquery", "query", "quser", "qwinsta",
-    "qprocess", "help", "sort", "which", "gcm", "tracerpt", "systeminfo.exe", "pwd", "ls", "cat", "echo.", "test-netconnection",
-    "test-connection", "resolve-dnsname", "uptime",
+    "qprocess", "help", "sort", "which", "pwd", "ls", "cat", "echo.", "uptime",
 ];
 
 /// Встроенные модули PowerShell, загрузка которых безопасна.
@@ -2510,9 +2551,7 @@ fn instance_call_ok(m: &str) -> bool {
             | "copyto" | "getproperties" | "getmethods" | "getmembers" | "getfiletype" | "getstatus" | "elapsed"
             | "isnullorempty" | "isnullorwhitespace" | "toshortdatestring" | "tolongdatestring" | "toshorttimestring"
             | "tolongtimestring" | "getnetworkcredential" | "newline" | "peek" | "pop" | "push" | "enqueue" | "dequeue"
-            | "toupperfirst" | "getaddressbytes" | "getipproperties" | "getphysicaladdress" | "getipv4statistics"
-            | "getsubkeys" | "close" | "dispose" | "wait" | "waitforexit" | "refresh" | "hasflag" | "getresult"
-            | "invokereturnasis" && false
-            | "remove" && false
+            | "getaddressbytes" | "getipproperties" | "getphysicaladdress" | "getipv4statistics" | "getsubkeys"
+            | "close" | "dispose" | "waitforexit" | "refresh" | "hasflag" | "getresult"
     )
 }
