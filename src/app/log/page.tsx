@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import AppShell, { DemoBadge } from '@/components/AppShell';
 import { ActionRow } from '@/components/hud/ActionFeed';
+import RichText from '@/components/RichText';
 import { call, errorText } from '@/lib/bridge';
 import { newestFirst } from '@/lib/reducer';
 import { useJarvis } from '@/lib/store';
@@ -44,7 +45,7 @@ export default function LogPage() {
                 <div className="msg-who">
                   {m.speaker === 'user' ? 'Вы' : 'Джарвис'} · {time(m.at)}
                 </div>
-                <div className="msg-text">{m.text}</div>
+                <div className="msg-text"><RichText text={m.text} /></div>
               </li>
             ))}
             {live.map((m) => (
@@ -52,7 +53,7 @@ export default function LogPage() {
                 <div className="msg-who">
                   {m.speaker === 'user' ? 'Вы' : 'Джарвис'} · {time(m.at)} · сейчас
                 </div>
-                <div className="msg-text">{m.text}</div>
+                <div className="msg-text"><RichText text={m.text} /></div>
               </li>
             ))}
           </ul>

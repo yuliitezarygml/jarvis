@@ -803,6 +803,22 @@ code,
   left: 0;
 }
 
+/* Жирный и код в репликах (RichText) */
+.sub-line strong,
+.cc-line strong,
+.msg-text strong {
+  color: var(--ice);
+  font-weight: 700;
+}
+.rt-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--ice);
+}
+
 /* Панель подписей рядом с реактором: что сказали, что отвечает, что делает. */
 .corner-caption {
   position: absolute;

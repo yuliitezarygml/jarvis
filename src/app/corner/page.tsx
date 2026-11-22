@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import ConfirmDialog from '@/components/hud/ConfirmDialog';
 import Reactor from '@/components/reactor/Reactor';
+import RichText from '@/components/RichText';
 import { call, startDragging } from '@/lib/bridge';
 import { STATE_LABEL } from '@/lib/glow';
 import type { ActionItem, SubtitleLine } from '@/lib/reducer';
@@ -99,7 +100,7 @@ export default function CornerPage() {
           {j && (
             <p className="cc-line cc-jarvis" data-final={j.final}>
               <span className="cc-who">Джарвис</span>
-              {j.text}
+              <RichText text={j.text} />
             </p>
           )}
           {act && (

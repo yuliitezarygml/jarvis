@@ -1,5 +1,6 @@
 'use client';
 
+import RichText from '@/components/RichText';
 import { useJarvis, useNow } from '@/lib/store';
 
 const HOLD_MS = 7000;
@@ -16,13 +17,13 @@ export default function Subtitles() {
       {prev && !stale && (
         <p className="sub-line sub-prev" data-speaker={prev.speaker}>
           <span className="sub-who">{prev.speaker === 'user' ? 'Вы' : 'Джарвис'}</span>
-          {prev.text}
+          <RichText text={prev.text} />
         </p>
       )}
       {current && !stale ? (
         <p className="sub-line sub-current" data-speaker={current.speaker} data-final={current.final}>
           <span className="sub-who">{current.speaker === 'user' ? 'Вы' : 'Джарвис'}</span>
-          {current.text}
+          <RichText text={current.text} />
         </p>
       ) : (
         <p className="sub-line sub-hint">Скажите «Джарвис, …»</p>
