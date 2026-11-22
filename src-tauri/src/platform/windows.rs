@@ -23,6 +23,7 @@ use windows_sys::Win32::System::{
 
 pub struct WindowsBackend;
 pub mod desktop;
+pub mod uia;
 pub fn windows_family(build: u32, product: u32) -> &'static str {
     match (product, build) {
         (2 | 3, _) => "Windows Server",

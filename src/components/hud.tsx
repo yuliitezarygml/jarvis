@@ -18,6 +18,14 @@ const states: Record<Phase, string> = {
   EXECUTING: "Выполняю действие",
   ERROR: "Требуется внимание",
 };
+const toolLabels: Record<string, string> = {
+  fs_write: "Записать файл", fs_move: "Переименовать файл", fs_copy: "Скопировать файл",
+  fs_delete: "Переместить файл в корзину Windows", undo_last: "Отменить последнее изменение",
+  volume_set: "Изменить громкость", app_launch: "Запустить приложение", app_close: "Закрыть приложение",
+  ui_control: "Управление компьютером (мышь и клавиатура)", ui_windows: "Посмотреть список окон", ui_state: "Прочитать содержимое окна",
+  ui_click: "Нажать на элемент", ui_set_value: "Записать текст в поле", ui_type: "Печатать на клавиатуре", ui_press_key: "Нажать клавиши", ui_scroll: "Прокрутить окно",
+  window_minimize: "Свернуть окно Jarvis", window_restore: "Восстановить окно Jarvis",
+};
 const titles: Record<string, string> = {
   center: "Командный центр",
   memory: "Память",
@@ -86,7 +94,7 @@ function Rail({ c }: { c: Console }) {
         ))}
       </section>
       <section className="panel">
-        <PanelTitle icon="activity">Телеметрия Mac</PanelTitle>
+        <PanelTitle icon="activity">{{ macos: "Телеметрия Mac", windows: "Телеметрия Windows", linux: "Телеметрия Linux" }[t?.platform ?? ""] ?? "Телеметрия"}</PanelTitle>
         {[
           ["CPU", t?.cpu],
           ["RAM", t ? (100 * t.ram) / t.total : undefined],
@@ -109,6 +117,10 @@ function Rail({ c }: { c: Console }) {
               " GiB"
             : "— GiB"}
         </small>
+        <div className="gpu">
+          <small>CPU{t?.cores ? ` · ${t.cores} потоков` : ""}</small>
+          <b>{t?.cpu_name || "—"}</b>
+        </div>
         <div className="gpu">
           <small>GPU</small>
           <b>{t?.gpu || "—"}</b>
@@ -283,6 +295,9 @@ function SettingsForm({ c }: { c: Console }) {
         {c.windows ? "Разрешить модели инструменты Windows" : "Разрешить модели диагностические инструменты"}
       </label>
       {c.windows && <label className="auto"><input type="checkbox" checked={s.read_only} onChange={e=>field("read_only",e.target.checked)} />Только чтение</label>}
+      {c.windows && <fieldset className="grants"><legend>Всегда разрешено</legend>
+        {c.grants.length===0 ? <span>Пока ничего. Джарвис спрашивает перед каждым действием.</span> : c.grants.map(t=><div key={t}>{toolLabels[t] ?? t} <button type="button" onClick={()=>void c.revokeGrant(t)}>Отозвать</button></div>)}
+      </fieldset>}
       {c.windows && <button type="button" onClick={()=>void c.toggleAdmin(!c.admin)}>{c.admin ? "Выключить режим администратора" : "Включить режим администратора"}</button>}
       <label>
         Пауза после речи
@@ -466,10 +481,12 @@ export default function Hud() {
     <div className={page === "center" ? "shell commandCenter" : "shell"}>
       {c.proposal && <div className="actionShade"><section role="alertdialog" aria-modal="true" aria-label="Подтверждение действия" className="panel actionPrompt">
         <h2>Подтвердить действие?</h2>
-        <p>{{fs_write:"Записать файл",fs_move:"Переименовать файл",fs_copy:"Скопировать файл",fs_delete:"Переместить файл в корзину Windows",undo_last:"Отменить последнее изменение"}[c.proposal.tool] ?? c.proposal.tool}</p>
-        <p>{c.proposal.detail.folder}</p>{c.proposal.detail.source && <>{c.proposal.detail.source} → </>}<strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
-        {c.proposal.detail.text_after!==null && <pre>{c.proposal.detail.text_after}</pre>}
-        <div><button autoFocus onClick={()=>void c.decide(false)}>Отмена</button> <button onClick={()=>void c.decide(true)}>Подтвердить</button></div>
+        <p>{toolLabels[c.proposal.tool] ?? c.proposal.tool}</p>
+        {c.proposal.detail.file ? <>
+          <p>{c.proposal.detail.folder}</p>{c.proposal.detail.source && <>{c.proposal.detail.source} → </>}<strong>{c.proposal.detail.file}</strong>{c.proposal.detail.destination && <> → {c.proposal.detail.destination}</>}
+          {c.proposal.detail.text_after!=null && <pre>{c.proposal.detail.text_after}</pre>}
+        </> : c.proposal.args && Object.keys(c.proposal.args).length>0 && <p><strong>{Object.values(c.proposal.args).join(", ")}{c.proposal.tool==="volume_set" ? "%" : ""}</strong></p>}
+        <div><button autoFocus onClick={()=>void c.decide("deny")}>Отклонить</button> <button onClick={()=>void c.decide("once")}>Разрешить</button> <button onClick={()=>void c.decide("always")}>Разрешать всегда</button></div>
       </section></div>}
       <header>
         <div className="brand">
@@ -478,6 +495,7 @@ export default function Hud() {
           </span>
           J.A.R.V.I.S.
           {c.admin && <strong aria-label="Режим администратора включён"> ADMIN</strong>}
+          {c.controlling && <strong className="controlBadge" role="status"> УПРАВЛЕНИЕ ПК · Ctrl+Alt+K — стоп</strong>}
         </div>
         <nav>
           {Object.entries(titles).map(([id, t]) => (

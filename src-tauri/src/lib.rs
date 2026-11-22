@@ -52,6 +52,11 @@ pub fn run() {
                     Ok(w.is_minimized()? == minimize)
                 }));
             }
+            #[cfg(windows)]
+            {
+                let stopper = core.clone();
+                platform::windows::uia::spawn_kill_switch(move || stopper.cancel());
+            }
             app.manage(core);
             Ok(())
         })
@@ -69,6 +74,8 @@ pub fn run() {
             desktop::telemetry,
             desktop::connections,
             desktop::confirm_action,
+            desktop::list_grants,
+            desktop::revoke_grant,
             desktop::admin_mode,
             desktop::run_tool
         ])

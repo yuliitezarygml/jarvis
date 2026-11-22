@@ -123,6 +123,8 @@ impl Core {
             !text.is_empty() && text.chars().count() <= 4000,
             "Допустимо от 1 до 4000 символов"
         );
+        #[cfg(windows)]
+        crate::platform::windows::uia::reset_stop();
         let id = Uuid::new_v4().to_string();
         let token = CancellationToken::new();
         let (settings, messages) = {
@@ -277,7 +279,7 @@ impl Core {
         } else {
             vec![]
         };
-        for round in 0..4 {
+        for round in 0..16 {
             let mut current = String::new();
             let mut callback = |value: &str| -> Result<()> {
                 ensure!(text.len() + value.len() < 40000, "Превышен лимит ответа");
@@ -316,7 +318,7 @@ impl Core {
                 break;
             }
             ensure!(
-                s.tools && !schemas.is_empty() && round < 3,
+                s.tools && !schemas.is_empty() && round < 15,
                 "Превышен лимит вызовов инструментов"
             );
             used_tools = true;

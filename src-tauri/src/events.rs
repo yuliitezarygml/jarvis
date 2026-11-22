@@ -15,6 +15,8 @@ pub enum Kind {
     #[cfg(windows)]
     Confirmation,
     Speaking,
+    #[cfg(windows)]
+    Control,
     Level,
     FirstText,
     Mic,

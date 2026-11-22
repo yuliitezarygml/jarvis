@@ -57,7 +57,8 @@ impl Store {
         CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY,session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,content TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS by_session ON messages(session,id);
         CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY CHECK(id=1),data TEXT);
-        CREATE TABLE IF NOT EXISTS preferences(id INTEGER PRIMARY KEY,body TEXT UNIQUE);")?;
+        CREATE TABLE IF NOT EXISTS preferences(id INTEGER PRIMARY KEY,body TEXT UNIQUE);
+        CREATE TABLE IF NOT EXISTS tool_grants(tool TEXT PRIMARY KEY);")?;
         let db = Self(conn);
         #[cfg(windows)]
         db.0.execute_batch("CREATE TABLE IF NOT EXISTS action_log(id INTEGER PRIMARY KEY,created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,session TEXT NOT NULL,request TEXT NOT NULL,tool TEXT NOT NULL,args TEXT NOT NULL,risk INTEGER NOT NULL,confirmation TEXT,result TEXT,exit_code INTEGER,state TEXT NOT NULL DEFAULT 'started',snapshot TEXT,undone INTEGER NOT NULL DEFAULT 0);")?;
@@ -65,6 +66,31 @@ impl Store {
             db.new_session()?;
         }
         Ok(db)
+    }
+    /// Tools the user chose to «always allow».
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn granted(&self, tool: &str) -> Result<bool> {
+        Ok(self.0.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tool_grants WHERE tool=?)",
+            [tool],
+            |r| r.get(0),
+        )?)
+    }
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn grant(&self, tool: &str) -> Result<()> {
+        self.0
+            .execute("INSERT OR IGNORE INTO tool_grants VALUES(?)", [tool])?;
+        Ok(())
+    }
+    pub fn grants(&self) -> Result<Vec<String>> {
+        self.rows("SELECT tool FROM tool_grants ORDER BY tool", &[], |r| {
+            r.get(0)
+        })
+    }
+    pub fn revoke(&self, tool: &str) -> Result<()> {
+        self.0
+            .execute("DELETE FROM tool_grants WHERE tool=?", [tool])?;
+        Ok(())
     }
     pub fn sessions(&self) -> Result<Vec<Value>> {
         self.rows(

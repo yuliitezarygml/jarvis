@@ -48,6 +48,8 @@ type Stats = {
   host: string;
   os: string;
   cores: number;
+  cpu_name?: string;
+  platform?: string;
 };
 export type SpeechUpdate =
   | { state: "listening" | "fallback" | "cleared" }
@@ -62,6 +64,7 @@ type Event = { session: string; turn?: string } & ({
     | "cancelled"
     | "thinking"
     | "executing"
+    | "control"
     | "speaking"
     | "level"
     | "first_text"
@@ -95,7 +98,11 @@ export function useConsole() {
     const timer=window.setInterval(poll,1500);
     return ()=>{live=false;window.clearInterval(timer);};
   },[windows]);
-  type Proposal={turn:string;digest:string;tool:string;detail:{folder:string;file:string;source:string|null;destination:string|null;undo:boolean;text_after:string|null}};
+  type Proposal={turn:string;digest:string;tool:string;args?:Record<string,unknown>;detail:{folder?:string;file?:string;source?:string|null;destination?:string|null;undo?:boolean;text_after?:string|null}};
+  const [controlling,setControlling]=useState(false);
+  const [grants,setGrants]=useState<string[]>([]);
+  const loadGrants=useCallback(()=>{invoke<string[]>("list_grants").then(setGrants).catch(()=>{});},[]);
+  useEffect(()=>{if(windows)loadGrants();},[windows,loadGrants]);
   const [proposal,setProposal]=useState<Proposal|null>(null);
   const [online, setOnline] = useState(false),
     [sessions, setSessions] = useState<Session[]>([]),
@@ -208,6 +215,9 @@ export function useConsole() {
           case "thinking":
             setPhase("PROCESSING");
             break;
+          case "control":
+            setControlling(Boolean(e.data));
+            break;
           case "executing":
             setPhase("EXECUTING");
             break;
@@ -251,6 +261,7 @@ export function useConsole() {
           case "done":
           case "cancelled":
           case "error":
+            setControlling(false);
             setProposal(null);
             turn.current = "";
             setBusy(false);
@@ -393,16 +404,21 @@ export function useConsole() {
     setPrefs(p);
   }
   return {
-    windows,proposal,
+    windows,proposal,controlling,
     admin,
     toggleAdmin:async (enable:boolean)=>{
       try{setAdmin(await invoke<boolean>("admin_mode",{enable}));}catch(e){report(e);}
     },
-    decide:async (allow:boolean)=>{
+    grants,
+    revokeGrant:async (tool:string)=>{
+      try{await invoke("revoke_grant",{tool});}catch(e){report(e);}
+      loadGrants();
+    },
+    decide:async (choice:"once"|"always"|"deny")=>{
       if(!proposal)return;
-      try {await invoke("confirm_action",{turn:proposal.turn,digest:proposal.digest,allow});}
+      try {await invoke("confirm_action",{turn:proposal.turn,digest:proposal.digest,choice});}
       catch(e){report(e);}
-      finally{setProposal(null);}
+      finally{setProposal(null);if(choice==="always")loadGrants();}
     },
     online,
     sessions,

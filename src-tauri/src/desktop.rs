@@ -127,15 +127,24 @@ pub fn confirm_action(
     core: Shared,
     turn: String,
     digest: String,
-    allow: bool,
+    choice: String,
 ) -> Result<(), String> {
     #[cfg(windows)]
     {
-        core.actions.decide(&turn, &digest, allow).map_err(error)
+        let choice = crate::actions::Choice::parse(&choice).map_err(error)?;
+        core.actions.decide(&turn, &digest, choice).map_err(error)
     }
     #[cfg(not(windows))]
     {
-        let _ = (core, turn, digest, allow);
+        let _ = (core, turn, digest, choice);
         Err("Недоступно на этой платформе".into())
     }
+}
+#[tauri::command]
+pub fn list_grants(core: Shared) -> Result<Vec<String>, String> {
+    core.db.lock().unwrap().grants().map_err(error)
+}
+#[tauri::command]
+pub fn revoke_grant(core: Shared, tool: String) -> Result<(), String> {
+    core.db.lock().unwrap().revoke(&tool).map_err(error)
 }

@@ -20,7 +20,24 @@ struct Ticket {
     turn: String,
     digest: String,
     until: Instant,
-    sender: oneshot::Sender<bool>,
+    sender: oneshot::Sender<Choice>,
+}
+/// The user's answer to a permission prompt.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Choice {
+    Once,
+    Always,
+    Deny,
+}
+impl Choice {
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "once" => Ok(Self::Once),
+            "always" => Ok(Self::Always),
+            "deny" => Ok(Self::Deny),
+            _ => bail!("Неизвестное решение"),
+        }
+    }
 }
 type WindowAction = Box<dyn Fn(bool) -> Result<bool> + Send + Sync>;
 pub struct Actions {
@@ -28,6 +45,8 @@ pub struct Actions {
     pub files: Files,
     pub window: OnceLock<WindowAction>,
     pending: Mutex<Option<Ticket>>,
+    /// Turn for which the user allowed computer control once.
+    ui_turn: Mutex<Option<String>>,
 }
 impl Actions {
     pub fn recover(&self, store: &mut crate::storage::Store) -> Result<()> {
@@ -74,9 +93,10 @@ impl Actions {
             files: Files::open(&dir.join("files"))?,
             window: OnceLock::new(),
             pending: Mutex::new(None),
+            ui_turn: Mutex::new(None),
         })
     }
-    pub fn decide(&self, turn: &str, digest: &str, allow: bool) -> Result<()> {
+    pub fn decide(&self, turn: &str, digest: &str, choice: Choice) -> Result<()> {
         let mut p = self.pending.lock().unwrap();
         ensure!(
             p.as_ref()
@@ -86,7 +106,7 @@ impl Actions {
         p.take()
             .unwrap()
             .sender
-            .send(allow)
+            .send(choice)
             .map_err(|_| anyhow::anyhow!("Запрос уже отменён"))
     }
 }
@@ -101,6 +121,51 @@ impl Drop for Log<'_> {
             [self.id],
         );
     }
+}
+/// Asks the user before an action runs. A tool the user chose to «always allow» skips the prompt.
+/// Returns the digest that identifies this decision in the action log.
+async fn confirm(
+    core: &Core,
+    turn: &str,
+    tool: &str,
+    args: &Value,
+    detail: Value,
+    digest: &str,
+) -> Result<String> {
+    // All computer-control tools share one consent: «Allow» covers the whole reply, «Always» is remembered.
+    let ui = crate::platform::windows::uia::is_ui_tool(tool);
+    let key = if ui { "ui_control" } else { tool };
+    if core.db.lock().unwrap().granted(key)? {
+        return Ok("always-allowed".into());
+    }
+    if ui && core.actions.ui_turn.lock().unwrap().as_deref() == Some(turn) {
+        return Ok("turn-allowed".into());
+    }
+    let (sender, rx) = oneshot::channel();
+    *core.actions.pending.lock().unwrap() = Some(Ticket {
+        turn: turn.into(),
+        digest: digest.into(),
+        until: Instant::now() + Duration::from_secs(60),
+        sender,
+    });
+    core.event(
+        turn,
+        Kind::Confirmation,
+        json!({"turn":turn,"digest":digest,"tool":tool,"args":args,"detail":detail}),
+    );
+    let decision = tokio::time::timeout(Duration::from_secs(60), rx).await;
+    core.event(turn, Kind::Confirmation, Value::Null);
+    let choice = match decision {
+        Ok(Ok(c)) => c,
+        _ => Choice::Deny,
+    };
+    ensure!(choice != Choice::Deny, "Действие не подтверждено");
+    if choice == Choice::Always {
+        core.db.lock().unwrap().grant(key)?;
+    } else if ui {
+        *core.actions.ui_turn.lock().unwrap() = Some(turn.to_owned());
+    }
+    Ok(digest.into())
 }
 async fn change(
     core: &Core,
@@ -133,21 +198,7 @@ async fn change(
             &snapshot
         ))?)
     );
-    let (sender, rx) = oneshot::channel();
-    *core.actions.pending.lock().unwrap() = Some(Ticket {
-        turn: turn.into(),
-        digest: digest.clone(),
-        until: Instant::now() + Duration::from_secs(60),
-        sender,
-    });
-    core.event(
-        turn,
-        Kind::Confirmation,
-        json!({"turn":turn,"digest":digest,"tool":tool,"detail":detail}),
-    );
-    let decision = tokio::time::timeout(Duration::from_secs(60), rx).await;
-    core.event(turn, Kind::Confirmation, Value::Null);
-    ensure!(matches!(decision, Ok(Ok(true))), "Действие не подтверждено");
+    let digest = confirm(core, turn, tool, args, detail.clone(), &digest).await?;
     core.for_turn(turn, || -> Result<()> {
         let _guard = core.actions.files.mutation_lock()?;
         let mut db = core.db.lock().unwrap();
@@ -197,30 +248,46 @@ pub async fn dispatch(
         db.0.last_insert_rowid()
     };
     let _log = Log { core, id };
-    let result = match level {
-        0 => ToolRegistry::run(core, tool, args).await,
-        1 if tool == "volume_set" => core
-            .for_turn(turn, || {
-                crate::platform::windows::desktop::volume(Some(args))
-            })
-            .context("Отменено")?,
-        1 if matches!(tool, "app_launch" | "app_close") => {
-            crate::platform::windows::desktop::app_action(core, turn, tool, args).await
+    let gate = if level == 1 {
+        let seed = format!("{:x}", Sha256::digest(Uuid::new_v4().as_bytes()));
+        confirm(core, turn, tool, args, json!({}), &seed)
+            .await
+            .map(|_| ())
+    } else {
+        Ok(())
+    };
+    let result = if let Err(e) = gate {
+        Err(e)
+    } else {
+        match level {
+            0 => ToolRegistry::run(core, tool, args).await,
+            1 if tool == "volume_set" => core
+                .for_turn(turn, || {
+                    crate::platform::windows::desktop::volume(Some(args))
+                })
+                .context("Отменено")?,
+            1 if matches!(tool, "app_launch" | "app_close") => {
+                crate::platform::windows::desktop::app_action(core, turn, tool, args).await
+            }
+            1 if crate::platform::windows::uia::is_ui_tool(tool) => {
+                core.event(turn, Kind::Control, json!(true));
+                crate::platform::windows::uia::exec(tool, args).await
+            }
+            1 => core
+                .for_turn(turn, || -> Result<Value> {
+                    ensure!(args == &json!({}), "Ожидается пустой объект");
+                    let w = core
+                        .actions
+                        .window
+                        .get()
+                        .context("Окно Jarvis недоступно")?;
+                    let minimize = tool == "window_minimize";
+                    Ok(json!({"verified":w(minimize)?,"window":"Jarvis"}))
+                })
+                .context("Действие отменено")?,
+            2 => change(core, turn, session, tool, args, id).await,
+            _ => bail!("Действие не поддерживается"),
         }
-        1 => core
-            .for_turn(turn, || -> Result<Value> {
-                ensure!(args == &json!({}), "Ожидается пустой объект");
-                let w = core
-                    .actions
-                    .window
-                    .get()
-                    .context("Окно Jarvis недоступно")?;
-                let minimize = tool == "window_minimize";
-                Ok(json!({"verified":w(minimize)?,"window":"Jarvis"}))
-            })
-            .context("Действие отменено")?,
-        2 => change(core, turn, session, tool, args, id).await,
-        _ => bail!("Действие не поддерживается"),
     };
     let (state, output, code) = match &result {
         Ok(v) if v.get("verified") == Some(&Value::Bool(false)) => ("unverified", v.to_string(), 0),
@@ -248,11 +315,11 @@ mod tests {
             until: Instant::now() + Duration::from_secs(5),
             sender,
         });
-        assert!(actions.decide("wrong", "digest", true).is_err());
-        assert!(actions.decide("turn", "forged", true).is_err());
-        actions.decide("turn", "digest", false).unwrap();
-        assert!(!rx.try_recv().unwrap());
-        assert!(actions.decide("turn", "digest", true).is_err());
+        assert!(actions.decide("wrong", "digest", Choice::Once).is_err());
+        assert!(actions.decide("turn", "forged", Choice::Once).is_err());
+        actions.decide("turn", "digest", Choice::Deny).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), Choice::Deny);
+        assert!(actions.decide("turn", "digest", Choice::Once).is_err());
         let (sender, _) = oneshot::channel();
         *actions.pending.lock().unwrap() = Some(Ticket {
             turn: "turn".into(),
@@ -260,7 +327,7 @@ mod tests {
             until: Instant::now(),
             sender,
         });
-        assert!(actions.decide("turn", "digest", true).is_err());
+        assert!(actions.decide("turn", "digest", Choice::Once).is_err());
         drop(actions);
         std::fs::remove_dir_all(dir).unwrap();
     }

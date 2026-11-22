@@ -19,13 +19,15 @@ impl Telemetry {
         let mut s = self.system.lock().unwrap();
         s.refresh_cpu_usage();
         s.refresh_memory();
-        json!({"cpu":s.global_cpu_usage(),"ram":s.used_memory(),"total":s.total_memory(),"gpu":self.gpu,"host":System::host_name(),"os":System::long_os_version(),"cores":s.cpus().len()})
+        json!({"cpu":s.global_cpu_usage(),"ram":s.used_memory(),"total":s.total_memory(),"gpu":self.gpu,"host":System::host_name(),"os":System::long_os_version(),"cores":s.cpus().len(),"cpu_name":s.cpus().first().map(|c|c.brand().trim().to_owned()).unwrap_or_default(),"platform":std::env::consts::OS})
     }
 }
 pub struct ToolRegistry;
 pub fn risk(name: &str) -> u8 {
     match name {
         "window_minimize" | "window_restore" | "app_launch" | "app_close" | "volume_set" => 1,
+        #[cfg(windows)]
+        n if crate::platform::windows::uia::is_ui_tool(n) => 1,
         "fs_move" | "fs_write" | "fs_copy" | "fs_delete" | "undo_last" => 2,
         _ if ToolRegistry::permission(name) == Permission::ReadOnly => 0,
         _ => 3,
@@ -108,6 +110,8 @@ impl ToolRegistry {
                 schema("window_minimize","Свернуть окно Jarvis",json!({}),&[]),
                 schema("window_restore","Восстановить окно Jarvis",json!({}),&[]),
             ]);
+        #[cfg(windows)]
+        let schemas = schemas.chain(crate::platform::windows::uia::schemas());
         schemas.collect()
     }
     pub async fn run(c: &Core, name: &str, args: &Value) -> Result<Value> {
