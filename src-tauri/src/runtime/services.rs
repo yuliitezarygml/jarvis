@@ -158,7 +158,37 @@ pub fn apply_best(core: &Core, cfg: &mut Config, only: Option<&[String]>) -> Res
         return Err("Нет результатов проверки: сначала нажмите «Проверить» у провайдера".into());
     }
     jarvis_llm::apply_best(cfg, &reports, 3);
+    let roles = &mut cfg.roles;
+    for chain in [&mut roles.brain, &mut roles.fast, &mut roles.vision, &mut roles.reflection] {
+        *chain = interleave_keys(&cfg.providers, chain);
+    }
     Ok(())
+}
+
+fn same_endpoint(a: &ProviderConfig, b: &ProviderConfig) -> bool {
+    let norm = |u: &str| u.trim().trim_end_matches('/').to_ascii_lowercase();
+    a.kind == b.kind && !a.base_url.trim().is_empty() && norm(&a.base_url) == norm(&b.base_url)
+}
+
+/// Несколько ключей одного провайдера (`groq`, `groq-2`: тот же адрес API, раздельные лимиты): за каждой
+/// моделью цепочки встают те же модели через остальные включённые ключи — упёрлись в лимит одного ключа,
+/// Джарвис переходит на другой, а не на модель похуже. Дубликаты убираются, порядок сохраняется.
+pub fn interleave_keys(providers: &[ProviderConfig], chain: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: String| {
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    };
+    for r in chain {
+        push(r.clone());
+        let Some(mref) = jarvis_core::ModelRef::parse(r) else { continue };
+        let Some(own) = providers.iter().find(|p| p.id == mref.provider) else { continue };
+        for sib in providers.iter().filter(|p| p.id != own.id && p.enabled && same_endpoint(p, own)) {
+            push(format!("{}/{}", sib.id, mref.model));
+        }
+    }
+    out
 }
 
 // ───────────────────────────── серверы голоса ─────────────────────────────
@@ -651,6 +681,24 @@ mod tests {
         assert!(b[0].abs() < 0.01 && b[b.len() - 1].abs() < 0.02, "плавные края");
         assert_eq!(device_arg(Some("  ".into())), None);
         assert_eq!(device_arg(Some(" USB ".into())).as_deref(), Some("USB"));
+    }
+
+    #[test]
+    fn best_chain_alternates_keys_of_one_provider() {
+        let p = |id: &str, url: &str, enabled: bool| ProviderConfig { id: id.into(), base_url: url.into(), enabled, ..Default::default() };
+        let providers = vec![
+            p("groq", "https://api.groq.com/openai/v1", true),
+            p("groq-2", "https://api.groq.com/openai/v1/", true),
+            p("groq-3", "https://api.groq.com/openai/v1", false),
+            p("zen", "https://opencode.ai/inference/openai/v1", true),
+        ];
+        let chain = vec!["groq/openai/gpt-oss-120b".to_string(), "zen/glm-5.3".into(), "groq-2/openai/gpt-oss-120b".into(), "groq/qwen3".into()];
+        assert_eq!(
+            interleave_keys(&providers, &chain),
+            ["groq/openai/gpt-oss-120b", "groq-2/openai/gpt-oss-120b", "zen/glm-5.3", "groq/qwen3", "groq-2/qwen3"],
+            "второй ключ сразу за первым, выключенный ключ не добавляется, дубликатов нет"
+        );
+        assert_eq!(interleave_keys(&providers, &["bad".to_string()]), ["bad"]);
     }
 
     #[test]

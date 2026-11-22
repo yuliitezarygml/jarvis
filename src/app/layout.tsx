@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 
+import ThemeRoot from '@/components/ThemeRoot';
+
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -15,7 +17,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body>
+        <ThemeRoot />
+        {children}
+      </body>
     </html>
   );
 }

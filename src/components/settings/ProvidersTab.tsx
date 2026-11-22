@@ -7,6 +7,7 @@ import { fmtCtx, fmtLatency, fmtNumber } from '@/lib/format';
 import {
   ROLE_LABEL,
   ROLE_NAMES,
+  addAnotherKey,
   addProvider,
   addToChain,
   applyRanking,
@@ -14,6 +15,8 @@ import {
   chainItemState,
   moveItem,
   presetBadges,
+  presetFor,
+  providerTitle,
   removeFromChain,
   removeProvider,
   rolesUsing,
@@ -148,14 +151,14 @@ function ProviderCard({
     update((cfg) => ({ ...cfg, providers: cfg.providers.map((x) => (x.id === p.id ? { ...x, ...patch } : x)) }));
   const used = rolesUsing(draft, p.id);
   const blocks = ROLE_NAMES.filter((r) => blockingDisabled(draft, r).includes(p.id));
-  const title = preset ? shortName(preset.name) : p.id;
+  const title = providerTitle(p, preset, draft.providers);
   const result = check && typeof check === 'object' ? check : null;
   return (
     <article className="card prov-card" data-enabled={p.enabled}>
       <header className="prov-head">
         <div className="prov-title">
           <span className="card-title">{title}</span>
-          {p.id !== preset?.id && <span className="mono muted small">{p.id}</span>}
+          {preset && title === shortName(preset.name) && p.id !== preset.id && <span className="mono muted small">{p.id}</span>}
           {preset?.tagline && <span className="prov-tagline">{preset.tagline}</span>}
         </div>
         <Switch checked={p.enabled} onChange={(v) => edit({ enabled: v })} label={`Провайдер ${title}`} />
@@ -208,6 +211,16 @@ function ProviderCard({
           </button>
         )}
         {preset?.key_url && <ExternalLink href={preset.key_url}>Где взять ключ</ExternalLink>}
+        {(preset?.needs_key ?? true) && (
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            title="Второй ключ того же провайдера: свои лимиты, Джарвис переключается между ключами"
+            onClick={() => update((cfg) => addAnotherKey(cfg, p, preset))}
+          >
+            + Добавить ещё ключ
+          </button>
+        )}
         <span className="grow-spacer" />
         {confirmRemove ? (
           <>
@@ -359,7 +372,10 @@ export default function ProvidersTab({ draft, update, base, onSaved }: TabProps 
     void call<ProviderPreset[]>('provider_presets').then(setPresets).catch(() => setPresets([]));
   }, []);
 
-  const presetOf = (id: string) => presets.find((p) => p.id === id) ?? presets.find((p) => id.startsWith(`${p.id}-`));
+  const presetOf = (id: string) => {
+    const pc = draft.providers.find((x) => x.id === id);
+    return pc ? presetFor(presets, pc) : presets.find((x) => x.id === id);
+  };
   const knownModels = useMemo(() => {
     const out: string[] = [];
     for (const [pid, c] of Object.entries(checks)) {
@@ -389,7 +405,7 @@ export default function ProvidersTab({ draft, update, base, onSaved }: TabProps 
       setBestMsg('Лучшие модели выбраны и сохранены — Джарвис уже использует их');
     } catch (e) {
       // нет результатов проверки на стороне ядра — подставляем рейтинг в черновик, сохранит кнопка «Сохранить»
-      update((cfg) => ({ ...cfg, roles: applyRanking(cfg.roles, ranking) }));
+      update((cfg) => ({ ...cfg, roles: applyRanking(cfg.roles, ranking, cfg.providers) }));
       setBestMsg(`${errorText(e)}. Рейтинг подставлен в черновик — нажмите «Сохранить».`);
     }
   };
@@ -401,7 +417,8 @@ export default function ProvidersTab({ draft, update, base, onSaved }: TabProps 
       {brainBlocked.length > 0 && (
         <div className="alert" role="alert">
           <span>
-            <strong>«Мозг» без модели:</strong> {brainBlocked.map((id) => (presetOf(id) ? shortName(presetOf(id)!.name) : id)).join(', ')}{' '}
+            <strong>«Мозг» без модели:</strong>{' '}
+            {brainBlocked.map((id) => providerTitle({ id }, presetOf(id), draft.providers)).join(', ')}{' '}
             {brainBlocked.length === 1 ? 'выключен' : 'выключены'}. Джарвис не сможет отвечать.
           </span>
           <button
@@ -426,7 +443,7 @@ export default function ProvidersTab({ draft, update, base, onSaved }: TabProps 
           <ProviderCard
             key={p.id}
             p={p}
-            preset={presetOf(p.id)}
+            preset={presetFor(presets, p)}
             draft={draft}
             check={checks[p.id]}
             update={update}

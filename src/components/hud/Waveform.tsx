@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
-import { PALETTE, withAlpha } from '@/lib/glow';
+import { withAlpha } from '@/lib/glow';
+import { livePalette } from '@/lib/theme';
 import { jarvisStore } from '@/lib/store';
 
 const BARS = 48;
@@ -39,7 +40,8 @@ export default function Waveform() {
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      const color = s.audio.lastSource === 'tts' ? PALETTE.ice : PALETTE.cyan;
+      const pal = livePalette();
+      const color = s.audio.lastSource === 'tts' ? pal.ice : pal.accent;
       const bw = w / BARS;
       for (let i = 0; i < BARS; i++) {
         const v = levels[i];

@@ -99,6 +99,28 @@ export interface Config {
   search_roots: string[];
   hud: { mode: HudMode; corner_x: number | null; corner_y: number | null };
   audio: AudioConfig;
+  appearance: AppearanceConfig;
+}
+
+export type CornerSize = 'small' | 'medium' | 'large';
+
+/** Внешний вид (jarvis_core::config::AppearanceConfig). */
+export interface AppearanceConfig {
+  /** id темы из `THEMES` (src/lib/theme.ts). */
+  theme: string;
+  /** Свой акцент `#RRGGBB` поверх темы. */
+  accent: string | null;
+  /** Яркость свечения 0.3…1.5. */
+  glow: number;
+  /** Скорость анимации реактора 0.25…2. */
+  animation_speed: number;
+  corner_size: CornerSize;
+  /** Сканлинии и гекс-сетка на фоне HUD. */
+  scanlines: boolean;
+  show_telemetry: boolean;
+  show_actions: boolean;
+  show_sources: boolean;
+  show_subtitles: boolean;
 }
 
 /** Микрофон, динамики, громкость (jarvis_core::config::AudioConfig). `null` — устройство Windows по умолчанию. */

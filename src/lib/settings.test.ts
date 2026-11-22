@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultConfig } from './mock';
 import {
+  addAnotherKey,
   addProvider,
+  applyRanking,
+  interleaveKeys,
+  presetFor,
+  providerTitle,
   blockingDisabled,
   chainItemState,
   deviceValue,
@@ -57,6 +62,31 @@ describe('провайдеры: включение', () => {
     // есть запасная модель у включённого провайдера — роль работает
     const withFallback = { ...c, roles: { ...c.roles, brain: [...c.roles.brain, 'opencode-zen/glm-5.3'] } };
     expect(blockingDisabled(withFallback, 'brain')).toEqual([]);
+  });
+});
+
+describe('несколько ключей одного провайдера', () => {
+  const groq: ProviderPreset = { ...zen, id: 'groq', name: 'Groq', base_url: 'https://api.groq.com/openai/v1' };
+  it('groq-2 — та же карточка «Groq · ключ 2»', () => {
+    let c = defaultConfig();
+    c = addAnotherKey(c, c.providers[0], groq);
+    expect(c.providers.map((p) => [p.id, p.base_url, p.api_key, p.enabled])).toEqual([
+      ['groq', 'https://api.groq.com/openai/v1', '', true],
+      ['groq-2', 'https://api.groq.com/openai/v1', '', true],
+    ]);
+    expect(presetFor([zen, groq], c.providers[1])?.id).toBe('groq');
+    expect(presetFor([zen, groq], { id: 'my', kind: 'openai_compat', base_url: 'https://api.groq.com/openai/v1/' })?.id).toBe('groq');
+    expect(providerTitle(c.providers[0], groq, c.providers)).toBe('Groq · ключ 1');
+    expect(providerTitle(c.providers[1], groq, c.providers)).toBe('Groq · ключ 2');
+    expect(providerTitle(c.providers[0], groq, [c.providers[0]])).toBe('Groq');
+    expect(addAnotherKey(c, c.providers[1], groq).providers[2].id).toBe('groq-3');
+  });
+
+  it('«лучшее автоматически» чередует ключи', () => {
+    const c = addAnotherKey(defaultConfig(), defaultConfig().providers[0], groq);
+    expect(interleaveKeys(c.providers, ['groq/a', 'groq/b'])).toEqual(['groq/a', 'groq-2/a', 'groq/b', 'groq-2/b']);
+    const roles = applyRanking(c.roles, [{ role: 'brain', top: [{ model: 'groq/a', reason: '' }] }], c.providers);
+    expect(roles.brain.slice(0, 2)).toEqual(['groq/a', 'groq-2/a']);
   });
 });
 

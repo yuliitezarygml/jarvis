@@ -2,6 +2,7 @@
 // радиальная волна от уровня звука, сканирующая дуга, ядро с треугольником. Чистые функции — без React.
 
 import { PALETTE, withAlpha } from '@/lib/glow';
+import { hexToRgb, livePalette } from '@/lib/theme';
 import type { AssistantState } from '@/lib/types';
 
 export interface ReactorParams {
@@ -26,21 +27,23 @@ export interface ReactorParams {
 /** Параметры кадра по состоянию. `t` — секунды, `level` — сглаженный уровень звука 0..1, `rand` — 0..1. */
 export function reactorParams(state: AssistantState, t: number, level: number, rand: number): ReactorParams {
   const breath = 0.5 + 0.5 * Math.sin(t * 1.25);
+  // цвета темы (янтарь и красный — сигнальные, от темы не зависят)
+  const { accent: cyan, ice } = livePalette();
   const lv = Math.min(1, Math.max(0, level));
   switch (state) {
     case 'listening':
-      return { speed: 1.35, glow: 0.85 + 0.15 * lv, base: PALETTE.cyan, accent: PALETTE.ice, wave: 0.22 + 0.78 * lv, pulse: lv * 0.4, scan: false, alpha: 1 };
+      return { speed: 1.35, glow: 0.85 + 0.15 * lv, base: cyan, accent: ice, wave: 0.22 + 0.78 * lv, pulse: lv * 0.4, scan: false, alpha: 1 };
     case 'thinking':
-      return { speed: 4.2, glow: 0.8, base: PALETTE.cyan, accent: PALETTE.ice, wave: 0.1, pulse: 0.15 * breath, scan: true, alpha: 1 };
+      return { speed: 4.2, glow: 0.8, base: cyan, accent: ice, wave: 0.1, pulse: 0.15 * breath, scan: true, alpha: 1 };
     case 'speaking':
-      return { speed: 1.4, glow: 0.7 + 0.3 * lv, base: PALETTE.cyan, accent: PALETTE.ice, wave: 0.12 + 0.75 * lv, pulse: lv, scan: false, alpha: 1 };
+      return { speed: 1.4, glow: 0.7 + 0.3 * lv, base: cyan, accent: ice, wave: 0.12 + 0.75 * lv, pulse: lv, scan: false, alpha: 1 };
     case 'controlling':
-      return { speed: 1.9, glow: 0.85, base: PALETTE.cyan, accent: PALETTE.amber, wave: 0.15 + 0.4 * lv, pulse: 0.2 * breath, scan: false, alpha: 1 };
+      return { speed: 1.9, glow: 0.85, base: cyan, accent: PALETTE.amber, wave: 0.15 + 0.4 * lv, pulse: 0.2 * breath, scan: false, alpha: 1 };
     case 'error':
       return { speed: 0.35, glow: 0.75, base: PALETTE.red, accent: PALETTE.red, wave: 0.06, pulse: 0, scan: false, alpha: rand > 0.86 ? 0.35 : 0.9 + 0.1 * rand };
     case 'idle':
     default:
-      return { speed: 1, glow: 0.5 + 0.22 * breath, base: PALETTE.cyan, accent: PALETTE.ice, wave: 0.06 + 0.3 * lv, pulse: 0.25 * breath, scan: false, alpha: 1 };
+      return { speed: 1, glow: 0.5 + 0.22 * breath, base: cyan, accent: ice, wave: 0.06 + 0.3 * lv, pulse: 0.25 * breath, scan: false, alpha: 1 };
   }
 }
 
@@ -80,6 +83,7 @@ export function drawReactor(ctx: CanvasRenderingContext2D, w: number, h: number,
   const R = (Math.min(w, h) / 2) * 0.92;
   if (R <= 4) return;
   const s = p.speed;
+  const ice = livePalette().ice;
 
   ctx.save();
   ctx.translate(w / 2, h / 2);
@@ -156,7 +160,7 @@ export function drawReactor(ctx: CanvasRenderingContext2D, w: number, h: number,
     ctx.strokeStyle = withAlpha(p.base, 0.12 * p.glow);
     ctx.lineWidth = Math.max(2, R * 0.016);
     ctx.stroke();
-    ctx.strokeStyle = withAlpha(p.accent === p.base ? p.base : PALETTE.ice, 0.35 + 0.6 * p.wave);
+    ctx.strokeStyle = withAlpha(p.accent === p.base ? p.base : ice, 0.35 + 0.6 * p.wave);
     ctx.lineWidth = Math.max(1, R * 0.006);
     ctx.stroke();
   }
@@ -188,7 +192,7 @@ export function drawReactor(ctx: CanvasRenderingContext2D, w: number, h: number,
     for (let i = 0; i < steps; i++) {
       const a1 = head - (i / steps) * 1.3;
       arcPath(ctx, R * 0.665, a1 - 1.3 / steps, a1);
-      ctx.strokeStyle = withAlpha(PALETTE.ice, 0.9 * (1 - i / steps) ** 1.6);
+      ctx.strokeStyle = withAlpha(ice, 0.9 * (1 - i / steps) ** 1.6);
       ctx.lineWidth = Math.max(1.5, R * 0.03);
       ctx.stroke();
     }
@@ -216,7 +220,7 @@ export function drawReactor(ctx: CanvasRenderingContext2D, w: number, h: number,
   const coreR = R * 0.36 * (1 + 0.1 * p.pulse);
   const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
   core.addColorStop(0, withAlpha('#FFFFFF', 0.85 * (0.6 + 0.4 * p.glow)));
-  core.addColorStop(0.22, withAlpha(PALETTE.ice, 0.6 * p.glow + 0.2 * p.pulse));
+  core.addColorStop(0.22, withAlpha(ice, 0.6 * p.glow + 0.2 * p.pulse));
   core.addColorStop(0.55, withAlpha(p.base, 0.28 * p.glow + 0.15 * p.pulse));
   core.addColorStop(1, withAlpha(p.base, 0));
   ctx.fillStyle = core;
@@ -236,7 +240,7 @@ export function drawReactor(ctx: CanvasRenderingContext2D, w: number, h: number,
   }
   ctx.closePath();
   ctx.lineJoin = 'round';
-  glowStroke(ctx, p.base === PALETTE.red ? PALETTE.red : PALETTE.ice, R * 0.022, p.glow);
+  glowStroke(ctx, p.base === PALETTE.red ? PALETTE.red : ice, R * 0.022, p.glow);
 
   ctx.restore();
 }
@@ -260,14 +264,16 @@ export function drawHexGrid(ctx: CanvasRenderingContext2D, w: number, h: number,
       ctx.closePath();
     }
   }
-  ctx.strokeStyle = withAlpha(PALETTE.steel, 0.16);
+  const pal = livePalette();
+  const v = hexToRgb(pal.void).join(', ');
+  ctx.strokeStyle = withAlpha(pal.steel, 0.16);
   ctx.lineWidth = 1;
   ctx.stroke();
   // виньетка: сетка гаснет к краям и под реактором
   const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.18, w / 2, h / 2, Math.max(w, h) * 0.75);
-  g.addColorStop(0, 'rgba(2, 8, 13, 0.85)');
-  g.addColorStop(0.45, 'rgba(2, 8, 13, 0)');
-  g.addColorStop(1, 'rgba(2, 8, 13, 0.9)');
+  g.addColorStop(0, `rgba(${v}, 0.85)`);
+  g.addColorStop(0.45, `rgba(${v}, 0)`);
+  g.addColorStop(1, `rgba(${v}, 0.9)`);
   ctx.globalCompositeOperation = 'destination-out';
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);

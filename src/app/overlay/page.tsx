@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import DevPanel from '@/components/DevPanel';
+import { useLivePalette } from '@/components/ThemeRoot';
 import { call, inTauri, listenTo } from '@/lib/bridge';
 import { intersectsOverlay, labelPlacement, toOverlayBox, toOverlayPoint } from '@/lib/geometry';
 import { glowFor, withAlpha } from '@/lib/glow';
@@ -102,7 +103,8 @@ export default function OverlayPage() {
     setBrowser(!inTauri());
   }, []);
 
-  const glow = glowFor({ tier: control.active ? control.tier : null, confirmPending: confirm !== null, assistant });
+  const palette = useLivePalette();
+  const glow = glowFor({ tier: control.active ? control.tier : null, confirmPending: confirm !== null, assistant }, palette.overlay);
   const target = control.target;
   const box = target && geometry && intersectsOverlay(target.rect, geometry) ? toOverlayBox(target.rect, geometry) : null;
   const placement = box ? labelPlacement(box, window.innerHeight) : 'above';

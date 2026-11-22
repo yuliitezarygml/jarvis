@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 import { drawHexGrid } from '@/components/reactor/draw';
+import { onThemeChange } from '@/lib/theme';
 
 /** Фон HUD: гекс-сетка (рисуется только при изменении размера) + линии сканирования на CSS. */
 export default function HudBackground() {
@@ -23,7 +24,11 @@ export default function HudBackground() {
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
-    return () => ro.disconnect();
+    const unsub = onThemeChange(redraw); // сетка в цвете темы
+    return () => {
+      ro.disconnect();
+      unsub();
+    };
   }, []);
   return (
     <div className="hud-bg" aria-hidden="true">

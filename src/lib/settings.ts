@@ -1,6 +1,6 @@
 // Чистые операции над черновиком конфига в экране настроек.
 
-import type { Config, ProviderPreset, RoleName, RoleRanking, Roles, SearchPreset } from './types';
+import type { Config, ProviderConfig, ProviderPreset, RoleName, RoleRanking, Roles, SearchPreset } from './types';
 
 export const ROLE_NAMES: RoleName[] = ['brain', 'fast', 'vision', 'reflection'];
 
@@ -52,11 +52,14 @@ export function removeFromChain(roles: Roles, role: RoleName, model: string): Ro
 }
 
 /** «Выбрать лучшее автоматически»: рекомендованные модели встают в начало цепочек, остальные — следом. */
-export function applyRanking(roles: Roles, ranking: RoleRanking[]): Roles {
+export function applyRanking(roles: Roles, ranking: RoleRanking[], providers: ProviderConfig[] = []): Roles {
   const next = { ...roles };
   for (const r of ranking) {
     if (!ROLE_NAMES.includes(r.role) || r.top.length === 0) continue;
-    const top = r.top.map((t) => t.model);
+    const top = interleaveKeys(
+      providers,
+      r.top.map((t) => t.model),
+    );
     next[r.role] = [...top, ...roles[r.role].filter((m) => !top.includes(m))];
   }
   return next;
@@ -113,6 +116,70 @@ export function presetBadges(p: Pick<ProviderPreset, 'local' | 'free_tier' | 'ne
   if (p.local) out.push({ tone: 'local', text: 'локально' });
   if (p.free_tier) out.push({ tone: 'free', text: p.local ? 'бесплатно' : 'есть бесплатно' });
   out.push(p.needs_key ? { tone: 'key', text: 'нужен ключ' } : { tone: 'free', text: 'без ключа' });
+  return out;
+}
+
+const normUrl = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+
+/** Пресет для записи конфига: по id, по `<пресет>-N` (второй ключ) или по адресу API (как `Presets::for_config`). */
+export function presetFor<P extends Pick<ProviderPreset, 'id' | 'kind' | 'base_url'>>(presets: P[], p: { id: string; kind: string; base_url: string }): P | undefined {
+  return (
+    presets.find((x) => x.id === p.id) ??
+    presets.find((x) => keyNumber(p.id, x.id) !== null) ??
+    (normUrl(p.base_url) ? presets.find((x) => x.kind === p.kind && normUrl(x.base_url) === normUrl(p.base_url)) : undefined)
+  );
+}
+
+/** Номер ключа: `groq` → 1, `groq-2` → 2 (если id не `<пресет>-N` — null). */
+export function keyNumber(id: string, presetId: string): number | null {
+  if (id === presetId) return 1;
+  const m = id.startsWith(`${presetId}-`) ? /^(\d+)$/.exec(id.slice(presetId.length + 1)) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/** Заголовок карточки: «Groq», второй ключ — «Groq · ключ 2». */
+export function providerTitle(p: { id: string }, preset: Pick<ProviderPreset, 'id' | 'name'> | undefined, all: { id: string }[]): string {
+  if (!preset) return p.id;
+  const n = keyNumber(p.id, preset.id);
+  const name = shortName(preset.name);
+  const several = all.filter((x) => keyNumber(x.id, preset.id) !== null).length > 1;
+  return n !== null && (n > 1 || several) ? `${name} · ключ ${n}` : name;
+}
+
+/** «Добавить ещё ключ»: новая запись того же провайдера (`<пресет>-N`) с тем же адресом и пустым ключом. */
+export function addAnotherKey(cfg: Config, p: ProviderConfig, preset: ProviderPreset | undefined): Config {
+  const base: ProviderPreset = preset ?? {
+    id: p.id.replace(/-\d+$/, ''),
+    name: p.id,
+    kind: p.kind,
+    base_url: p.base_url,
+    key_url: '',
+    docs_url: '',
+    needs_key: true,
+    local: false,
+    free_tier: false,
+    tagline: '',
+    note: '',
+  };
+  return addProvider(cfg, base, '', p.base_url);
+}
+
+/** Как `interleave_keys` в ядре: за моделью одного ключа — та же модель через другие включённые ключи. */
+export function interleaveKeys(providers: ProviderConfig[], chain: string[]): string[] {
+  const out: string[] = [];
+  const push = (s: string) => {
+    if (!out.includes(s)) out.push(s);
+  };
+  for (const r of chain) {
+    push(r);
+    const pid = providerOf(r);
+    const own = providers.find((x) => x.id === pid);
+    if (!own || !normUrl(own.base_url)) continue;
+    const model = r.slice(pid.length + 1);
+    for (const s of providers) {
+      if (s.id !== own.id && s.enabled && s.kind === own.kind && normUrl(s.base_url) === normUrl(own.base_url)) push(`${s.id}/${model}`);
+    }
+  }
   return out;
 }
 

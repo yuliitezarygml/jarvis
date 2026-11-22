@@ -37,13 +37,16 @@ export interface GlowInput {
   assistant: AssistantState;
 }
 
-/** Цвет рамки оверлея; null — рамку не показывать. */
-export function glowFor({ tier, confirmPending, assistant }: GlowInput): GlowSpec | null {
+/**
+ * Цвет рамки оверлея; null — рамку не показывать. `accent` — цвет темы для T1/T2 (по умолчанию циан);
+ * янтарь (T3) и красный (подтверждение/ошибка) — сигнальные и от темы не зависят.
+ */
+export function glowFor({ tier, confirmPending, assistant }: GlowInput, accent: string = PALETTE.cyan): GlowSpec | null {
   if (confirmPending) return SPECS.red;
   if (tier === null) return null;
   if (assistant === 'error') return { ...SPECS.red, label: 'Ошибка' };
   if (tier === 'T3') return SPECS.amber;
-  if (tier === 'T1' || tier === 'T2') return SPECS.cyan;
+  if (tier === 'T1' || tier === 'T2') return accent === SPECS.cyan.color ? SPECS.cyan : { ...SPECS.cyan, color: accent };
   return null; // T0
 }
 

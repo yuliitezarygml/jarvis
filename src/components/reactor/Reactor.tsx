@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 import { jarvisStore } from '@/lib/store';
+import { liveMotion } from '@/lib/theme';
 
 import { drawReactor, reactorParams, smoothLevel, targetFps } from './draw';
 
@@ -44,7 +45,7 @@ export default function Reactor({ variant, className }: Props) {
     let last = performance.now();
     let level = 0;
     let curFps = 0;
-    const t0 = last;
+    let clock = 0;
 
     const frame = (now: number) => {
       raf = 0;
@@ -63,7 +64,12 @@ export default function Reactor({ variant, className }: Props) {
             ? s.audio.tts
             : Math.max(s.audio.mic, s.audio.tts);
       level = smoothLevel(level, target, dt);
-      drawReactor(ctx, w, h, (now - t0) / 1000, reactorParams(s.assistant, (now - t0) / 1000, level, Math.random()));
+      // скорость анимации и яркость свечения из «Внешнего вида»: время копится с множителем — без рывков при смене
+      const motion = liveMotion();
+      clock += dt * motion.speed;
+      const p = reactorParams(s.assistant, clock, level, Math.random());
+      p.glow = Math.min(1.6, p.glow * motion.glow);
+      drawReactor(ctx, w, h, clock, p);
       schedule(fps);
     };
 
