@@ -16,7 +16,7 @@ use std::{
 use windows::{
     core::{BOOL, BSTR, PWSTR},
     Win32::{
-        Foundation::{CloseHandle, HWND, LPARAM, RECT},
+        Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND, LPARAM, RECT},
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
         System::{
             Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED},
@@ -24,6 +24,12 @@ use windows::{
                 OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
                 PROCESS_QUERY_LIMITED_INFORMATION,
             },
+        },
+        System::{
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+            },
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
         },
         UI::{Accessibility::*, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
     },
@@ -387,25 +393,6 @@ fn key_input(vk: VIRTUAL_KEY, up: bool) -> INPUT {
         },
     }
 }
-fn unicode_input(unit: u16, up: bool) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(0),
-                wScan: unit,
-                dwFlags: KEYEVENTF_UNICODE
-                    | if up {
-                        KEYEVENTF_KEYUP
-                    } else {
-                        KEYBD_EVENT_FLAGS(0)
-                    },
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    }
-}
 fn mouse_input(flags: MOUSE_EVENT_FLAGS, data: i32) -> INPUT {
     INPUT {
         r#type: INPUT_MOUSE,
@@ -488,23 +475,73 @@ fn press(keys: &str) -> Result<()> {
     send(&inputs);
     Ok(())
 }
+fn clipboard_open() -> Result<()> {
+    for _ in 0..20 {
+        if unsafe { OpenClipboard(None) }.is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    bail!("Буфер обмена занят другой программой")
+}
+fn clipboard_text() -> Option<String> {
+    clipboard_open().ok()?;
+    let out = unsafe {
+        GetClipboardData(CF_UNICODETEXT_ID).ok().and_then(|h| {
+            let p = GlobalLock(HGLOBAL(h.0)) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let mut len = 0;
+            while *p.add(len) != 0 {
+                len += 1;
+            }
+            let text = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+            let _ = GlobalUnlock(HGLOBAL(h.0));
+            Some(text)
+        })
+    };
+    let _ = unsafe { CloseClipboard() };
+    out
+}
+fn set_clipboard(text: Option<&str>) -> Result<()> {
+    clipboard_open()?;
+    let result = (|| unsafe {
+        EmptyClipboard()?;
+        if let Some(text) = text {
+            let units: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            let mem = GlobalAlloc(GMEM_MOVEABLE, units.len() * 2)?;
+            let dst = GlobalLock(mem) as *mut u16;
+            ensure!(!dst.is_null(), "Не удалось выделить память");
+            std::ptr::copy_nonoverlapping(units.as_ptr(), dst, units.len());
+            let _ = GlobalUnlock(mem);
+            SetClipboardData(CF_UNICODETEXT_ID, Some(HANDLE(mem.0)))?;
+        }
+        Ok(())
+    })();
+    let _ = unsafe { CloseClipboard() };
+    result
+}
+const CF_UNICODETEXT_ID: u32 = 13;
+/// Types text by pasting it. Injected character events are read late by modern apps and come out garbled
+/// («abc» typed fast arrives as «ccc»), the clipboard is the only reliable route. The old text is restored.
 fn type_text(text: &str) -> Result<()> {
     ensure_not_own_foreground()?;
-    for ch in text.chars() {
-        if STOP.load(Ordering::SeqCst) {
-            bail!("Остановлено пользователем (Ctrl+Alt+K)");
-        }
-        if ch == '\n' {
-            send(&[key_input(VK_RETURN, false), key_input(VK_RETURN, true)]);
-        } else {
-            let mut units = [0u16; 2];
-            for &u in ch.encode_utf16(&mut units).iter() {
-                send(&[unicode_input(u, false), unicode_input(u, true)]);
-            }
-        }
-        std::thread::sleep(Duration::from_millis(4));
-    }
-    Ok(())
+    ensure!(
+        !STOP.load(Ordering::SeqCst),
+        "Остановлено пользователем (Ctrl+Alt+K)"
+    );
+    let previous = clipboard_text();
+    let crlf = text.lines().collect::<Vec<_>>().join("\r\n");
+    set_clipboard(Some(&crlf))?;
+    send(&[
+        key_input(VK_CONTROL, false),
+        key_input(VIRTUAL_KEY(b'V' as u16), false),
+        key_input(VIRTUAL_KEY(b'V' as u16), true),
+        key_input(VK_CONTROL, true),
+    ]);
+    std::thread::sleep(Duration::from_millis(350));
+    set_clipboard(previous.as_deref())
 }
 fn center(e: &IUIAutomationElement) -> Result<(i32, i32)> {
     let r = unsafe { e.CurrentBoundingRectangle()? };
@@ -749,7 +786,8 @@ mod tests {
             for _ in 0..20 {
                 state = exec("ui_state", &json!({"window":window})).await?;
                 let ready = state["elements"].as_array().is_some_and(|e| {
-                    e.iter().any(|x| matches!(x["type"].as_str(), Some("Document" | "Edit")))
+                    e.iter()
+                        .any(|x| matches!(x["type"].as_str(), Some("Document" | "Edit")))
                 });
                 if ready {
                     break;
@@ -782,12 +820,42 @@ mod tests {
             println!("values after typing: {value}");
             tokio::time::sleep(Duration::from_secs(3)).await;
             let late = exec("ui_state", &json!({"window":window})).await?;
-            for e in late["elements"].as_array().unwrap().iter().filter(|e| e.get("value").is_some()) {
+            for e in late["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e.get("value").is_some())
+            {
                 println!("LATE value of {}: {:?}", e["type"], e["value"]);
             }
             ensure!(
                 value.contains("abc xyz hello привет 123"),
                 "текст не появился: {value}"
+            );
+            let tabs = |v: &Value| {
+                v["elements"]
+                    .as_array()
+                    .map_or(0, |e| e.iter().filter(|x| x["type"] == "TabItem").count())
+            };
+            let before = tabs(&after["state"]);
+            let add = after["state"]["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["name"] == "Add New Tab")
+                .context("нет кнопки Add New Tab")?["i"]
+                .as_u64()
+                .unwrap();
+            let clicked = exec("ui_click", &json!({"window":window,"element":add})).await?;
+            println!(
+                "click did: {} ; tabs {} -> {}",
+                clicked["result"]["did"],
+                before,
+                tabs(&clicked["state"])
+            );
+            ensure!(
+                tabs(&clicked["state"]) == before + 1,
+                "вкладка не добавилась"
             );
             // The password-safety and own-window rules hold on a real handle too.
             let own = exec("ui_state", &json!({"window":0})).await;
