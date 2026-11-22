@@ -10,7 +10,7 @@ pub mod tool;
 pub mod untrusted;
 
 pub use config::{Autonomy, Config, ConfigError, ModelRef, ProviderConfig, ProviderKind};
-pub use event::{AssistantState, Event, EventSink, NullSink, CollectSink, Rect};
+pub use event::{ActionStatus, AssistantState, AudioSource, CollectSink, Event, EventSink, NullSink, Rect, SourceLink, Speaker};
 pub use llm::{ChatEvent, ChatMessage, ChatModel, ChatRequest, ChatResponse, ImageData, LlmError, Role, ToolCall, Usage};
 pub use risk::{requires_confirmation, RiskTier};
 pub use tool::{Attachment, Tool, ToolCtx, ToolError, ToolOutput, ToolRegistry, ToolSpec};
