@@ -667,7 +667,7 @@ mod tests {
         }
         drop(tx);
         assert_eq!(p.speak(rx).await.unwrap(), SpeakOutcome::Completed);
-        assert_eq!(*tts.texts.lock().unwrap(), ["Привет, сэр.", "Найдено пять файлов на диске D.", "Пример кода."]);
+        assert_eq!(*tts.texts.lock().unwrap(), ["Привет, сэр.", "Найдено пять файлов на диске ди.", "Пример кода."]);
         assert_eq!(*out.samples.lock().unwrap(), 3 * 4800);
         assert!(p.echo_guard().overlap("найдено пять файлов") > 0.99, "сказанное запомнено для фильтра эха");
         let ev = sink.take();

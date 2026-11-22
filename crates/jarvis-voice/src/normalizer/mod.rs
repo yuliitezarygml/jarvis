@@ -1,9 +1,10 @@
 //! `SpeechNormalizer` — текст ответа LLM → текст, который русский TTS прочитает правильно.
 //!
-//! Порядок: Markdown → эмодзи → ссылки/почта → символы перед числами → числа → сокращения → символы → чистка.
-//! Английские слова не трогаем (их транслитерирует сервер TTS).
+//! Порядок: Markdown → эмодзи → ссылки/почта → символы перед числами → числа → сокращения →
+//! английские слова (словарь + транскрипция) → символы → чистка.
 
 mod abbrev;
+pub mod english;
 mod markdown;
 pub mod numbers;
 mod numexpr;
@@ -37,6 +38,7 @@ impl SpeechNormalizer {
         let s = text::symbols_pre(&s);
         let s = numexpr::replace_numbers(&s);
         let s = abbrev::expand(&s);
+        let s = english::expand(&s);
         let s = text::symbols_post(&s);
         text::cleanup(&s)
     }
