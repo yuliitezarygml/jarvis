@@ -43,9 +43,13 @@ export function VoiceTab({ draft, update }: TabProps) {
       </section>
       <section className="section">
         <h2 className="section-title">Распознавание речи</h2>
-        <p className="section-lead">Сервер на Xeon («не у всех мощный ПК»); запасной вариант — Groq Whisper по ключу Groq.</p>
+        <p className="section-lead">
+          «На этом ПК» — быстрее всего и без сети (модель GigaAM v3, ~215 МБ в data/models). Для слабого ПК — свой сервер
+          на Xeon или Groq Whisper по ключу Groq. Если модели на ПК нет, распознаёт сервер.
+        </p>
         <Field label="Движок">
           <select className="select" value={draft.stt.engine} onChange={(e) => update((c) => ({ ...c, stt: { ...c.stt, engine: e.target.value } }))}>
+            <option value="local">На этом ПК (быстро, без сети)</option>
             <option value="server">Свой сервер (jarvis-stt-rs)</option>
             <option value="groq_whisper">Groq Whisper (облако)</option>
           </select>

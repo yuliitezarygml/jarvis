@@ -252,7 +252,11 @@ mod tests {
         assert!(matches!(e, VoiceError::Config(_)), "{e:?}");
     }
 
+    // Ручные тесты: тестовый exe лежит не рядом с DLL sherpa-onnx, и Windows подставляет системную
+    // onnxruntime.dll (1.17) из System32 → падение. Запуск: скопировать target/debug/*.dll к тестовому exe
+    // и выполнить `<exe> stt::local --ignored`. В самом приложении DLL лежат рядом с jarvis.exe.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "нужны DLL sherpa-onnx рядом с тестовым exe (см. комментарий)"]
     async fn recognizes_example_wav_fast() {
         let Some(dir) = model_dir() else {
             eprintln!("модели нет в data/models — тест пропущен");
@@ -278,6 +282,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "нужны DLL sherpa-onnx рядом с тестовым exe (см. комментарий выше)"]
     async fn stream_gives_final_after_end() {
         let Some(dir) = model_dir() else { return };
         let wav = dir.join("test_wavs").join("example.wav");

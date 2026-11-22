@@ -44,7 +44,7 @@ export function defaultConfig(): Config {
   return {
     data_dir: 'data',
     tts: { url: 'https://192.168.50.38:8443', voice: 'jarvis-ru', ca_path: 'src-tauri/config/xeon-tts-ca.pem' },
-    stt: { engine: 'server', url: 'https://192.168.50.38:8444', ca_path: 'src-tauri/config/xeon-tts-ca.pem' },
+    stt: { engine: 'local', url: 'https://192.168.50.38:8444', ca_path: 'src-tauri/config/xeon-tts-ca.pem' },
     providers: [{ id: 'groq', kind: 'openai_compat', base_url: 'https://api.groq.com/openai/v1', api_key: '', enabled: true }],
     roles: { brain: ['groq/openai/gpt-oss-120b'], fast: [], vision: [], reflection: [] },
     web_search: [{ id: 'duckduckgo', api_key: '', extra: '', enabled: true }],
