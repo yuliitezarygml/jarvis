@@ -1,0 +1,37 @@
+[Unit]
+Description=Jarvis Russian speech recognition (sherpa-onnx)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Сокет открыт и модели загружены → sd_notify READY=1 (front-сокет не пускает клиентов раньше).
+Type=notify
+TimeoutStartSec=180
+User=jarvis-rust-tts
+Group=jarvis-rust-tts
+WorkingDirectory=/opt/jarvis-stt-rs
+ExecStart=/opt/jarvis-stt-rs/bin/jarvis-stt-rs
+# Только loopback; в LAN отдаёт jarvis-stt-rs-front.socket (192.168.50.38:8444). TLS — сертификат TTS.
+Environment=JARVIS_STT_BIND=127.0.0.1:8182
+Environment=JARVIS_TLS_CERT=/etc/jarvis-tts-rs/tls/server.pem
+Environment=JARVIS_TLS_KEY=/etc/jarvis-tts-rs/tls/server.key
+Environment=JARVIS_STT_MODEL_DIR=/opt/jarvis-stt-rs/models
+Environment=JARVIS_STT_STREAMING=t-one:sherpa-onnx-streaming-t-one-russian-2025-09-08
+Environment=JARVIS_STT_OFFLINE=gigaam-rnnt:sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16
+Environment=JARVIS_STT_THREADS=2
+Environment=JARVIS_STT_POOL=2
+Environment=JARVIS_STT_MAX_SESSIONS=8
+Environment=RUST_LOG=info
+MemoryHigh=2560M
+MemoryMax=3G
+TasksMax=128
+CPUQuota=600%
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

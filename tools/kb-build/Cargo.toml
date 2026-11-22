@@ -1,0 +1,29 @@
+[package]
+name = "kb-build"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Сборщик базы знаний Windows J.A.R.V.I.S.: sparse-клоны MicrosoftDocs → Markdown → фрагменты → data/kb.sqlite (FTS5); оценка Recall@5/MRR"
+
+# Отдельная сборка (свой target), как у остальных крейтов до интеграции в общий workspace.
+[workspace]
+
+[lib]
+name = "kb_build"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kb-build"
+path = "src/main.rs"
+
+[dependencies]
+jarvis-kb = { path = "../../crates/jarvis-kb" }
+jarvis-core = { path = "../../crates/jarvis-core" }
+pulldown-cmark = { version = "0.13", default-features = false }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3"
+
+[dev-dependencies]
+tempfile = "3"

@@ -333,6 +333,20 @@ impl SseReader {
     }
 }
 
+/// Отправить событие потребителю стрима; ждём места в канале, но уважаем отмену.
+/// Закрытый приёмник — не ошибка: ответ всё равно соберётся целиком.
+pub(crate) async fn emit(
+    tx: &tokio::sync::mpsc::Sender<jarvis_core::ChatEvent>,
+    ev: jarvis_core::ChatEvent,
+    cancel: &CancellationToken,
+) -> Result<(), LlmError> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(LlmError::Cancelled),
+        _ = tx.send(ev) => Ok(()),
+    }
+}
+
 /// Хост из URL (для проверки, что ключ не уходит на чужой домен).
 pub(crate) fn host_of(url: &str) -> Option<String> {
     reqwest::Url::parse(url).ok()?.host_str().map(|h| h.to_ascii_lowercase())

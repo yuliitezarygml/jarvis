@@ -2,7 +2,7 @@
 //! Хоткеи регистрирует только этот слой; бэкенд получает остановку через `UiHooks::emergency_stop`.
 
 use jarvis_core::{Event, EventSink};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 use crate::commands::{SinkState, do_emergency_stop};
@@ -17,7 +17,7 @@ pub fn stop_shortcut() -> Shortcut {
 }
 
 /// Зарегистрировать хоткеи. Если сочетание занято другой программой — сообщение в HUD, без падения.
-pub fn register<R: Runtime>(app: &AppHandle<R>) {
+pub fn register(app: &AppHandle) {
     let gs = app.global_shortcut();
     let toggle = gs.on_shortcut(toggle_shortcut(), |app, _s, ev| {
         if ev.state == ShortcutState::Pressed
@@ -39,7 +39,7 @@ pub fn register<R: Runtime>(app: &AppHandle<R>) {
             // окна ещё грузятся — покажем ошибку чуть позже
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(3));
-                if let Some(s) = app.try_state::<SinkState<R>>() {
+                if let Some(s) = app.try_state::<SinkState>() {
                     s.0.emit(Event::Error { message: msg });
                 }
             });

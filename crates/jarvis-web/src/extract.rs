@@ -70,7 +70,26 @@ pub fn to_markdown(html: &str) -> String {
         ..Default::default()
     };
     let conv = htmd::HtmlToMarkdown::builder().options(options).skip_tags(SKIP_TAGS.to_vec()).build();
-    tidy(&conv.convert(html).unwrap_or_default())
+    tidy(&strip_anchor_links(&conv.convert(html).unwrap_or_default()))
+}
+
+/// Убрать «якоря» заголовков документации: `[§](#examples)`, `[¶](#x)`, `[#](#y)` — шум для модели.
+fn strip_anchor_links(md: &str) -> String {
+    let mut out = String::with_capacity(md.len());
+    let mut rest = md;
+    while let Some(pos) = ["[§](", "[¶](", "[#]("].iter().filter_map(|p| rest.find(p)).min() {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos..];
+        match after.find(')') {
+            Some(end) if !after[..end].contains('\n') => rest = &after[end + 1..],
+            _ => {
+                out.push_str(&after[..1]);
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `<title>`, затем `og:title`, затем первый `<h1>`.
@@ -193,6 +212,12 @@ mod tests {
         let mut bom = vec![0xEF, 0xBB, 0xBF];
         bom.extend_from_slice("Джарвис".as_bytes());
         assert_eq!(decode_text(&bom, Some("text/plain; charset=windows-1251"), false), "Джарвис");
+    }
+
+    #[test]
+    fn anchors_removed() {
+        assert_eq!(strip_anchor_links("## [§](#examples)Examples\n[¶](#a) x [real](https://a.b/)"), "## Examples\n x [real](https://a.b/)");
+        assert_eq!(strip_anchor_links("[§](broken\nline)"), "[§](broken\nline)");
     }
 
     #[test]

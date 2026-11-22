@@ -183,11 +183,8 @@ impl Fetcher {
 
         let (title, markdown, page_type) = match classify(&mime, &body) {
             Kind::Pdf => {
-                if body_truncated || body.len() >= self.opts.max_pdf_bytes {
-                    return Err(FetchError::Unsupported(format!(
-                        "PDF больше {} МБ",
-                        self.opts.max_pdf_bytes / (1024 * 1024)
-                    )));
+                if body_truncated {
+                    return Err(FetchError::Unsupported(format!("PDF больше {}", human_size(limit))));
                 }
                 let text = tokio::task::spawn_blocking(move || extract::pdf_to_text(&body))
                     .await
@@ -232,10 +229,7 @@ impl Fetcher {
         }
         let (mut markdown, text_truncated) = truncate_markdown(&markdown, self.opts.max_chars);
         if body_truncated && !text_truncated {
-            markdown.push_str(&format!(
-                "\n\n[…страница больше {} МБ, прочитано только начало]",
-                self.opts.max_bytes / (1024 * 1024)
-            ));
+            markdown.push_str(&format!("\n\n[…страница больше {}, прочитано только начало]", human_size(limit)));
         }
         Ok(Page {
             url: url.to_string(),
@@ -327,6 +321,15 @@ fn file_name(url: &str) -> String {
         })
         .or_else(|| url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)))
         .unwrap_or_else(|| url.to_string())
+}
+
+/// `2097152` → «2 МБ», `65536` → «64 КБ».
+fn human_size(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{} МБ", bytes / (1024 * 1024))
+    } else {
+        format!("{} КБ", (bytes / 1024).max(1))
+    }
 }
 
 fn percent_decode(s: &str) -> String {

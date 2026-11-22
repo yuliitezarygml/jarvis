@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "comment": "Источники базы знаний Windows. Пути и URL проверены 2026-11-22 (см. README.md). repo пробуется первым, затем mirrors по порядку; недоступный источник — предупреждение, его фрагменты переносятся из прежней базы.",
+  "sources": [
+    {
+      "id": "windows-commands",
+      "name": "Windows Commands (cmd, справочник командной строки)",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/windowsserverdocs",
+      "branch": "main",
+      "sparse": ["WindowsServerDocs/administration/windows-commands"],
+      "include": ["WindowsServerDocs/administration/windows-commands/**/*.md"],
+      "exclude": [],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [{ "from": "WindowsServerDocs/", "to": "windows-server/" }],
+        "lowercase": true
+      },
+      "commands": "exe_title",
+      "note": "Публичное зеркало windowsserverdocs-pr; живое."
+    },
+    {
+      "id": "powershell",
+      "name": "PowerShell: справочник 7.6 и 5.1, docs-conceptual",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/PowerShell-Docs",
+      "branch": "main",
+      "sparse": [
+        "reference/7.6",
+        "reference/5.1",
+        "reference/docs-conceptual/learn",
+        "reference/docs-conceptual/samples",
+        "reference/docs-conceptual/security",
+        "reference/docs-conceptual/install",
+        "reference/docs-conceptual/windows-powershell"
+      ],
+      "include": ["reference/7.6/**/*.md", "reference/5.1/**/*.md", "reference/docs-conceptual/**/*.md"],
+      "exclude": ["**/includes/**", "**/media/**"],
+      "dedupe_versions": ["reference/7.6/", "reference/5.1/"],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [
+          { "from": "reference/docs-conceptual/", "to": "powershell/scripting/" },
+          { "from": "reference/7.6/", "to": "powershell/module/", "query": "view=powershell-7.6" },
+          { "from": "reference/5.1/", "to": "powershell/module/", "query": "view=powershell-5.1" }
+        ],
+        "lowercase": true,
+        "landing_dir": true
+      },
+      "commands": "cmdlet_title",
+      "note": "7.6 — текущая стабильная (страницы learn по умолчанию); из 5.1 берутся только командлеты, которых нет в 7.6 (LocalAccounts, Get-WmiObject, PSScheduledJob…)."
+    },
+    {
+      "id": "windows-powershell",
+      "name": "Модули PowerShell для Windows (Defender, NetSecurity, NetTCPIP, ScheduledTasks, Storage, Appx…)",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/windows-powershell-docs",
+      "branch": "main",
+      "sparse": [
+        "docset/winserver2025-ps/Appx",
+        "docset/winserver2025-ps/AppBackgroundTask",
+        "docset/winserver2025-ps/AppLocker",
+        "docset/winserver2025-ps/AssignedAccess",
+        "docset/winserver2025-ps/BitLocker",
+        "docset/winserver2025-ps/BitsTransfer",
+        "docset/winserver2025-ps/Defender",
+        "docset/winserver2025-ps/DefenderPerformance",
+        "docset/winserver2025-ps/DeliveryOptimization",
+        "docset/winserver2025-ps/Dism",
+        "docset/winserver2025-ps/DnsClient",
+        "docset/winserver2025-ps/Hyper-V",
+        "docset/winserver2025-ps/International",
+        "docset/winserver2025-ps/LanguagePackManagement",
+        "docset/winserver2025-ps/MMAgent",
+        "docset/winserver2025-ps/NetAdapter",
+        "docset/winserver2025-ps/NetConnection",
+        "docset/winserver2025-ps/NetQos",
+        "docset/winserver2025-ps/NetSecurity",
+        "docset/winserver2025-ps/NetTCPIP",
+        "docset/winserver2025-ps/NetworkConnectivityStatus",
+        "docset/winserver2025-ps/PnpDevice",
+        "docset/winserver2025-ps/PrintManagement",
+        "docset/winserver2025-ps/ProcessMitigations",
+        "docset/winserver2025-ps/ScheduledTasks",
+        "docset/winserver2025-ps/SecureBoot",
+        "docset/winserver2025-ps/SmbShare",
+        "docset/winserver2025-ps/StartLayout",
+        "docset/winserver2025-ps/Storage",
+        "docset/winserver2025-ps/TrustedPlatformModule",
+        "docset/winserver2025-ps/VpnClient",
+        "docset/winserver2025-ps/WindowsErrorReporting",
+        "docset/winserver2025-ps/WindowsSearch",
+        "docset/winserver2025-ps/WindowsUpdate",
+        "docset/winserver2025-ps/WinHttpProxy"
+      ],
+      "include": ["docset/winserver2025-ps/**/*.md"],
+      "exclude": ["**/includes/**"],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [
+          { "from": "docset/winserver2025-ps/", "to": "powershell/module/", "query": "view=windowsserver2025-ps" }
+        ],
+        "lowercase": true,
+        "landing_dir": true
+      },
+      "commands": "cmdlet_title",
+      "note": "Только клиентски полезные модули из ~160 (серверные роли AD/DNS/DHCP/Hyper-V-кластеры не берём, кроме Hyper-V для Windows 11 Pro)."
+    },
+    {
+      "id": "sysinternals",
+      "name": "Sysinternals",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/sysinternals",
+      "branch": "main",
+      "sparse": ["sysinternals"],
+      "include": ["sysinternals/**/*.md"],
+      "exclude": ["**/media/**"],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [{ "from": "sysinternals/", "to": "sysinternals/" }],
+        "lowercase": true
+      },
+      "commands": "filename",
+      "command_scope": ["sysinternals/downloads/"],
+      "command_aliases": {
+        "sysinternals/downloads/process-explorer.md": ["procexp", "procexp64"],
+        "sysinternals/downloads/procmon.md": ["procmon64"],
+        "sysinternals/downloads/autoruns.md": ["autorunsc"],
+        "sysinternals/downloads/rootkit-revealer.md": ["rootkitrevealer"],
+        "sysinternals/downloads/sysinternals-suite.md": [],
+        "sysinternals/downloads/pstools.md": ["pstools"]
+      }
+    },
+    {
+      "id": "win32",
+      "name": "Win32 (desktop-src): UI Automation, Shell, ввод, службы, системная информация и реестр, ошибки, процессы, питание, журнал событий",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/win32",
+      "branch": "docs",
+      "sparse": [
+        "desktop-src/WinAuto",
+        "desktop-src/shell",
+        "desktop-src/inputdev",
+        "desktop-src/Services",
+        "desktop-src/SysInfo",
+        "desktop-src/Debug",
+        "desktop-src/ProcThread",
+        "desktop-src/Power",
+        "desktop-src/EventLog"
+      ],
+      "include": ["desktop-src/**/*.md"],
+      "exclude": ["**/includes/**", "**/images/**"],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [{ "from": "desktop-src/", "to": "windows/win32/" }],
+        "lowercase": true
+      },
+      "commands": "none",
+      "note": "Подмножество под инструменты агента: WinAuto (UIA — наблюдение/клики), inputdev (SendInput, клавиатура/мышь), shell (известные папки, ярлыки, ShellExecute), Services (SCM), SysInfo (реестр, версии ОС), Debug (System Error Codes для разбора ошибок), ProcThread (процессы/потоки/job), Power, EventLog. Остальные ~50 тыс. файлов (DirectX, COM, сеть…) не тянем."
+    },
+    {
+      "id": "windows-client",
+      "name": "Windows client для ИТ-специалистов (безопасность, управление, настройка, конфиденциальность)",
+      "kind": "git",
+      "repo": "https://github.com/MicrosoftDocs/windows-itpro-docs",
+      "mirrors": [
+        "https://github.com/MaxMood96/windows-itpro-docs",
+        "https://github.com/dinhngtu/ms-windows-itpro-docs",
+        "https://github.com/NOUIY/windows-itpro-docs"
+      ],
+      "branch": "public",
+      "sparse": [
+        "windows/security",
+        "windows/client-management",
+        "windows/configuration",
+        "windows/privacy",
+        "windows/whats-new",
+        "windows/application-management"
+      ],
+      "include": ["windows/**/*.md"],
+      "exclude": [
+        "**/includes/**",
+        "windows/client-management/mdm/**",
+        "windows/security/book/**",
+        "windows/configuration/wcd/**",
+        "windows/configuration/unified-write-filter/**",
+        "windows/configuration/keyboard-filter/**"
+      ],
+      "url": {
+        "base": "https://learn.microsoft.com/en-us/",
+        "rules": [{ "from": "windows/", "to": "windows/" }],
+        "lowercase": true
+      },
+      "commands": "none",
+      "note": "MicrosoftDocs/windows-itpro-docs закрыт (404): контент Windows client теперь в приватном MicrosoftDocs/windows-docs-pr (так указывает original_content_git_url на learn.microsoft.com), публичные репозитории Learn выводятся из доступа до конца 2026. Берём последний публичный снимок (коммит 09768ace, 2025-08-08) из личных форков — у нескольких независимых форков один и тот же хэш."
+    },
+    {
+      "id": "seed",
+      "name": "Шпаргалки Джарвиса (kb/seed)",
+      "kind": "local",
+      "path": "kb/seed",
+      "include": ["**/*.md"],
+      "exclude": ["README.md"],
+      "url": {
+        "base": "",
+        "rules": [{ "from": "", "to": "kb/seed/" }],
+        "keep_ext": true
+      },
+      "commands": "none"
+    }
+  ]
+}

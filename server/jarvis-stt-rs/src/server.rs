@@ -409,6 +409,25 @@ async fn shutdown_signal() {
     }
 }
 
+/// Сообщить systemd (`Type=notify`), что сокет открыт: front-сокет не пустит клиентов раньше.
+fn notify_systemd_ready() {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::{SocketAddr, UnixDatagram};
+        let Some(path) = std::env::var_os("NOTIFY_SOCKET") else { return };
+        let path = path.to_string_lossy().into_owned();
+        let addr = match path.strip_prefix('@') {
+            Some(name) => SocketAddr::from_abstract_name(name.as_bytes()),
+            None => SocketAddr::from_pathname(&path),
+        };
+        let sent = addr.and_then(|a| UnixDatagram::unbound()?.send_to_addr(b"READY=1", &a));
+        if let Err(e) = sent {
+            tracing::warn!(error = %e, "sd_notify READY=1 не отправлен");
+        }
+    }
+}
+
 /// Запуск HTTPS (или HTTP на loopback без TLS). Завершается по SIGTERM/Ctrl+C (≤2 с на закрытие).
 pub async fn serve(
     bind: std::net::SocketAddr,
@@ -422,6 +441,12 @@ pub async fn serve(
         shutdown_signal().await;
         tracing::info!("остановка");
         h.graceful_shutdown(Some(Duration::from_secs(2)));
+    });
+    let h = handle.clone();
+    tokio::spawn(async move {
+        if h.listening().await.is_some() {
+            notify_systemd_ready();
+        }
     });
     if let Some((cert, key)) = tls {
         rustls::crypto::ring::default_provider().install_default().ok();

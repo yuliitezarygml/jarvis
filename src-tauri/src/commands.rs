@@ -7,7 +7,7 @@ use jarvis_core::config::HudMode;
 use jarvis_core::event::ActionStatus;
 use jarvis_core::{AssistantState, CancellationToken, Config, Event, EventSink};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config_store::{self, ConfigStore};
 use crate::demo;
@@ -23,7 +23,7 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 /// Общий синк событий в состоянии Tauri (`Arc<dyn EventSink>` отдаётся бэкенду интегратором).
-pub struct SinkState<R: Runtime>(pub TauriSink<R>);
+pub struct SinkState(pub TauriSink<tauri::Wry>);
 
 /// Запущенный сценарий симулятора.
 #[derive(Default)]
@@ -32,7 +32,7 @@ pub struct SimState(Mutex<Option<CancellationToken>>);
 // ───────────────────────────── окна ─────────────────────────────
 
 #[tauri::command]
-pub fn set_hud_mode<R: Runtime>(app: AppHandle<R>, mode: HudMode) -> CmdResult<()> {
+pub fn set_hud_mode(app: AppHandle, mode: HudMode) -> CmdResult<()> {
     windows_manager::set_mode(&app, mode).map_err(err)
 }
 
@@ -42,17 +42,17 @@ pub fn get_hud_mode(state: State<'_, WindowsState>) -> HudMode {
 }
 
 #[tauri::command]
-pub fn toggle_hud_mode<R: Runtime>(app: AppHandle<R>) -> CmdResult<HudMode> {
+pub fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
     windows_manager::toggle_mode(&app).map_err(err)
 }
 
 #[tauri::command]
-pub fn open_settings<R: Runtime>(app: AppHandle<R>, tab: Option<String>) -> CmdResult<()> {
+pub fn open_settings(app: AppHandle, tab: Option<String>) -> CmdResult<()> {
     windows_manager::open_settings(&app, tab.as_deref()).map_err(err)
 }
 
 #[tauri::command]
-pub fn overlay_geometry<R: Runtime>(app: AppHandle<R>) -> Option<OverlayGeometry> {
+pub fn overlay_geometry(app: AppHandle) -> Option<OverlayGeometry> {
     windows_manager::overlay_geometry(&app)
 }
 
@@ -79,16 +79,16 @@ pub fn config_path_get(store: State<'_, ConfigStore>) -> String {
 
 /// Аварийная остановка (кнопка в HUD; хоткей Ctrl+Alt+K вызывает то же самое).
 #[tauri::command]
-pub fn emergency_stop<R: Runtime>(app: AppHandle<R>) {
+pub fn emergency_stop(app: AppHandle) {
     do_emergency_stop(&app, "button");
 }
 
-pub fn do_emergency_stop<R: Runtime>(app: &AppHandle<R>, source: &str) {
+pub fn do_emergency_stop(app: &AppHandle, source: &str) {
     app.state::<AppHooks>().emergency_stop(source);
     if let Some(t) = app.state::<SimState>().0.lock().unwrap().take() {
         t.cancel();
     }
-    let sink = &app.state::<SinkState<R>>().0;
+    let sink = &app.state::<SinkState>().0;
     let (running, pending) = {
         let cache = sink.cache();
         let c = cache.lock().unwrap();
@@ -109,14 +109,14 @@ pub fn do_emergency_stop<R: Runtime>(app: &AppHandle<R>, source: &str) {
 
 /// Ответ на `ConfirmRequest` (кнопки «Да/Нет» в HUD или истёкший таймер → `approved: false`).
 #[tauri::command]
-pub fn confirm_respond<R: Runtime>(app: AppHandle<R>, id: String, approved: bool) {
+pub fn confirm_respond(app: AppHandle, id: String, approved: bool) {
     app.state::<AppHooks>().confirm(&id, approved);
-    app.state::<SinkState<R>>().0.emit(Event::ConfirmResolved { id, approved });
+    app.state::<SinkState>().0.emit(Event::ConfirmResolved { id, approved });
 }
 
 /// Снимок текущего состояния интерфейса — новое окно прогоняет его через свой редьюсер.
 #[tauri::command]
-pub fn events_replay<R: Runtime>(sink: State<'_, SinkState<R>>) -> Vec<Event> {
+pub fn events_replay(sink: State<'_, SinkState>) -> Vec<Event> {
     sink.0.replay()
 }
 
@@ -125,18 +125,18 @@ pub fn events_replay<R: Runtime>(sink: State<'_, SinkState<R>>) -> Vec<Event> {
 /// Проиграть демо-сценарий (все состояния, субтитры, волна, свечение с целями, подтверждение, источники,
 /// телеметрия, ошибка). Повторный вызов перезапускает сценарий. Возвращает длительность, мс.
 #[tauri::command]
-pub fn simulate_demo<R: Runtime>(app: AppHandle<R>) -> u64 {
+pub fn simulate_demo(app: AppHandle) -> u64 {
     let token = app.state::<AppHooks>().demo_token().child_token();
     if let Some(prev) = app.state::<SimState>().0.lock().unwrap().replace(token.clone()) {
         prev.cancel();
     }
-    let sink: Arc<dyn EventSink> = Arc::new(app.state::<SinkState<R>>().0.clone());
+    let sink: Arc<dyn EventSink> = Arc::new(app.state::<SinkState>().0.clone());
     simulator::spawn_demo(sink, token);
     simulator::demo_duration_ms()
 }
 
 #[tauri::command]
-pub fn simulate_stop<R: Runtime>(app: AppHandle<R>) {
+pub fn simulate_stop(app: AppHandle) {
     if let Some(t) = app.state::<SimState>().0.lock().unwrap().take() {
         t.cancel();
     }
@@ -144,7 +144,7 @@ pub fn simulate_stop<R: Runtime>(app: AppHandle<R>) {
 
 /// Отправить одно произвольное событие (dev-панель, отладка интеграции).
 #[tauri::command]
-pub fn simulate_event<R: Runtime>(sink: State<'_, SinkState<R>>, event: Event) {
+pub fn simulate_event(sink: State<'_, SinkState>, event: Event) {
     sink.0.emit(event);
 }
 
@@ -227,7 +227,7 @@ pub struct AppInfo {
 }
 
 #[tauri::command]
-pub fn app_info<R: Runtime>(app: AppHandle<R>, store: State<'_, ConfigStore>) -> AppInfo {
+pub fn app_info(app: AppHandle, store: State<'_, ConfigStore>) -> AppInfo {
     AppInfo {
         version: app.package_info().version.to_string(),
         config_path: store.path().display().to_string(),

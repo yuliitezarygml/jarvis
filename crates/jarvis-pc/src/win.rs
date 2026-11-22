@@ -259,6 +259,41 @@ pub fn find_window(query: &str) -> Option<WindowInfo> {
         .cloned()
 }
 
+fn find_by_class(class: &str) -> Option<WindowInfo> {
+    let hwnds = top_level_hwnds();
+    let matching: Vec<isize> = hwnds.into_iter().filter(|&h| window_class(h).eq_ignore_ascii_case(class)).collect();
+    // SAFETY: чтение видимости окна.
+    let visible = matching.iter().copied().find(|&h| unsafe { IsWindowVisible(hwnd(h)) }.as_bool());
+    visible.or(matching.first().copied()).and_then(window_info)
+}
+
+/// Окно по запросу агента: `None`/пусто — активное окно пользователя; `class:Имя`; `hwnd:123`;
+/// `taskbar`/`панель задач`; иначе — подстрока заголовка или имя процесса.
+pub fn resolve_window(query: Option<&str>) -> Result<WindowInfo, ToolError> {
+    let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) else {
+        return foreground_app_window().ok_or_else(|| ToolError::Failed("нет активного окна".into()));
+    };
+    let lower = q.to_lowercase();
+    if matches!(lower.as_str(), "taskbar" | "панель задач" | "панель_задач") {
+        return find_by_class("Shell_TrayWnd").ok_or_else(|| ToolError::Failed("панель задач не найдена".into()));
+    }
+    if let Some(c) = q.strip_prefix("class:") {
+        return find_by_class(c.trim()).ok_or_else(|| ToolError::Failed(format!("нет окна класса «{}»", c.trim())));
+    }
+    if let Some(h) = q.strip_prefix("hwnd:") {
+        let h = h.trim();
+        let parsed = match h.strip_prefix("0x") {
+            Some(hex) => isize::from_str_radix(hex, 16).ok(),
+            None => h.parse::<isize>().ok(),
+        };
+        return parsed.and_then(window_info).ok_or_else(|| ToolError::Failed(format!("нет окна {q}")));
+    }
+    find_window(q).ok_or_else(|| {
+        let titles: Vec<String> = list_windows().into_iter().take(10).map(|w| format!("«{}»", w.title)).collect();
+        ToolError::Failed(format!("окно «{q}» не найдено. Открыты: {}", titles.join(", ")))
+    })
+}
+
 /// Вывести окно на передний план. Обходит блокировку смены фокуса (последний ввод — от нас).
 pub fn focus_window(h: isize) -> Result<(), ToolError> {
     let _dpi = DpiScope::per_monitor();

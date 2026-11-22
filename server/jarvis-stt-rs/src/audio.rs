@@ -345,7 +345,8 @@ pub fn white_noise(len: usize, seed: u64) -> Vec<f32> {
 /// Добавить белый шум с заданным SNR относительно `signal_rms` (по умолчанию — RMS всей записи).
 pub fn add_white_noise_at(samples: &mut [f32], snr_db: f32, signal_rms: f32, seed: u64) {
     let level = signal_rms / 10f32.powf(snr_db / 20.0);
-    for (s, n) in samples.iter_mut().zip(white_noise(samples.len(), seed)) {
+    let noise = white_noise(samples.len(), seed);
+    for (s, n) in samples.iter_mut().zip(noise) {
         *s = (*s + n * level).clamp(-1.0, 1.0);
     }
 }

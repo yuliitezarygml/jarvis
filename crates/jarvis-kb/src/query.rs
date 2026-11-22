@@ -243,7 +243,8 @@ mod tests {
     #[test]
     fn non_prefix_stem_uses_common_prefix() {
         assert_eq!(make_term("directory").fts, "\"director\"*");
-        assert_eq!(make_term("copies").fts, "\"copies\"");
+        assert_eq!(make_term("copies").fts, "\"copi\"*");
+        assert_eq!(make_term("happy").fts, "\"happy\"");
     }
 
     #[test]

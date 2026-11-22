@@ -189,10 +189,10 @@ impl KbWriter {
                 s.branch,
                 s.commit_id,
                 s.commit_date,
-                s.files,
-                s.chunks,
-                s.skipped,
-                s.errors,
+                s.files as i64,
+                s.chunks as i64,
+                s.skipped as i64,
+                s.errors as i64,
                 s.built_at,
                 s.note
             ],
@@ -215,7 +215,7 @@ impl KbWriter {
     }
 
     pub fn chunk_count(&self) -> Result<u64> {
-        Ok(self.c().query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))?)
+        Ok(self.c().query_row("SELECT count(*) FROM chunks", [], |r| r.get::<_, i64>(0))? as u64)
     }
 
     /// Перестроить FTS, записать время сборки, закрыть и атомарно переименовать.

@@ -170,7 +170,7 @@ impl Kb {
 
     pub fn status(&self) -> Result<KbStatus> {
         let conn = self.conn();
-        let chunks: u64 = conn.query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))?;
+        let chunks = conn.query_row("SELECT count(*) FROM chunks", [], |r| r.get::<_, i64>(0))? as u64;
         let built_at = schema::meta(&conn, "built_at")?.unwrap_or_default();
         let mut st = conn.prepare(
             "SELECT id, name, repo, commit_id, commit_date, files, chunks, built_at, note FROM sources ORDER BY id",
@@ -183,8 +183,8 @@ impl Kb {
                     repo: r.get(2)?,
                     commit_id: r.get(3)?,
                     commit_date: r.get(4)?,
-                    files: r.get(5)?,
-                    chunks: r.get(6)?,
+                    files: r.get::<_, i64>(5)? as u64,
+                    chunks: r.get::<_, i64>(6)? as u64,
                     built_at: r.get(7)?,
                     note: r.get(8)?,
                 })
@@ -262,7 +262,7 @@ mod tests {
         let kb = Kb::open(&path).unwrap();
         let st = kb.status().unwrap();
         assert!(st.chunks >= 8, "{st:?}");
-        assert_eq!(st.sources.len(), 3);
+        assert_eq!(st.sources.len(), 4);
         assert!(st.built_at.ends_with('Z'));
         assert!(st.size_bytes > 0);
 

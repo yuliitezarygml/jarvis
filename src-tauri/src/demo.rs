@@ -428,8 +428,8 @@ fn upsert_by_id<T: HasId>(v: &mut Vec<T>, mut item: T, prefix: &str, n: u64) {
         *item.id_mut() = format!("{prefix}{n}");
     }
     let id = item.id_mut().clone();
-    match v.iter_mut().find(|x| *x.id_mut() == id) {
-        Some(slot) => *slot = item,
+    match v.iter_mut().position(|x| *x.id_mut() == id) {
+        Some(i) => v[i] = item,
         None => v.push(item),
     }
 }

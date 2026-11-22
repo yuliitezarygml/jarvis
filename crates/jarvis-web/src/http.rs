@@ -228,6 +228,17 @@ mod tests {
         assert!(check_url(&u("http://127.0.0.1:8080/"), true).is_ok());
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolver_drops_internal_addresses() {
+        use std::str::FromStr;
+        // localhost резолвится из hosts без сети → только 127.0.0.1/::1 → отказ.
+        let err = match PublicOnlyResolver.resolve(Name::from_str("localhost").unwrap()).await {
+            Err(e) => e,
+            Ok(addrs) => panic!("ожидался отказ, получено {:?}", addrs.collect::<Vec<_>>()),
+        };
+        assert!(err.downcast_ref::<PrivateAddressError>().is_some(), "{err}");
+    }
+
     #[test]
     fn api_messages() {
         assert_eq!(api_error_message(r#"{"error":{"code":400,"message":"API key not valid."}}"#), "API key not valid.");
