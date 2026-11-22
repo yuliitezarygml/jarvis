@@ -161,6 +161,7 @@ impl Player {
             idle: Notify::new(),
         });
         let quit = Arc::new(AtomicBool::new(false));
+        let volume = cfg.volume;
         let (init_tx, init_rx) = std::sync::mpsc::channel::<Result<(u32, String)>>();
         let (sh, q) = (shared.clone(), quit.clone());
         let thread = std::thread::Builder::new()
