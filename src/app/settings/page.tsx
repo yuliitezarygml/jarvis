@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import AppShell from '@/components/AppShell';
+import { useThemePreview } from '@/components/ThemeRoot';
+import AppearanceTab from '@/components/settings/AppearanceTab';
 import ProvidersTab from '@/components/settings/ProvidersTab';
 import { AudioTab, PermissionsTab, SearchTab, VoiceTab, WindowsTab } from '@/components/settings/tabs';
 import { call, errorText } from '@/lib/bridge';
@@ -15,6 +17,7 @@ const TABS = [
   { id: 'voice', name: 'Голос и серверы' },
   { id: 'audio', name: 'Аудио' },
   { id: 'permissions', name: 'Разрешения' },
+  { id: 'appearance', name: 'Внешний вид' },
   { id: 'windows', name: 'Окна' },
   { id: 'search', name: 'Поиск' },
 ] as const;
@@ -86,6 +89,8 @@ export default function SettingsPage() {
   };
 
   const dirty = isDirty(saved, draft);
+  // окно настроек показывает черновик темы сразу (живой предпросмотр); «Отменить изменения» возвращает сохранённую
+  useThemePreview(draft?.appearance);
 
   return (
     <AppShell>
@@ -117,6 +122,7 @@ export default function SettingsPage() {
           {tab === 'voice' && <VoiceTab draft={draft} update={update} />}
           {tab === 'audio' && <AudioTab draft={draft} update={update} />}
           {tab === 'permissions' && <PermissionsTab draft={draft} update={update} />}
+          {tab === 'appearance' && <AppearanceTab draft={draft} update={update} />}
           {tab === 'windows' && <WindowsTab draft={draft} update={update} />}
           {tab === 'search' && <SearchTab draft={draft} update={update} />}
           <div className="savebar">

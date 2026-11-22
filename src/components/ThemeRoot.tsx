@@ -29,9 +29,23 @@ export default function ThemeRoot() {
 }
 
 const CACHE_KEY = 'jarvis-appearance';
+/** Атрибут на `<html>`: тему окна задаёт экран настроек (черновик), а не сохранённый конфиг. */
+export const PREVIEW_ATTR = 'data-theme-preview';
+
+/** Экран настроек: показывать черновик темы, пока он открыт. */
+export function useThemePreview(ap: AppearanceConfig | undefined) {
+  const key = ap ? JSON.stringify(ap) : '';
+  useEffect(() => () => document.documentElement.removeAttribute(PREVIEW_ATTR), []);
+  useEffect(() => {
+    if (!key) return; // черновик ещё не загружен — тема из кэша/конфига остаётся
+    document.documentElement.setAttribute(PREVIEW_ATTR, '');
+    applyAppearance(JSON.parse(key) as AppearanceConfig);
+  }, [key]);
+}
 
 function apply(ap: AppearanceConfig | undefined) {
-  applyAppearance(ap);
+  // окно настроек само показывает черновик темы (живой предпросмотр) — не перебивать его
+  if (!document.documentElement.hasAttribute(PREVIEW_ATTR)) applyAppearance(ap);
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(ap ?? null));
   } catch {

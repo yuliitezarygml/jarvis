@@ -2,7 +2,7 @@
 // в приложении все команды обслуживает Rust (src-tauri/src/commands.rs).
 
 import { playDemo } from './simulator';
-import { EVENT_NAME, MIC_TEST_EVENT, type Config, type JarvisEvent } from './types';
+import { CONFIG_CHANGED_EVENT, EVENT_NAME, MIC_TEST_EVENT, type Config, type JarvisEvent } from './types';
 
 type Handler = (payload: unknown) => void;
 
@@ -56,6 +56,18 @@ export function defaultConfig(): Config {
     search_roots: ['%USERPROFILE%', 'D:\\'],
     hud: { mode: 'corner', corner_x: null, corner_y: null },
     audio: { input_device: null, output_device: null, volume: 1, listen_on_start: true },
+    appearance: {
+      theme: 'arc-reactor',
+      accent: null,
+      glow: 1,
+      animation_speed: 1,
+      corner_size: 'medium',
+      scanlines: true,
+      show_telemetry: true,
+      show_actions: true,
+      show_sources: true,
+      show_subtitles: true,
+    },
   };
 }
 
@@ -163,6 +175,7 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
       } catch {
         /* приватный режим — живём в памяти */
       }
+      browserBus.emit(CONFIG_CHANGED_EVENT, masked(merged));
       return r(masked(merged));
     }
     case 'config_path_get':
