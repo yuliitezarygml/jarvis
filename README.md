@@ -6,7 +6,7 @@
 
 Стек: **Rust + Tauri 2 + Next.js**. Python в проекте нет. Подробный план и решения — [docs/PLAN.md](docs/PLAN.md).
 
-> Статус: идёт разработка. Модули пишутся отдельно и тестируются по одному, общей сборки в одно приложение ещё нет (этап интеграции впереди).
+> Статус: модули собраны в одно приложение (общий Cargo workspace, ядро `src-tauri/src/runtime`). Первый живой запуск с микрофоном и управлением ПК — впереди.
 
 ## Возможности
 
@@ -172,9 +172,10 @@ flowchart LR
 | База знаний | [crates/jarvis-kb](crates/jarvis-kb), [tools/kb-build](tools/kb-build), [kb/seed](kb/seed) | ~20 тыс. фрагментов документации Microsoft + шпаргалки; Recall@5 = 95,4 % | ✅ | 72 |
 | Интерфейс | [src](src), [src-tauri](src-tauri) | HUD, виджет-реактор в углу, оверлей-свечение, настройки, демо-симулятор | ✅ (не проверен вживую) | 39 + 25 |
 | Голос | [crates/jarvis-voice](crates/jarvis-voice) | TTS-клиент, нормализатор речи, VAD, «Джарвис/стоп/да», фильтр эха, STT-клиенты | 🟡 нет динамиков, микрофона и связки | 54 (+3 живых) |
-| Память | [crates/jarvis-memory](crates/jarvis-memory) | факты, уроки-ошибки, плейбуки, самообучение | ⏸ в работе | — |
-| Система | [crates/jarvis-sys](crates/jarvis-sys) | уровни риска команд, PowerShell, откат, ресурсы, поиск и открытие | ⏸ в работе | — |
-| STT-сервер | [server/jarvis-stt-rs](server/jarvis-stt-rs) | распознавание русской речи на Xeon | ⏸ в работе | — |
+| Память | [crates/jarvis-memory](crates/jarvis-memory) | факты, уроки-ошибки, плейбуки, самообучение | ✅ | ✓ |
+| Система | [crates/jarvis-sys](crates/jarvis-sys) | уровни риска команд, PowerShell, откат, ресурсы, поиск и открытие | ✅ | ✓ |
+| STT-сервер | [server/jarvis-stt-rs](server/jarvis-stt-rs) | распознавание русской речи на Xeon | ✅ работает | ✓ |
+| Ядро-оркестратор | [src-tauri/src/runtime](src-tauri/src/runtime) | собирает все модули: агент, голос, память, инструменты, подтверждения, свечение | ✅ (без живого запуска) | 40 |
 | TTS-сервер | [server/jarvis-tts-rs](server/jarvis-tts-rs) | синтез голоса `jarvis-ru` (работает на Xeon) | ✅ работает | — |
 
 «Живые» тесты ходят в сеть или двигают мышь и по умолчанию пропускаются (`#[ignore]`).
@@ -182,7 +183,7 @@ flowchart LR
 ## Сервер голоса (Xeon 192.168.50.38)
 
 - **TTS**: `https://192.168.50.38:8443`, без токена, TLS частным CA ([src-tauri/config/xeon-tts-ca.pem](src-tauri/config/xeon-tts-ca.pem)). `GET /ready`, `POST /tts/stream` → PCM 24 кГц. Модель скачивается с сервера в `server/jarvis-tts-rs/model/` (в git не хранится).
-- **STT**: будет на `https://192.168.50.38:8444`, протокол — [crates/jarvis-core/src/stt_protocol.rs](crates/jarvis-core/src/stt_protocol.rs).
+- **STT**: `https://192.168.50.38:8444` (без токена, тот же CA), протокол — [crates/jarvis-core/src/stt_protocol.rs](crates/jarvis-core/src/stt_protocol.rs).
 
 ## Конфигурация
 
@@ -201,12 +202,12 @@ copy config.example.json config.json
 Нужно: Rust (stable), Node.js 24, WebView2, `cargo install tauri-cli`.
 
 ```powershell
-# интерфейс с демо-симулятором (бэкенд пока не подключён)
 npm install
-cargo tauri dev
+cargo tauri dev              # приложение целиком: HUD, голос, агент и все модули
 
-# тесты модуля (каждый крейт собирается отдельно)
-cd crates\jarvis-agent; cargo test
+# общий Cargo workspace (один target/ в корне); живые тесты помечены #[ignore]
+cargo test --workspace
+cargo clippy --workspace --all-targets
 npm test                     # тесты фронтенда
 
 # база знаний Windows
@@ -225,6 +226,5 @@ cargo run --release -- --eval                          # замер точнос
 
 ## Что дальше
 
-1. Доделать Память, Систему, Голос и STT-сервер.
-2. Интеграция: подключить настоящие модули вместо демо-данных в интерфейсе, собрать общий Cargo workspace.
-3. Общие тесты по критериям приёмки из [docs/PLAN.md](docs/PLAN.md), первый живой запуск.
+1. Первый живой запуск: микрофон и динамики, свечение и click-through, ввод мышью/клавиатурой, T3 с «да, сэр».
+2. Ключ LLM → «Проверить» → «Выбрать лучшее автоматически», приёмка этапов из [docs/PLAN.md](docs/PLAN.md).

@@ -1,7 +1,7 @@
 # J.A.R.V.I.S. — оболочка Tauri 2 и HUD (Next.js)
 
-Окна, трей, глобальные хоткеи, мост событий `jarvis_core::Event` → фронтенд, конфиг, симулятор и демо-заглушки
-экранов. Фронтенд — Next.js (App Router, TypeScript, static export) в корне репозитория (`src/`, `public/`).
+Окна, трей, глобальные хоткеи, мост событий `jarvis_core::Event` → фронтенд, конфиг, симулятор (dev-панель) и
+ядро-оркестратор, которое собирает все модули в одно приложение. Фронтенд — Next.js (App Router, TypeScript, static export) в корне репозитория (`src/`, `public/`).
 
 ## Запуск
 
@@ -14,7 +14,7 @@ cargo tauri dev        # поднимает `npm run dev` (http://localhost:3000
 Отладочная сборка запускается **без UAC** (манифест `asInvoker`). Релиз:
 
 ```powershell
-cargo tauri build      # npm run build → out/ → src-tauri/target/release/jarvis.exe (+ установщик NSIS)
+cargo tauri build      # npm run build → out/ → target/release/jarvis.exe (+ установщик NSIS)
 ```
 
 Релизный exe требует прав администратора (`requireAdministrator`, один запрос UAC при старте).
@@ -29,9 +29,9 @@ cargo tauri build      # npm run build → out/ → src-tauri/target/release/jar
 npm test               # vitest: редьюсер событий, цвета свечения, форматирование, геометрия, настройки
 npm run typecheck      # tsc --noEmit
 npm run build          # static export в out/
-cd src-tauri
-cargo build
-cargo test             # сериализация событий TauriSink (mock runtime), config_path, маски ключей, симулятор, …
+cargo build                       # весь workspace (из корня репозитория)
+cargo test -p jarvis              # оболочка + интеграция ядра без GUI (мок-модель, настоящие инструменты)
+cargo test -p jarvis live_voice_check -- --ignored --nocapture   # серверы TTS/STT (только /ready и /health)
 ```
 
 ## Что увидит пользователь
@@ -116,33 +116,53 @@ Payload — JSON `jarvis_core::Event` как есть (`#[serde(tag = "type", re
 | `simulate_demo` | `() -> u64` | длительность сценария, мс; повторный вызов перезапускает |
 | `simulate_stop` | `()` | |
 | `simulate_event` | `(event: Event)` | одно событие через настоящий `TauriSink` |
-| `provider_presets` | `() -> Vec<ProviderPreset>` | **демо** (копия; настоящие — `providers.json` модуля LLM) |
-| `provider_check` | `(provider_id, base_url, api_key) -> ProviderCheck{demo,status,message,models[],ranking[]}` | **демо**; маска ключа → берётся сохранённый (`config_store::resolve_key`) |
-| `voice_check` | `(kind: "tts"\|"stt", url) -> ServiceCheck{demo,ok,message,latency_ms}` | **демо** |
-| `search_presets` | `() -> Vec<SearchPreset>` | **демо** |
-| `search_check` | `(id, api_key, extra) -> ServiceCheck` | **демо** |
-| `audio_devices` | `() -> AudioDevices{demo,inputs,outputs}` | **демо** |
-| `memory_list` | `() -> MemoryData{demo,facts,lessons,playbooks}` | **демо** (в памяти процесса) |
-| `memory_upsert` | `(kind: "facts"\|"lessons"\|"playbooks", item: Value) -> Result<MemoryData>` | **демо**; пустой `id` — новая запись |
-| `memory_delete` | `(kind, id) -> Result<MemoryData>` | **демо** |
-| `kb_search` | `(query) -> KbResult{demo,hits[]}` | **демо** |
-| `history_list` | `() -> HistoryResult{demo,items[]}` | **демо** |
+| `agent_submit` | `(text) -> Result<()>` | текстовая команда из HUD («Сказать Джарвису…»), отменяет предыдущую задачу |
+| `mic_get` / `mic_set` | `() -> MicStatus` / `(enabled) -> Result<MicStatus>` | микрофон `{enabled, listening, voice_ready, error}`; по умолчанию слушает |
+| `assistant_status` | `() -> AssistantStatus{llm_ready, llm_problem, brain_model, mic, issues[], tools, busy}` | плашка «нет ключа LLM» в HUD |
+| `provider_presets` | `() -> Vec<ProviderPreset>` | пресеты jarvis-llm (`crates/jarvis-llm/presets/providers.json`, иначе встроенные) |
+| `provider_check` | `(provider_id, base_url, api_key) -> ProviderCheck{status,message,models[],ranking[]}` | jarvis-llm `check_provider`: ключ, модели, живая проверка, рейтинг; маска ключа → сохранённый |
+| `provider_apply_best` | `(config, provider_ids?) -> Result<Config>` | jarvis-llm `apply_best` по последним проверкам → config.json → модели пересобираются сразу |
+| `voice_check` | `(kind: "tts"\|"stt", url) -> ServiceCheck{ok,message,latency_ms}` | TTS `GET /ready`, STT `GET /health` (CA из конфига) |
+| `search_presets` | `() -> Vec<SearchPreset>` | |
+| `search_check` | `(id, api_key, extra) -> ServiceCheck` | jarvis-web `validate_config` (тестовый запрос) |
+| `audio_devices` | `() -> AudioDevices{inputs,outputs}` | имена устройств WASAPI, `default` — устройство Windows по умолчанию |
+| `memory_list` | `() -> MemoryData{facts,lessons,playbooks}` | `data/memory.db` (jarvis-memory) |
+| `memory_upsert` | `(kind: "facts"\|"lessons"\|"playbooks", item) -> Result<MemoryData>` | пустой `id` — новая запись; шаг плейбука: `инструмент {json} — примечание` |
+| `memory_delete` | `(kind, id) -> Result<MemoryData>` | |
+| `kb_search` | `(query) -> KbResult{hits[]}` | `data/kb.sqlite` (jarvis-kb) |
+| `history_list` | `() -> HistoryResult{items[]}` | сеансы и реплики памяти, по времени |
 
-Все «демо»-ответы содержат `demo: true`, UI показывает плашку «демо-данные». Интегратор заменяет тела команд,
-сохраняя типы ответа (`src-tauri/src/demo.rs`).
+Типы ответов — `src/api.rs` (зеркало `src/lib/types.ts`); поле `demo` оставлено для совместимости и всегда `false`.
+Демо осталось только в симуляторе (`simulate_*`, dev-панель).
 
-## Подключение бэкенда (интегратору)
+## Ядро-оркестратор (`src/runtime/`)
 
-```rust
-use jarvis_lib::{commands::SinkState, hooks::{AppHooks, UiHooks}};
-// события для HUD/оверлея:
-let sink: std::sync::Arc<dyn jarvis_core::EventSink> = std::sync::Arc::new(app.state::<SinkState>().0.clone());
-// остановка и подтверждения:
-app.state::<AppHooks>().set(std::sync::Arc::new(MyHooks)); // impl UiHooks { emergency_stop, confirm }
+`Core::start(config, TauriSink, CoreOptions::app(root), tokio-handle)` в `setup`:
+
+```text
+микрофон ─► VoicePipeline ─► Intent ─┬─ Command ─► Core::submit ─► Agent::run ─► ToolRegistry (sys/pc/web/kb/memory)
+поле HUD ─► agent_submit ────────────┘   Stop ─► Core::stop_all (отмена, release_all_held, барж-ин)
+                                         Confirm/Deny ─► ConfirmGate ◄── кнопки HUD (confirm_respond → UiHooks::confirm)
+Agent ─ SpeechSink ─► SpeechQueue (очередь реплик) ─► VoicePipeline::speak (TTS Xeon)
+Agent ─ events ─► GlowSink (GlowControl::hold на всю задачу) ─► TauriSink ─► окна
+Agent ─ MemoryHooks ─► jarvis-memory (блок «Память», known_fix только при exact, заготовки уроков, журнал, рефлектор в фоне)
+spawn_telemetry (jarvis-sys) ─► TauriSink; алерты ResourceGuard ─► субтитр + голос
 ```
 
-Ctrl+Alt+K регистрирует оболочка — агенту не нужно регистрировать его повторно (`RegisterHotKey` вернёт ошибку);
-он получает остановку через `UiHooks::emergency_stop`.
+| Файл | Что |
+|---|---|
+| `runtime/mod.rs` | `Core`: открытие модулей (ошибка модуля → `issues` и сообщение в HUD, не паника), задачи (новая отменяет старую), голос и микрофон, телеметрия, `apply_config` |
+| `runtime/models.rs` | `ModelSlot` — модель роли с заменой на лету; без ключа — `NO_KEY_TEXT` |
+| `runtime/bridges.rs` | `GateConfirmer` (озвучить → ждать «да, сэр»/кнопку 20 с, защищённый путь — второй раз), `MemoryBridge`, `GlowSink` |
+| `runtime/speech.rs` | `SpeechQueue` (`SpeechSink` → `speak` по очереди), `VoiceEvents` (фильтр событий голоса) |
+| `runtime/registry.rs` | один `ToolRegistry`; при дубле имени остаётся модуль раньше в порядке sys → pc → web → kb → memory |
+| `runtime/services.rs` | тела команд экранов (провайдеры, голос, поиск, аудио, память, KB, журнал) |
+| `runtime/tests.rs` | интеграция без GUI: мок-модель → настоящие инструменты → события → ответ; T3 с отказом |
+
+`config_set` применяет сразу: провайдеры и модели, автономию/зрение, поиск, серверы TTS/STT (голос пересобирается),
+resource guard. Только после перезапуска: `data_dir`, `search_roots` (в HUD — сообщение).
+
+Ctrl+Alt+K регистрирует оболочка; ядро получает остановку через `UiHooks::emergency_stop` (`CoreHooks`).
 
 ## Конфиг
 
@@ -164,7 +184,9 @@ src-tauri/
   src/windows_manager.rs окна, режимы, WDA_EXCLUDEFROMCAPTURE, позиция виджета, след курсора
   src/sink.rs           TauriSink, EventCache, имена событий
   src/commands.rs       команды, аварийная остановка, таймаут подтверждения
-  src/hotkeys.rs, tray.rs, hooks.rs, config_store.rs, simulator.rs, demo.rs
+  src/api.rs            типы ответов команд экранов
+  src/runtime/          ядро-оркестратор (см. выше)
+  src/hotkeys.rs, tray.rs, hooks.rs, config_store.rs, simulator.rs
 src/app/{hud,corner,overlay,settings,memory,kb,log}/page.tsx
 src/components/         reactor/ (Canvas 2D), hud/, settings/, DevPanel, AppShell
 src/lib/                types, reducer, store, bridge, glow, format, geometry, settings, simulator, mock

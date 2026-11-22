@@ -5,15 +5,25 @@
 Приложение пишем **с нуля**, из git-истории не берём ничего (решение пользователя). Единственное исключение, которое он разрешил: **Rust-проект голоса `jarvis-tts-rs`** восстановлен из `379f7cb~1` в `server/jarvis-tts-rs/`.
 
 ## Состояние сейчас
-Сделано:
-- Поставлены `cargo tauri-cli`; уже были Rust 1.100, Node 24, git, winget, WebView2. (`paramiko` стоит только как мой инструмент SSH, в проект не входит.)
-- Xeon 192.168.50.38 (Ubuntu 25.04, 20 потоков, 19 ГБ, **без GPU**, AVX2): работает только TTS `jarvis-tts-rs`. **Токен убран**: бэкенд слушает `127.0.0.1:8181`, наружу `192.168.50.38:8443` отдаёт `jarvis-tts-rs-front.socket` (`systemd-socket-proxyd`), TLS тот же. Проверено с ПК: `/ready` → 200, синтез без токена, первый звук ~0,7 с. Откат: `/etc/jarvis-tts-rs.env.bak-before-notoken` и `…service.bak-before-notoken`.
-- В проекте: `.gitignore`, `config.example.json`, `docs/PLAN.md`, `src-tauri/config/xeon-tts-ca.pem` (CA сервера), `config.json` (локальный, без токена), `server/jarvis-tts-rs/` (из git, 82 файла).
+- **Серверы Xeon** 192.168.50.38 (без GPU) работают без токенов, TLS частным CA `src-tauri/config/xeon-tts-ca.pem`:
+  TTS `jarvis-tts-rs` — `https://…:8443` (`/ready`, `/tts/stream`, первый звук ~0,7 с), STT `jarvis-stt-rs` —
+  `https://…:8444` (`/health`, `WS /stt/stream`, `POST /stt`; модель GigaAM v3 CTC, см. `server/jarvis-stt-rs/bench`).
+- **Модули готовы и протестированы по отдельности**: `crates/jarvis-{core,agent,llm,voice,memory,pc,sys,web,kb}`,
+  `tools/kb-build` (база `data/kb.sqlite`, Recall@5 95,4 %), интерфейс `src/` + `src-tauri/`.
+- **Интеграция собрана**: общий Cargo workspace в корне (один `target/`, один `Cargo.lock`; `server/jarvis-tts-rs`
+  вне workspace). Ядро-оркестратор `src-tauri/src/runtime/`: Config → Memory, Kb, Sys, PcToolkit (классификатор
+  jarvis-sys), WebStack, модели ролей jarvis-llm (замена на лету после `config_set`) → один `ToolRegistry` →
+  `Agent` (ConfirmGate, память + рефлектор, озвучка через VoicePipeline, `redact_secrets`, защищённые пути,
+  свечение на всю задачу). Голос: «Джарвис, …» → агент, «стоп» и Ctrl+Alt+K → отмена, «да/нет» → ConfirmGate.
+  Текстовое поле «Сказать Джарвису…» и кнопка микрофона в HUD. Телеметрия и resource guard → HUD и голос.
+  Все экраны (провайдеры, голос, поиск, аудио, память, KB, журнал) работают на настоящих модулях.
+- Без ключа LLM приложение стартует и показывает в HUD «Нет ключа LLM — добавьте его в Настройках».
 
-Осталось/сломано по пути:
-- Скачивание **модели** (`/opt/jarvis-tts-rs/model`, 793 МБ) было прервано: проверить `server/jarvis-tts-rs/model`, удалить частичное и скачать заново **только модель** (tar по SSH).
-- `.gitignore` сейчас игнорирует `server/*`; нужно: `server/**/model/`, `server/**/target/`, `server/**/bin/` (исходники голоса должны коммититься).
-- Каркас Tauri + Next.js ещё не создан. `docs/PLAN.md` синхронизировать с этим файлом.
+Осталось:
+- Первый живой запуск на ПК пользователя (`cargo tauri dev`): прозрачность окон, click-through оверлея,
+  микрофон/динамики, эхо без наушников, ввод мышью/клавиатурой, T3 с «да, сэр».
+- Ключ LLM (Groq / OpenCode Zen) → «Проверить» → «Выбрать лучшее автоматически»; приёмка этапов 1–9 вживую.
+- Выбор аудиоустройств в `config.json` (сейчас — устройства Windows по умолчанию), DPAPI для ключей.
 
 ## Решения пользователя (зафиксированы)
 Rust + Tauri 2 + Next.js · всё внутри `d:\jarvis` · v1: голос, управление ПК, HUD, интернет, память · «Python не надо» · **разрешения: спрашивать только про опасное** · **Джарвис всегда запускается от администратора** · STT на сервере Xeon («не у всех мощный ПК») · SSH-ключ не нужен, заходим по паролю.
