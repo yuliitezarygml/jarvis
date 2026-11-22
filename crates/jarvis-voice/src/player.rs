@@ -199,7 +199,7 @@ impl Player {
         let (device_rate, device_name) = init_rx
             .recv_timeout(Duration::from_secs(10))
             .map_err(|_| VoiceError::Device("устройство вывода не ответило".into()))??;
-        Ok(Self { shared, resampler: Mutex::new(None), device_rate, device_name, quit, thread: Some(thread) })
+        Ok(Self { shared, resampler: Mutex::new(None), device_rate, device_name, volume, quit, thread: Some(thread) })
     }
 
     pub fn device_name(&self) -> &str {
@@ -249,7 +249,8 @@ impl Player {
 
 #[async_trait]
 impl AudioOutput for Player {
-    async fn play(&self, samples: Vec<f32>, sample_rate: u32) -> Result<()> {
+    async fn play(&self, mut samples: Vec<f32>, sample_rate: u32) -> Result<()> {
+        apply_gain(&mut samples, self.volume);
         let buf = self.resample(&samples, sample_rate, false)?;
         self.enqueue(buf).await
     }
@@ -399,5 +400,16 @@ mod tests {
         q.next_sample(&mut freed);
         assert_eq!(q.clear(), 2);
         assert!(q.next_sample(&mut freed).is_none(), "после stop — сразу тишина");
+    }
+
+    #[test]
+    fn gain_scales_and_clips() {
+        let mut s = vec![0.5, -0.5, 0.9];
+        apply_gain(&mut s, 1.0);
+        assert_eq!(s, vec![0.5, -0.5, 0.9]);
+        apply_gain(&mut s, 0.5);
+        assert_eq!(s, vec![0.25, -0.25, 0.45]);
+        apply_gain(&mut s, 4.0);
+        assert_eq!(s, vec![1.0, -1.0, 1.0], "усиление не переполняет");
     }
 }

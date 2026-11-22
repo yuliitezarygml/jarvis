@@ -32,8 +32,16 @@ pub struct AgentConfig {
     /// Промпт персоны (по умолчанию — [`PERSONA_PROMPT`]).
     pub persona: String,
     pub temperature: Option<f32>,
+    /// Бюджет ответа модели. Groq считает запрошенный бюджет в лимит токенов в минуту, поэтому не `None`;
+    /// у reasoning-моделей (gpt-oss) сюда входят и рассуждения — меньше ~1500 рискует пустым ответом.
     pub max_tokens: Option<u32>,
+    /// Ленивая загрузка инструментов: модели уходят `core` + группы по словам запроса и прошлого хода,
+    /// остальное — через мета-инструмент `tools_load`. `false` — всегда весь реестр.
+    pub lazy_tools: bool,
 }
+
+/// Бюджет ответа по умолчанию.
+pub const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 impl Default for AgentConfig {
     fn default() -> Self {

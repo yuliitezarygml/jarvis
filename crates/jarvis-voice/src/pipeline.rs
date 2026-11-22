@@ -69,6 +69,16 @@ impl Default for VoiceConfig {
     }
 }
 
+impl VoiceConfig {
+    /// Устройства и громкость из `config.json` → `audio` (не задано — устройства Windows по умолчанию).
+    pub fn with_audio(mut self, audio: &jarvis_core::config::AudioConfig) -> Self {
+        self.capture.device = audio.input().map(str::to_string);
+        self.player.device = audio.output().map(str::to_string);
+        self.player.volume = audio.gain();
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeakOutcome {
     Completed,
@@ -145,13 +155,23 @@ impl VoicePipeline {
         }
     }
 
-    /// Боевая сборка из `config.json`: TTS Xeon, STT по `stt.engine`, динамики по умолчанию.
+    /// Боевая сборка из `config.json`: TTS Xeon, STT по `stt.engine`, микрофон/динамики/громкость из `audio`
+    /// (устройство не найдено — берётся устройство Windows по умолчанию с предупреждением в журнале).
+    /// Устройства, явно заданные в `cfg`, важнее `audio`.
     pub fn from_config(
         cfg: VoiceConfig,
         app: &jarvis_core::Config,
         project_root: &Path,
         events: Arc<dyn EventSink>,
     ) -> Result<Self> {
+        let explicit = (cfg.capture.device.clone(), cfg.player.device.clone());
+        let mut cfg = cfg.with_audio(&app.audio);
+        if explicit.0.is_some() {
+            cfg.capture.device = explicit.0;
+        }
+        if explicit.1.is_some() {
+            cfg.player.device = explicit.1;
+        }
         let tts = Arc::new(TtsClient::new(&app.tts, project_root)?);
         let stt = crate::stt::engine_from_config(app, project_root)?;
         let player = Arc::new(Player::start(cfg.player.clone(), events.clone())?);
