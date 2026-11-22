@@ -1,0 +1,7 @@
+config.json
+models/
+target/
+node_modules/
+.next/
+out/
+*.log
