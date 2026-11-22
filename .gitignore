@@ -5,3 +5,8 @@ node_modules/
 .next/
 out/
 *.log
+*.key
+# копия серверных файлов: большие модели/бинарники не коммитим
+server/*
+!server/README.md
+!server/etc/
