@@ -1,0 +1,87 @@
+{
+  "url": "http://127.0.0.1:18182",
+  "threads": "6",
+  "at": "2026-11-18T21:18:09.036Z",
+  "runs": [
+    {
+      "id": "short",
+      "stream": true,
+      "firstMs": 255.135112,
+      "wallMs": 525.993945,
+      "seconds": 1.44,
+      "rms": 0.05613003745768426,
+      "peak": 0.3192138671875,
+      "rtf": 0.3652735729166667,
+      "chunks": 8,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 454.377854102484
+    },
+    {
+      "id": "long",
+      "stream": true,
+      "firstMs": 155.74454500000002,
+      "wallMs": 1543.3994359999997,
+      "seconds": 6.08,
+      "rms": 0.055014551563037625,
+      "peak": 0.5186767578125,
+      "rtf": 0.2538485914473684,
+      "chunks": 59,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 607.1014269827685
+    },
+    {
+      "id": "short",
+      "stream": true,
+      "firstMs": 74.48605399999997,
+      "wallMs": 383.35867400000006,
+      "seconds": 1.36,
+      "rms": 0.0681921390149284,
+      "peak": 0.42889404296875,
+      "rtf": 0.2818813779411765,
+      "chunks": 10,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 568.6580604147227
+    },
+    {
+      "id": "long",
+      "stream": true,
+      "firstMs": 153.1546830000002,
+      "wallMs": 1340.728943,
+      "seconds": 5.44,
+      "rms": 0.058512927898528376,
+      "peak": 0.437591552734375,
+      "rtf": 0.2464575262867647,
+      "chunks": 33,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 620.5579467377844
+    },
+    {
+      "id": "short",
+      "stream": true,
+      "firstMs": 84.7350220000003,
+      "wallMs": 395.03294700000015,
+      "seconds": 1.44,
+      "rms": 0.06080956773602427,
+      "peak": 0.41558837890625,
+      "rtf": 0.2743284354166668,
+      "chunks": 9,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 574.6356138745053
+    },
+    {
+      "id": "long",
+      "stream": true,
+      "firstMs": 155.4442939999999,
+      "wallMs": 1730.7523089999995,
+      "seconds": 6.48,
+      "rms": 0.05046241979705373,
+      "peak": 0.4212646484375,
+      "rtf": 0.2670914057098765,
+      "chunks": 44,
+      "rssPeakKiB": 1928976,
+      "cpuPct": 606.6725981181402
+    }
+  ],
+  "startMetrics": "jarvis_jobs_total 0\njarvis_failed_total 0\njarvis_queue_microseconds_total 0\njarvis_load_milliseconds 4123\n",
+  "endMetrics": "jarvis_jobs_total 6\njarvis_failed_total 0\njarvis_queue_microseconds_total 266\njarvis_load_milliseconds 4123\n"
+}

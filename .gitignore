@@ -1,12 +1,16 @@
+# секреты и локальные данные
 config.json
-models/
+data/
+*.key
+*.log
+
+# сборка
 target/
 node_modules/
 .next/
 out/
-*.log
-*.key
-# копия серверных файлов: большие модели/бинарники не коммитим
-server/*
-!server/README.md
-!server/etc/
+
+# голосовой сервер: исходники коммитим, модель и бинарники нет
+server/**/model/
+server/**/bin/
+server/**/target/

@@ -1,0 +1,3 @@
+Model adapter modules from Kyutai Pocket TTS, Rust implementation (MIT).
+https://github.com/kyutai-labs/pocket-tts/tree/a4a6054db281f0f34f3d44d626a972a44560dc83/rust
+This package exposes the model as a library, accepts local assets only and omits the CLI, download code and HTTP server.
