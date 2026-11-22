@@ -82,13 +82,43 @@ pub fn config_get(store: State<'_, ConfigStore>) -> Config {
 /// Сохранить конфиг из UI. Маска вместо ключа = «не менять». Возвращает сохранённое (замаскированным).
 /// Модели и провайдеры, автономия, зрение, поиск, серверы голоса и resource guard применяются сразу
 /// (`Core::apply_config`); папка данных и папки поиска — после перезапуска (об этом сообщение в HUD).
-#[tauri::command]
+/// Внешний вид применяется во всех окнах сразу (событие `CONFIG_CHANGED_EVENT`, размер виджета).
 /// `base` — конфиг, который экран получил при открытии: поля, которые пользователь не менял, берутся из
 /// файла (правки config.json снаружи и режим/позиция HUD не затираются старой копией).
-pub fn config_set(store: State<'_, ConfigStore>, core: State<'_, CoreState>, config: Config, base: Option<Config>) -> CmdResult<Config> {
+#[tauri::command]
+pub async fn config_set(
+    app: AppHandle,
+    store: State<'_, ConfigStore>,
+    core: State<'_, CoreState>,
+    config: Config,
+    base: Option<Config>,
+) -> CmdResult<Config> {
     let saved = store.set_from_ui(config, base)?;
-    core.0.apply_config(&saved);
-    Ok(config_store::masked(&saved))
+    Ok(after_save(&app, &core.0, &saved))
+}
+
+/// Сохранённый конфиг → ядро, размер виджета, все окна (тема, панели HUD). Возвращает замаскированный.
+pub fn after_save<R: tauri::Runtime>(app: &AppHandle<R>, core: &Core, saved: &Config) -> Config {
+    core.apply_config(saved);
+    apply_corner_size(app, saved.appearance.corner_size);
+    let masked = config_store::masked(saved);
+    let _ = app.emit(config_store::CONFIG_CHANGED_EVENT, &masked);
+    masked
+}
+
+/// Размер виджета в углу (`appearance.corner_size`). Правый нижний угол остаётся на месте,
+/// поэтому виджет у края экрана не уезжает за край.
+pub fn apply_corner_size<R: tauri::Runtime>(app: &AppHandle<R>, size: jarvis_core::config::CornerSize) {
+    let Some(w) = app.get_webview_window(windows_manager::CORNER) else { return };
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let side = (size.px() * scale).round() as i32;
+    let (Ok(cur), Ok(pos)) = (w.outer_size(), w.outer_position()) else { return };
+    let (cw, ch) = (cur.width as i32, cur.height as i32);
+    if cw == side && ch == side {
+        return;
+    }
+    let _ = w.set_size(tauri::PhysicalSize::new(side as u32, side as u32));
+    let _ = w.set_position(tauri::PhysicalPosition::new(pos.x + cw - side, pos.y + ch - side));
 }
 
 #[tauri::command]
@@ -295,7 +325,8 @@ pub async fn provider_check(
 /// «Выбрать лучшее автоматически» (jarvis-llm `apply_best`) по последним проверкам: цепочки ролей
 /// записываются в черновик из UI, он сохраняется в config.json и применяется без перезапуска.
 #[tauri::command]
-pub fn provider_apply_best(
+pub async fn provider_apply_best(
+    app: AppHandle,
     store: State<'_, ConfigStore>,
     core: State<'_, CoreState>,
     config: Config,
@@ -303,8 +334,7 @@ pub fn provider_apply_best(
     provider_ids: Option<Vec<String>>,
 ) -> CmdResult<Config> {
     let saved = store.set_from_ui_with(config, base, |merged| services::apply_best(&core.0, merged, provider_ids.as_deref()))?;
-    core.0.apply_config(&saved);
-    Ok(config_store::masked(&saved))
+    Ok(after_save(&app, &core.0, &saved))
 }
 
 /// `kind`: `tts` (`GET /ready`) | `stt` (`GET /health`).

@@ -205,7 +205,7 @@ async fn measure_request_size() {
         let msgs: usize = r.messages.iter().map(|m| m.content.chars().count()).sum();
         let mut per: Vec<(usize, String)> =
             r.tools.iter().map(|t| (serde_json::to_string(t).unwrap().chars().count(), t.name.clone())).collect();
-        per.sort_by(|a, b| b.0.cmp(&a.0));
+        per.sort_by_key(|p| std::cmp::Reverse(p.0));
         println!(
             "«{phrase}»: TOOLS n={} chars={tools} | MSG chars={msgs} | ≈{} ток. (≈3 симв./ток.) | max_tokens={:?}",
             r.tools.len(),

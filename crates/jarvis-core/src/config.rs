@@ -199,6 +199,74 @@ pub struct Config {
     pub search_roots: Vec<String>,
     pub hud: HudConfig,
     pub audio: AudioConfig,
+    pub appearance: AppearanceConfig,
+}
+
+/// Размер виджета в углу.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl CornerSize {
+    /// Сторона окна виджета, логические пиксели.
+    pub fn px(self) -> f64 {
+        match self {
+            Self::Small => 160.0,
+            Self::Medium => 220.0,
+            Self::Large => 300.0,
+        }
+    }
+}
+
+/// Внешний вид: тема (акцентный цвет всех окон), свечение, анимация, виджет, панели HUD.
+/// Сигнальные цвета (янтарь T3, красный — подтверждение/ошибка) темой не меняются.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppearanceConfig {
+    /// `arc-reactor` (циан, по умолчанию), `mark-iii`, `emerald`, `violet`, `white-ice`.
+    pub theme: String,
+    /// Свой акцентный цвет `#RRGGBB` поверх темы; `None` — цвет темы.
+    pub accent: Option<String>,
+    /// Яркость свечения, 0.3–1.5.
+    pub glow: f32,
+    /// Скорость анимации реактора, 0.25–2.
+    pub animation_speed: f32,
+    pub corner_size: CornerSize,
+    /// Сканлинии и гекс-сетка на фоне HUD («как в фильме»).
+    pub scanlines: bool,
+    pub show_telemetry: bool,
+    pub show_actions: bool,
+    pub show_sources: bool,
+    pub show_subtitles: bool,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self {
+            theme: "arc-reactor".into(),
+            accent: None,
+            glow: 1.0,
+            animation_speed: 1.0,
+            corner_size: CornerSize::Medium,
+            scanlines: true,
+            show_telemetry: true,
+            show_actions: true,
+            show_sources: true,
+            show_subtitles: true,
+        }
+    }
+}
+
+impl AppearanceConfig {
+    /// Свой акцент, только если это корректный `#RRGGBB`.
+    pub fn accent_hex(&self) -> Option<&str> {
+        self.accent.as_deref().map(str::trim).filter(|s| s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit()))
+    }
 }
 
 impl Default for Config {
@@ -224,6 +292,7 @@ impl Default for Config {
             search_roots: vec!["%USERPROFILE%".into(), "D:\\".into()],
             hud: HudConfig::default(),
             audio: AudioConfig::default(),
+            appearance: AppearanceConfig::default(),
         }
     }
 }
@@ -313,6 +382,12 @@ mod tests {
         assert!(!c.providers[1].enabled);
         assert!(c.web_search[0].enabled);
         assert_eq!(c.audio, AudioConfig::default());
+        assert_eq!(c.appearance, AppearanceConfig::default());
+        let ap: AppearanceConfig = serde_json::from_str(r##"{"theme":"mark-iii","accent":"#12ab9Z","corner_size":"large"}"##).unwrap();
+        assert_eq!((ap.theme.as_str(), ap.accent_hex(), ap.corner_size.px(), ap.show_subtitles), ("mark-iii", None, 300.0, true));
+        let ap: AppearanceConfig = serde_json::from_str(r##"{"accent":" #12AB9f "}"##).unwrap();
+        assert_eq!(ap.accent_hex(), Some("#12AB9f"));
+        assert_eq!(serde_json::to_value(Config::default()).unwrap()["appearance"]["corner_size"], "medium");
         let a: AudioConfig = serde_json::from_str(r#"{"input_device":"  ","volume":9}"#).unwrap();
         assert_eq!((a.input(), a.output(), a.gain(), a.listen_on_start), (None, None, AudioConfig::MAX_VOLUME, true));
     }

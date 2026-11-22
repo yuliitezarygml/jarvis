@@ -81,7 +81,19 @@ describe('настройки', () => {
   });
 
   it('провайдеры и цепочки', () => {
-    const preset = { id: 'groq', name: 'Groq', kind: 'openai_compat' as const, base_url: 'https://g/v1', key_url: '', needs_key: true, note: '' };
+    const preset = {
+      id: 'groq',
+      name: 'Groq',
+      kind: 'openai_compat' as const,
+      base_url: 'https://g/v1',
+      key_url: '',
+      docs_url: '',
+      needs_key: true,
+      local: false,
+      free_tier: true,
+      tagline: '',
+      note: '',
+    };
     let c = addProvider(defaultConfig(), preset, ' key ');
     expect(c.providers.map((p) => p.id)).toEqual(['groq', 'groq-2']);
     expect(c.providers[1].api_key).toBe('key');

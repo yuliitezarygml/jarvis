@@ -63,6 +63,7 @@ pub fn run() {
             config_store::spawn_watcher(handle.clone());
 
             windows_manager::create_windows(&handle, &initial)?;
+            commands::apply_corner_size(&handle, initial.appearance.corner_size);
             tray::create(&handle)?;
             hotkeys::register(&handle);
 

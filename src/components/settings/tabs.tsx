@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 
 import { call, errorText } from '@/lib/bridge';
-import { addSearch, moveItem } from '@/lib/settings';
-import type { AppInfo, AudioDevices, Autonomy, HudMode, SearchPreset, ServiceCheck } from '@/lib/types';
+import { addSearch, deviceValue, levelPercent, moveItem, setAudio } from '@/lib/settings';
+import { useTauriEvent } from '@/lib/store';
+import { MIC_TEST_EVENT, type AppInfo, type AudioDevice, type AudioDevices, type Autonomy, type HudMode, type SearchPreset, type ServiceCheck } from '@/lib/types';
 
-import { CheckStatus, Field, KeyField, Toggle, type TabProps } from './common';
+import { CheckStatus, Field, KeyField, Switch, Toggle, type TabProps } from './common';
 
 // ───────────── Голос и серверы ─────────────
 
@@ -66,47 +67,181 @@ export function VoiceTab({ draft, update }: TabProps) {
 
 // ───────────── Аудио ─────────────
 
-export function AudioTab() {
+/** Выбор устройства: «по умолчанию Windows» + список; выбранное, но отключённое — отдельной строкой. */
+function DeviceSelect({
+  label,
+  list,
+  value,
+  onChange,
+}: {
+  label: string;
+  list: AudioDevice[];
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const v = deviceValue(value);
+  const def = list.find((d) => d.default);
+  const missing = v !== '' && !list.some((d) => d.id === v);
+  return (
+    <Field label={label}>
+      <select className="select" value={v} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">По умолчанию Windows{def ? ` — ${def.name}` : ''}</option>
+        {list.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+          </option>
+        ))}
+        {missing && <option value={v}>{v} — не подключено</option>}
+      </select>
+      {missing && <span className="error-text small">Это устройство сейчас не подключено — Джарвис возьмёт устройство по умолчанию.</span>}
+    </Field>
+  );
+}
+
+/** Индикатор уровня микрофона: сегменты по шкале −60…0 dBFS с удержанием пика. */
+function LevelMeter({ rms }: { rms: number }) {
+  const [peak, setPeak] = useState(0);
+  const pct = levelPercent(rms);
+  useEffect(() => {
+    setPeak((p) => (pct >= p ? pct : Math.max(pct, p - 1.5)));
+  }, [pct]);
+  return (
+    <div className="meter" role="meter" aria-label="Уровень микрофона" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
+      <div className="meter-fill" style={{ width: `${pct}%` }} />
+      <div className="meter-peak" style={{ left: `${peak}%` }} />
+    </div>
+  );
+}
+
+const MIC_TEST_SECONDS = 15;
+
+export function AudioTab({ draft, update }: TabProps) {
   const [dev, setDev] = useState<AudioDevices | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const [testing, setTesting] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [micMsg, setMicMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sound, setSound] = useState<ServiceCheck | 'loading'>();
+
+  const load = () => {
+    setError(null);
     call<AudioDevices>('audio_devices')
       .then(setDev)
       .catch((e) => setError(errorText(e)));
-  }, []);
+  };
+  useEffect(load, []);
+  // ушли с вкладки во время проверки — закрыть микрофон
+  useEffect(() => () => void call('audio_mic_test_stop').catch(() => {}), []);
+
+  useTauriEvent<number>(MIC_TEST_EVENT, (rms) => {
+    if (testing) setLevel(rms);
+  });
+
+  const audio = draft.audio;
+  const micTest = async () => {
+    setTesting(true);
+    setMicMsg(null);
+    setLevel(0);
+    try {
+      const opened = await call<string>('audio_mic_test', { device: audio.input_device, seconds: MIC_TEST_SECONDS });
+      const asked = deviceValue(audio.input_device);
+      setMicMsg(
+        asked && !opened.toLowerCase().includes(asked.toLowerCase())
+          ? { ok: false, text: `«${asked}» не найден — проверялся «${opened}» (по умолчанию).` }
+          : { ok: true, text: `Проверка закончена: «${opened}».` },
+      );
+    } catch (e) {
+      setMicMsg({ ok: false, text: errorText(e) });
+    } finally {
+      setTesting(false);
+      setLevel(0);
+    }
+  };
+
+  const soundTest = async () => {
+    setSound('loading');
+    try {
+      setSound(await call<ServiceCheck>('audio_sound_test', { device: audio.output_device, volume: audio.volume }));
+    } catch (e) {
+      setSound({ demo: false, ok: false, message: errorText(e), latency_ms: null });
+    }
+  };
+
+  const volumePct = Math.round(audio.volume * 100);
   return (
-    <section className="section">
-      <h2 className="section-title">Микрофон и динамики</h2>
-      <p className="section-lead">
-        Джарвис берёт устройства Windows по умолчанию (отмечены в списке); выбор другого устройства в config.json пока не
-        поддерживается. Микрофон включается и выключается кнопкой в HUD.
-        {dev?.demo && ' Список ниже — демо-данные.'}
-      </p>
-      {error && <p className="status" data-ok="false">{error}</p>}
-      {dev && (
-        <>
-          <Field label="Микрофон">
-            <select className="select" defaultValue={dev.inputs.find((d) => d.default)?.id} disabled>
-              {dev.inputs.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Вывод звука">
-            <select className="select" defaultValue={dev.outputs.find((d) => d.default)?.id} disabled>
-              {dev.outputs.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <p className="muted small">Без наушников Джарвис может услышать сам себя: аппаратного подавления эха в Windows нет.</p>
-        </>
-      )}
-    </section>
+    <>
+      <section className="section">
+        <h2 className="section-title">Микрофон</h2>
+        <p className="section-lead">
+          Выбор применяется после «Сохранить» — Джарвис сам переподключит микрофон и динамики, перезапуск не нужен.
+          {dev?.demo && ' Список ниже — демо-данные.'}
+        </p>
+        {error && (
+          <p className="status" data-ok="false">
+            {error}
+          </p>
+        )}
+        {dev && (
+          <DeviceSelect label="Микрофон" list={dev.inputs} value={audio.input_device} onChange={(v) => update((c) => setAudio(c, { input_device: v }))} />
+        )}
+        <div className="mic-test">
+          <div className="row">
+            {testing ? (
+              <button type="button" className="btn btn-stop" onClick={() => void call('audio_mic_test_stop')}>
+                Остановить проверку
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={() => void micTest()}>
+                Проверить микрофон
+              </button>
+            )}
+            <button type="button" className="btn btn-ghost" onClick={load}>
+              Обновить список устройств
+            </button>
+          </div>
+          {testing && (
+            <>
+              <LevelMeter rms={level} />
+              <p className="muted small">Скажите что-нибудь обычным голосом — полоса должна доходить примерно до середины. Микрофон закроется сам через {MIC_TEST_SECONDS} с.</p>
+            </>
+          )}
+          {micMsg && (
+            <p className="status" data-ok={micMsg.ok}>
+              {micMsg.text}
+            </p>
+          )}
+        </div>
+        <Toggle
+          checked={audio.listen_on_start}
+          onChange={(v) => update((c) => setAudio(c, { listen_on_start: v }))}
+          title="Включать микрофон при запуске"
+          desc="Выключено — Джарвис стартует глухим, микрофон включается кнопкой в HUD."
+        />
+      </section>
+
+      <section className="section">
+        <h2 className="section-title">Динамики и голос</h2>
+        {dev && (
+          <DeviceSelect label="Вывод звука" list={dev.outputs} value={audio.output_device} onChange={(v) => update((c) => setAudio(c, { output_device: v }))} />
+        )}
+        <Field label={`Громкость голоса Джарвиса: ${volumePct} %`}>
+          <input
+            className="range"
+            type="range"
+            min={0}
+            max={150}
+            step={5}
+            value={volumePct}
+            onChange={(e) => update((c) => setAudio(c, { volume: Number(e.target.value) / 100 }))}
+          />
+        </Field>
+        <button type="button" className="btn btn-primary" disabled={sound === 'loading'} onClick={() => void soundTest()}>
+          {sound === 'loading' ? 'Говорю…' : 'Проверить звук'}
+        </button>
+        <CheckStatus check={sound === 'loading' ? undefined : sound} />
+        <p className="muted small">Без наушников Джарвис может услышать сам себя: аппаратного подавления эха в Windows нет.</p>
+      </section>
+    </>
   );
 }
 
@@ -296,14 +431,12 @@ export function SearchTab({ draft, update }: TabProps) {
               <div className="card-head">
                 <span className="chain-n">{i + 1}</span>
                 <span className="card-title">{p?.name ?? s.id}</span>
-                <label className="row small" style={{ marginLeft: 'auto' }}>
-                  <input
-                    type="checkbox"
-                    checked={s.enabled}
-                    onChange={(e) => update((c) => ({ ...c, web_search: c.web_search.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x)) }))}
-                  />
-                  включён
-                </label>
+                <span className="grow-spacer" />
+                <Switch
+                  checked={s.enabled}
+                  label={`Поисковик ${p?.name ?? s.id}`}
+                  onChange={(v) => update((c) => ({ ...c, web_search: c.web_search.map((x) => (x.id === s.id ? { ...x, enabled: v } : x)) }))}
+                />
                 <button type="button" className="btn btn-small btn-ghost" aria-label="Выше" disabled={i === 0} onClick={() => update((c) => ({ ...c, web_search: moveItem(c.web_search, i, -1) }))}>
                   ↑
                 </button>

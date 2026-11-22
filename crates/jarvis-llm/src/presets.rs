@@ -161,6 +161,21 @@ impl Presets {
     pub fn get(&self, id: &str) -> Option<&ProviderPreset> {
         self.providers.iter().find(|p| p.id == id)
     }
+
+    /// Пресет для записи из конфига: по id, а если id свой (второй ключ: `groq-2`) — по адресу API.
+    pub fn for_config(&self, pc: &ProviderConfig) -> Option<&ProviderPreset> {
+        self.get(&pc.id).or_else(|| {
+            let url = normalize_url(&pc.base_url);
+            if url.is_empty() {
+                return None;
+            }
+            self.providers.iter().find(|p| p.kind == pc.kind && normalize_url(&p.base_url) == url)
+        })
+    }
+}
+
+fn normalize_url(u: &str) -> String {
+    u.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
 /// Всё, что нужно клиенту: запись из конфига + особенности провайдера из пресета.
@@ -191,7 +206,7 @@ impl ProviderSpec {
     }
 
     pub fn with_presets(pc: &ProviderConfig, presets: &Presets) -> Self {
-        let preset = presets.get(&pc.id).cloned().unwrap_or_else(|| ProviderPreset {
+        let preset = presets.for_config(pc).cloned().unwrap_or_else(|| ProviderPreset {
             id: pc.id.clone(),
             kind: pc.kind,
             needs_key: false,
@@ -275,6 +290,25 @@ mod tests {
             assert!(!t.contains("/models") && !t.contains("GET "), "{}: в tagline заметки разработчика", p.id);
             assert!(!p.local || p.free_tier, "{}: локальный — значит бесплатный", p.id);
         }
+    }
+
+    #[test]
+    fn second_key_with_own_id_gets_preset_by_url() {
+        let groq = Presets::builtin().get("groq").unwrap().clone();
+        let pc = ProviderConfig {
+            id: "groq-2".into(),
+            kind: ProviderKind::OpenaiCompat,
+            base_url: format!("{}/", groq.base_url.to_uppercase()),
+            api_key: "k".into(),
+            enabled: true,
+        };
+        let s = ProviderSpec::from_config(&pc);
+        assert_eq!(s.id, "groq-2", "id остаётся своим: у второго ключа свой circuit breaker");
+        assert!(s.needs_key);
+        assert_eq!(s.max_tokens_field, groq.max_tokens_field);
+        // Свой адрес без пресета — пустой пресет, как раньше.
+        let other = ProviderSpec::from_config(&ProviderConfig { base_url: "http://my.host/v1".into(), ..pc });
+        assert!(!other.needs_key);
     }
 
     #[test]

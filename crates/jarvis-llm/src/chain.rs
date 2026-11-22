@@ -514,14 +514,18 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn multi_model_chain_fails_over_without_waiting() {
-        let a = Limited::new("pa/x", 1, Some(3_000));
-        let b = Limited::new("pb/y", 0, None);
+        // Два ключа Groq (разные организации, свои лимиты): 429 у первого — сразу второй, без ожидания.
+        let a = Limited::new("groq/openai/gpt-oss-120b", 1, Some(3_000));
+        let b = Limited::new("groq-2/openai/gpt-oss-120b", 0, None);
         let chain = chain_of(vec![a.clone(), b.clone()]);
         let t0 = tokio::time::Instant::now();
         let r = chain.chat(ChatRequest::default(), CancellationToken::new()).await.unwrap();
-        assert_eq!(r.model, "pb/y");
+        assert_eq!(r.model, "groq-2/openai/gpt-oss-120b");
         assert_eq!((a.calls(), b.calls()), (1, 1));
         assert!(t0.elapsed() < Duration::from_secs(1));
+        // Circuit breaker — по id провайдера: groq и groq-2 независимы.
+        assert_eq!(chain.breaker().failures("groq"), 1);
+        assert_eq!(chain.breaker().failures("groq-2"), 0);
     }
 
     #[tokio::test(start_paused = true)]

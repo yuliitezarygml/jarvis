@@ -323,7 +323,7 @@ pub const CONFIG_CHANGED_EVENT: &str = "jarvis://config_changed";
 /// Раз в секунду проверять `config.json`: правки снаружи применяются к ядру без перезапуска
 /// (модели, провайдеры, голос, поиск…) и отправляются окнам событием `CONFIG_CHANGED_EVENT`.
 pub fn spawn_watcher(app: tauri::AppHandle) {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     let _ = std::thread::Builder::new().name("jarvis-config-watch".into()).spawn(move || {
         let mut seen = app.state::<ConfigStore>().external_revision();
         loop {
@@ -337,8 +337,7 @@ pub fn spawn_watcher(app: tauri::AppHandle) {
             seen = rev;
             let cfg = store.get();
             eprintln!("[jarvis] config.json изменён снаружи — применяю");
-            app.state::<crate::commands::CoreState>().0.apply_config(&cfg);
-            let _ = app.emit(CONFIG_CHANGED_EVENT, masked(&cfg));
+            crate::commands::after_save(&app, &app.state::<crate::commands::CoreState>().0, &cfg);
         }
     });
 }
