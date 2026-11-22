@@ -10,6 +10,9 @@ export CARGO_HOME=/opt/jarvis-stt-rs/build-tools/cargo
 export CARGO_TARGET_DIR=/opt/jarvis-stt-rs/build-tools/target
 export SHERPA_ONNX_LIB_DIR=/opt/jarvis-stt-rs/lib
 export RUSTFLAGS="-C target-cpu=haswell"
+# Раньше было в [profile.release] крейта; в общем workspace профили задаются только в корне,
+# а здесь крейт собирается отдельно (копия исходников без корневого Cargo.toml).
+export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
 cd "$SRC"
 nice -n 10 cargo build --release --locked --features sherpa
 if [ "${1:-}" = "--install" ]; then

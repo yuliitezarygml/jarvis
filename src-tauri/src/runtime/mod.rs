@@ -567,8 +567,11 @@ impl Core {
                 message: format!("Сохранено. Изменения ({}) применятся после перезапуска Джарвиса.", restart.join(", ")),
             });
         }
-        if let Some(p) = self.models.brain.problem() {
-            self.events.emit(Event::Error { message: p });
+        match self.models.brain.problem() {
+            Some(p) => self.events.emit(Event::Error { message: p }),
+            // ключ появился — снять красное «ошибка» с реактора
+            None if !self.is_busy() => self.events.emit(Event::State { state: AssistantState::Idle }),
+            None => {}
         }
         restart
     }

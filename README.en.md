@@ -6,7 +6,7 @@ A voice assistant for Windows 11 inspired by J.A.R.V.I.S. from *Iron Man*. Say "
 
 Stack: **Rust + Tauri 2 + Next.js**. No Python in the project. The detailed plan and decisions are in [docs/PLAN.md](docs/PLAN.md) (in Russian).
 
-> Status: in development. Modules are written and tested one by one; they are not yet assembled into a single application (the integration stage is next).
+> Status: the modules are assembled into one application (shared Cargo workspace, orchestrator in `src-tauri/src/runtime`). The first live run with the microphone and PC control is next.
 
 ## Features
 

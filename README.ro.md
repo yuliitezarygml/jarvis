@@ -6,7 +6,7 @@ Un asistent vocal pentru Windows 11 inspirat de J.A.R.V.I.S. din *Iron Man*. Spu
 
 Stack: **Rust + Tauri 2 + Next.js**. Fără Python în proiect. Planul detaliat și deciziile sunt în [docs/PLAN.md](docs/PLAN.md) (în rusă).
 
-> Stare: în dezvoltare. Modulele sunt scrise și testate pe rând; încă nu sunt asamblate într-o singură aplicație (urmează etapa de integrare).
+> Stare: modulele sunt asamblate într-o singură aplicație (workspace Cargo comun, orchestratorul în `src-tauri/src/runtime`). Urmează prima rulare reală cu microfonul și controlul PC-ului.
 
 ## Funcționalități
 
