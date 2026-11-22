@@ -41,7 +41,7 @@ pub struct AgentConfig {
 }
 
 /// Бюджет ответа по умолчанию.
-pub const DEFAULT_MAX_TOKENS: u32 = 2048;
+pub const DEFAULT_MAX_TOKENS: u32 = 1536;
 
 impl Default for AgentConfig {
     fn default() -> Self {
@@ -60,11 +60,12 @@ impl Default for AgentConfig {
             tool_timeouts,
             autonomy: Autonomy::AskDangerous,
             vision_enabled: true,
-            // Оценка «символы/4» для кириллицы занижает реальные токены в 1,5–2 раза,
-            // плюс описания инструментов не входят в бюджет — поэтому с запасом под ctx 32k.
-            history_budget_tokens: 12_000,
+            // Оценка «символы/4» для кириллицы занижает реальные токены в 1,5–2 раза, а бесплатный Groq даёт
+            // 8000 токенов в минуту на модель (вход + бюджет ответа). Поэтому запрос держим ≈5–6 тыс. реальных
+            // токенов: история ≈2,5k оценочных, вывод инструмента ≤3500 символов (страницы режутся).
+            history_budget_tokens: 2_500,
             max_history_turns: 40,
-            max_tool_output_chars: 8_000,
+            max_tool_output_chars: 3_500,
             loop_repeat_limit: 3,
             persona: PERSONA_PROMPT.to_string(),
             temperature: None,

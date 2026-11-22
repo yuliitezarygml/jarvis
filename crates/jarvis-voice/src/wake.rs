@@ -175,7 +175,9 @@ impl WakeFilter {
         match stripped {
             Some("") => Intent::WakeOnly,
             Some(cmd) => Intent::Command(cmd.to_string()),
-            None if ctx.follow_up && words(text).iter().any(|w| w.chars().any(char::is_alphabetic)) => {
+            // Без обращения в окне ожидания — только осмысленная фраза (≥4 букв): обрывки вроде «п»,
+            // «ну» или кашель не тратят запрос к модели.
+            None if ctx.follow_up && text.chars().filter(|c| c.is_alphabetic()).count() >= 4 => {
                 Intent::Command(text.trim().to_string())
             }
             None => Intent::Ignored,
@@ -210,6 +212,9 @@ mod tests {
         }
         assert_eq!(f.classify("я говорил с Джарвисом", idle()), Intent::Ignored, "обращение только в начале");
         assert_eq!(f.classify("открой браузер", WakeContext { follow_up: true, ..idle() }), Intent::Command("открой браузер".into()));
+        for junk in ["п", "ну", "а?", "м-м"] {
+            assert_eq!(f.classify(junk, WakeContext { follow_up: true, ..idle() }), Intent::Ignored, "{junk}");
+        }
     }
 
     #[test]
