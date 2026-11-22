@@ -68,7 +68,8 @@ impl Default for AgentConfig {
             loop_repeat_limit: 3,
             persona: PERSONA_PROMPT.to_string(),
             temperature: None,
-            max_tokens: None,
+            max_tokens: Some(DEFAULT_MAX_TOKENS),
+            lazy_tools: true,
         }
     }
 }
