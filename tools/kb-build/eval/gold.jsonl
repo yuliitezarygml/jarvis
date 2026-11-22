@@ -1,0 +1,65 @@
+{"q": ["robocopy mirror directory", "copy folder with robocopy /mir"], "expect": "windows-commands/robocopy"}
+{"q": ["flush DNS cache command", "ipconfig flushdns"], "expect": "windows-commands/ipconfig"}
+{"q": ["reset winsock catalog", "netsh winsock reset"], "expect": "windows-commands/netsh-winsock"}
+{"q": ["scan and repair system files", "sfc scannow"], "expect": "windows-commands/sfc"}
+{"q": ["check disk for errors", "chkdsk fix file system errors"], "expect": "windows-commands/chkdsk"}
+{"q": ["edit boot configuration data", "bcdedit boot entries"], "expect": "windows-commands/bcdedit"}
+{"q": ["create scheduled task from command line", "schtasks create daily"], "expect": "schtasks"}
+{"q": ["list running processes cmd", "tasklist command"], "expect": "windows-commands/tasklist"}
+{"q": ["kill process by name command line", "taskkill force"], "expect": "windows-commands/taskkill"}
+{"q": ["battery report powercfg", "change power plan from command line"], "expect": "windows-commands/powercfg"}
+{"q": ["change file permissions ACL command", "icacls grant permissions"], "expect": "windows-commands/icacls"}
+{"q": ["take ownership of a file", "takeown command"], "expect": "windows-commands/takeown"}
+{"q": ["shutdown computer with timer command", "restart computer command line shutdown /r"], "expect": "windows-commands/shutdown"}
+{"q": ["change service startup type sc config", "sc.exe config start= disabled"], "expect": "windows-commands/sc-config"}
+{"q": ["partition disk command line", "diskpart create partition"], "expect": "diskpart"}
+{"q": ["query event logs from command line", "wevtutil export log"], "expect": "windows-commands/wevtutil"}
+{"q": ["install driver inf command line", "pnputil add driver"], "expect": "windows-commands/pnputil"}
+{"q": ["show current user and groups", "whoami groups"], "expect": "windows-commands/whoami"}
+{"q": ["show system information OS version install date", "systeminfo command"], "expect": "windows-commands/systeminfo"}
+{"q": ["change file attributes hidden read-only", "attrib command"], "expect": "windows-commands/attrib"}
+{"q": ["add registry value from command line", "reg add REG_DWORD"], "expect": "windows-commands/reg-add"}
+{"q": ["encrypt files EFS command", "cipher wipe free space"], "expect": "windows-commands/cipher"}
+{"q": ["BitLocker command line turn on encryption", "manage-bde on"], "expect": "manage-bde"}
+{"q": ["Get-Service list running services", "PowerShell get services status"], "expect": "get-service"}
+{"q": ["Stop-Process kill process PowerShell", "terminate process by id PowerShell"], "expect": "stop-process"}
+{"q": ["running scripts is disabled on this system", "PowerShell execution policy"], "expect": ["about_execution_policies", "set-executionpolicy"]}
+{"q": ["Get-WinEvent filter hashtable", "read event log PowerShell"], "expect": "get-winevent"}
+{"q": ["list files recursively PowerShell", "Get-ChildItem recurse filter"], "expect": "get-childitem"}
+{"q": ["ping host PowerShell", "Test-Connection cmdlet"], "expect": "test-connection"}
+{"q": ["tail log file PowerShell", "Get-Content -Tail -Wait"], "expect": "get-content"}
+{"q": ["run program as administrator PowerShell", "Start-Process -Verb RunAs"], "expect": "start-process"}
+{"q": ["download file PowerShell", "Invoke-WebRequest OutFile"], "expect": "invoke-webrequest"}
+{"q": ["environment variables PowerShell", "about environment variables env drive"], "expect": "about_environment_variables"}
+{"q": ["create local user account PowerShell", "New-LocalUser"], "expect": "new-localuser"}
+{"q": ["Defender antivirus status PowerShell", "Get-MpComputerStatus real-time protection"], "expect": "get-mpcomputerstatus"}
+{"q": ["add Defender exclusion folder", "Add-MpPreference ExclusionPath"], "expect": "add-mppreference"}
+{"q": ["run Defender quick scan PowerShell", "Start-MpScan"], "expect": "start-mpscan"}
+{"q": ["open port in Windows firewall PowerShell", "New-NetFirewallRule inbound allow"], "expect": "new-netfirewallrule"}
+{"q": ["list network adapters PowerShell", "Get-NetAdapter"], "expect": "get-netadapter"}
+{"q": ["clear DNS client cache PowerShell", "Clear-DnsClientCache"], "expect": ["clear-dnsclientcache", "windows-commands/ipconfig"]}
+{"q": ["register scheduled task PowerShell", "Register-ScheduledTask action trigger"], "expect": "register-scheduledtask"}
+{"q": ["remove built-in app package PowerShell", "Get-AppxPackage Remove-AppxPackage"], "expect": ["get-appxpackage", "remove-appxpackage"]}
+{"q": ["list devices with errors PowerShell", "Get-PnpDevice status error"], "expect": "get-pnpdevice"}
+{"q": ["defragment optimize drive PowerShell", "Optimize-Volume"], "expect": "optimize-volume"}
+{"q": ["monitor file and registry activity tool", "Process Monitor procmon"], "expect": "sysinternals/downloads/procmon"}
+{"q": ["see all programs that start automatically", "Autoruns Sysinternals"], "expect": ["sysinternals/downloads/autoruns", "kb/seed/startup"]}
+{"q": ["run command on remote computer", "PsExec"], "expect": "sysinternals/downloads/psexec"}
+{"q": ["advanced task manager Sysinternals", "Process Explorer"], "expect": "sysinternals/downloads/process-explorer"}
+{"q": ["show TCP connections and owning process tool", "TCPView"], "expect": "sysinternals/downloads/tcpview"}
+{"q": ["securely delete file", "SDelete"], "expect": "sysinternals/downloads/sdelete"}
+{"q": ["UI Automation overview", "Microsoft UI Automation Win32"], "expect": "windows/win32/winauto/"}
+{"q": ["system error codes list", "ERROR_ACCESS_DENIED error code 5"], "expect": "system-error-codes"}
+{"q": ["Windows Firewall overview", "Windows Defender Firewall features"], "expect": "windows-firewall"}
+{"q": ["BitLocker overview", "BitLocker drive encryption"], "expect": "windows/security/operating-system-security/data-protection/bitlocker"}
+{"q": ["Windows Sandbox", "run untrusted app in isolated desktop"], "expect": "windows-sandbox"}
+{"q": ["Windows LAPS local administrator password", "LAPS overview"], "expect": "laps"}
+{"q": "как отключить автозагрузку программ", "expect": "kb/seed/startup", "lang": "ru"}
+{"q": "нет интернета сбросить сеть", "expect": "kb/seed/network-reset", "lang": "ru"}
+{"q": "как освободить место на диске C", "expect": "kb/seed/disk-cleanup", "lang": "ru"}
+{"q": "выполнение сценариев отключено в этой системе", "expect": "kb/seed/common-errors", "lang": "ru"}
+{"q": "git comit опечатка", "expect": "kb/seed/common-errors", "lang": "ru"}
+{"q": "как остановить службу", "expect": "kb/seed/services", "lang": "ru"}
+{"q": "добавить папку в PATH", "expect": "kb/seed/environment-variables", "lang": "ru"}
+{"q": "установить Ubuntu в WSL", "expect": "kb/seed/wsl", "lang": "ru"}
+{"q": "открыть настройки Bluetooth", "expect": "kb/seed/settings-pages", "lang": "ru"}
