@@ -49,6 +49,18 @@ pub async fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
     windows_manager::toggle_mode(&app).map_err(err)
 }
 
+/// HUD: полный экран ↔ обычное окно. `true` = теперь полный экран.
+#[tauri::command]
+pub async fn toggle_hud_fullscreen(app: AppHandle) -> CmdResult<bool> {
+    windows_manager::toggle_hud_fullscreen(&app).map_err(err)
+}
+
+/// Выйти из полного экрана HUD (Esc). `true`, если HUD был на весь экран.
+#[tauri::command]
+pub async fn exit_hud_fullscreen(app: AppHandle) -> CmdResult<bool> {
+    windows_manager::exit_hud_fullscreen(&app).map_err(err)
+}
+
 #[tauri::command]
 pub async fn open_settings(app: AppHandle, tab: Option<String>) -> CmdResult<()> {
     windows_manager::open_settings(&app, tab.as_deref()).map_err(err)

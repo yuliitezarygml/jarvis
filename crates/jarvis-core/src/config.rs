@@ -31,7 +31,13 @@ pub struct ProviderConfig {
     pub kind: ProviderKind,
     pub base_url: String,
     pub api_key: String,
+    /// Нет поля в `config.json` — провайдер включён (запись, добавленная руками без `enabled`, не выключает его).
+    #[serde(default = "yes")]
     pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Цепочки моделей по ролям, каждая строка — «provider_id/model_id».
@@ -114,7 +120,46 @@ pub struct SearchProviderConfig {
     pub api_key: String,
     /// Для Google Programmable Search — cx.
     pub extra: String,
+    #[serde(default = "yes")]
     pub enabled: bool,
+}
+
+/// Микрофон, динамики и громкость голоса.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig {
+    /// Имя микрофона, как его показывает Windows; `None` — микрофон Windows по умолчанию.
+    pub input_device: Option<String>,
+    /// Имя устройства вывода; `None` — динамики Windows по умолчанию.
+    pub output_device: Option<String>,
+    /// Громкость голоса Джарвиса: 0.0–1.5 (1.0 — как пришло с сервера TTS).
+    pub volume: f32,
+    /// Включать микрофон при запуске (иначе — кнопкой в HUD).
+    pub listen_on_start: bool,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self { input_device: None, output_device: None, volume: 1.0, listen_on_start: true }
+    }
+}
+
+impl AudioConfig {
+    pub const MAX_VOLUME: f32 = 1.5;
+
+    /// Громкость в допустимых пределах (NaN → 1.0).
+    pub fn gain(&self) -> f32 {
+        if self.volume.is_finite() { self.volume.clamp(0.0, Self::MAX_VOLUME) } else { 1.0 }
+    }
+
+    /// Пустое имя устройства = «по умолчанию».
+    pub fn input(&self) -> Option<&str> {
+        self.input_device.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+
+    pub fn output(&self) -> Option<&str> {
+        self.output_device.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -153,6 +198,7 @@ pub struct Config {
     /// Корни для `file_search`.
     pub search_roots: Vec<String>,
     pub hud: HudConfig,
+    pub audio: AudioConfig,
 }
 
 impl Default for Config {
@@ -177,6 +223,7 @@ impl Default for Config {
             resource_guard: true,
             search_roots: vec!["%USERPROFILE%".into(), "D:\\".into()],
             hud: HudConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 }
@@ -254,6 +301,20 @@ mod tests {
         assert_eq!(c2.autonomy, Autonomy::AskDangerous);
         assert!(Config::load(dir.join("missing.json")).is_ok());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_enabled_means_enabled_and_old_files_get_audio_defaults() {
+        let c: Config = serde_json::from_str(
+            r#"{"providers":[{"id":"groq","api_key":"k"},{"id":"zen","enabled":false}],"web_search":[{"id":"brave"}]}"#,
+        )
+        .unwrap();
+        assert!(c.providers[0].enabled, "запись без enabled не выключает провайдера");
+        assert!(!c.providers[1].enabled);
+        assert!(c.web_search[0].enabled);
+        assert_eq!(c.audio, AudioConfig::default());
+        let a: AudioConfig = serde_json::from_str(r#"{"input_device":"  ","volume":9}"#).unwrap();
+        assert_eq!((a.input(), a.output(), a.gain(), a.listen_on_start), (None, None, AudioConfig::MAX_VOLUME, true));
     }
 
     #[test]

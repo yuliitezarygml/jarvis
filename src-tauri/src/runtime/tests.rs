@@ -161,6 +161,40 @@ async fn text_command_runs_real_t0_tool_and_answers() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wake_word_alone_gets_spoken_reply() {
+    let h = harness(vec![], None);
+    on_intent(&h.core.me, jarvis_voice::Intent::WakeOnly);
+    assert!(
+        events(&h.sink).contains(&Event::Subtitle { speaker: Speaker::Jarvis, text: "Слушаю, сэр.".into(), is_final: true }),
+        "{:?}",
+        events(&h.sink)
+    );
+    // Модель не вызывается: это только отклик.
+    assert!(h.model.requests().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "замер размера запроса"]
+async fn measure_request_size() {
+    let h = harness(vec![ChatMessage::assistant("ok")], None);
+    h.core.submit("привет", false).unwrap();
+    for _ in 0..500 {
+        if !h.model.requests().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let r = &h.model.requests()[0];
+    let tools = serde_json::to_string(&r.tools).unwrap();
+    let msgs: usize = r.messages.iter().map(|m| m.content.chars().count()).sum();
+    let mut per: Vec<(usize, String)> = r.tools.iter().map(|t| (serde_json::to_string(t).unwrap().chars().count(), t.name.clone())).collect();
+    per.sort_by(|a, b| b.0.cmp(&a.0));
+    println!("TOOLS n={} chars={} | MSG chars={} max_tokens={:?}", r.tools.len(), tools.chars().count(), msgs, r.max_tokens);
+    println!("TOP {:?}", &per[..12]);
+    println!("ALL {}", per.iter().map(|(n, s)| format!("{s}:{n}")).collect::<Vec<_>>().join(" "));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_search_tool_on_real_base_finds_powercfg() {
     let Some(kb) = real_kb() else {
         eprintln!("data/kb.sqlite нет — пропуск");

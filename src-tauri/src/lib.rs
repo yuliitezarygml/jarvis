@@ -87,6 +87,8 @@ pub fn run() {
             commands::set_hud_mode,
             commands::get_hud_mode,
             commands::toggle_hud_mode,
+            commands::toggle_hud_fullscreen,
+            commands::exit_hud_fullscreen,
             commands::open_settings,
             commands::overlay_geometry,
             commands::config_get,

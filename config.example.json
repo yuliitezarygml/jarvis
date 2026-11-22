@@ -34,5 +34,6 @@
   "terminal_autorun": true,
   "resource_guard": true,
   "search_roots": ["%USERPROFILE%", "D:\\"],
-  "hud": { "mode": "corner", "corner_x": null, "corner_y": null }
+  "hud": { "mode": "corner", "corner_x": null, "corner_y": null },
+  "audio": { "input_device": null, "output_device": null, "volume": 1.0, "listen_on_start": true }
 }

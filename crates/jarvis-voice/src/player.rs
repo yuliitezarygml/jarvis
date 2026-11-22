@@ -43,11 +43,23 @@ pub struct PlayerConfig {
     pub max_buffers: usize,
     /// Частота событий уровня.
     pub level_hz: u32,
+    /// Множитель громкости (1.0 — как есть); результат ограничивается [-1, 1].
+    pub volume: f32,
 }
 
 impl Default for PlayerConfig {
     fn default() -> Self {
-        Self { device: None, max_buffers: 5, level_hz: 30 }
+        Self { device: None, max_buffers: 5, level_hz: 30, volume: 1.0 }
+    }
+}
+
+/// Применить громкость к буферу (с ограничением, чтобы усиление не давало переполнения).
+pub fn apply_gain(samples: &mut [f32], gain: f32) {
+    if (gain - 1.0).abs() < f32::EPSILON || !gain.is_finite() {
+        return;
+    }
+    for s in samples {
+        *s = (*s * gain).clamp(-1.0, 1.0);
     }
 }
 
@@ -129,6 +141,7 @@ pub struct Player {
     resampler: Mutex<Option<StreamResampler>>,
     device_rate: u32,
     device_name: String,
+    volume: f32,
     quit: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }

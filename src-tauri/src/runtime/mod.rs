@@ -600,7 +600,15 @@ fn on_intent(core: &Weak<Core>, intent: Intent) {
         Intent::Deny => {
             core.gate.on_transcript("нет", AudioSource::Mic, None);
         }
-        Intent::WakeOnly | Intent::Ignored => {}
+        // Одно «Джарвис» (в том числе когда открыт только виджет в углу): отзывается голосом и ждёт
+        // команду без повторного обращения (окно follow-up ставит голосовой конвейер). Без «да» в фразе,
+        // чтобы эхо не сошло за подтверждение.
+        Intent::WakeOnly => {
+            const ACK: &str = "Слушаю, сэр.";
+            core.speech.say(ACK);
+            core.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: ACK.into(), is_final: true });
+        }
+        Intent::Ignored => {}
     }
 }
 

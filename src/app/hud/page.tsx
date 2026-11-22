@@ -31,9 +31,35 @@ export default function HudPage() {
 
   useTauriEvent(EMERGENCY_EVENT, () => setStopped(Date.now()));
 
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const toggleFullscreen = async () => {
+    try {
+      setFullscreen(Boolean(await call<boolean>('toggle_hud_fullscreen')));
+    } catch {
+      /* в браузере без Tauri окна нет */
+    }
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.querySelector('.confirm')) void call('set_hud_mode', { mode: 'corner' });
+      if (e.key === 'F11') {
+        e.preventDefault();
+        void toggleFullscreen();
+        return;
+      }
+      if (e.key !== 'Escape' || document.querySelector('.confirm')) return;
+      // Esc: сначала выход из полного экрана в обычное окно, повторный Esc — в угол.
+      void (async () => {
+        let wasFull = false;
+        try {
+          wasFull = Boolean(await call<boolean>('exit_hud_fullscreen'));
+        } catch {
+          /* нет Tauri */
+        }
+        if (wasFull) setFullscreen(false);
+        else void call('set_hud_mode', { mode: 'corner' });
+      })();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -60,6 +86,9 @@ export default function HudPage() {
         </div>
         <Clock />
         <nav className="hud-actions" aria-label="Управление окном">
+          <button type="button" className="btn btn-ghost" onClick={() => void toggleFullscreen()} title="F11">
+            {fullscreen ? 'Окно' : 'Во весь экран'}
+          </button>
           <button type="button" className="btn btn-ghost" onClick={() => void call('set_hud_mode', { mode: 'corner' })} title="Esc или Ctrl+Alt+J">
             В угол
           </button>

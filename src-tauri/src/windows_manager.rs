@@ -1,5 +1,6 @@
 //! Окна J.A.R.V.I.S.:
-//! - `hud` — полноэкранный HUD без рамки (режим `fullscreen`);
+//! - `hud` — большое окно HUD (режим `fullscreen`): обычная рамка Windows, можно свернуть, уменьшить,
+//!   развернуть; на весь экран без рамки — кнопкой в HUD или F11 (`toggle_hud_fullscreen`);
 //! - `corner` — виджет ~220×220 в углу: прозрачный, всегда сверху, без панели задач, перетаскивается,
 //!   позиция сохраняется в `config.json` → `hud.corner_x/corner_y` (физические пиксели);
 //! - `overlay` — прозрачное свечение на весь основной монитор: всегда сверху, без фокуса, без панели задач,
@@ -147,11 +148,17 @@ pub fn create_windows<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> tauri::Re
 
     let hud = WebviewWindowBuilder::new(app, HUD, WebviewUrl::App("hud/".into()))
         .title("J.A.R.V.I.S.")
-        .decorations(false)
-        .resizable(false)
+        .decorations(true)
+        .resizable(true)
+        .maximizable(true)
+        .minimizable(true)
+        .inner_size(1440.0, 900.0)
+        .min_inner_size(960.0, 620.0)
+        .center()
+        .maximized(true)
+        .theme(Some(tauri::Theme::Dark))
         .skip_taskbar(false)
         .background_color(HUD_BG)
-        .fullscreen(mode == HudMode::Fullscreen)
         .visible(mode == HudMode::Fullscreen)
         .build()?;
     protect(&hud);
@@ -248,9 +255,9 @@ pub fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: HudMode) -> tauri::Result<
     match mode {
         HudMode::Fullscreen => {
             if let Some(h) = &hud {
-                // сначала полноэкранный размер, потом показ — без мелькания окна 800×600
-                h.set_fullscreen(true)?;
+                // Окно сохраняет размер, который выбрал пользователь (обычное, развёрнутое или полный экран).
                 h.show()?;
+                h.unminimize()?;
                 h.set_focus()?;
             }
             if let Some(c) = &corner {
@@ -274,6 +281,25 @@ pub fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: HudMode) -> tauri::Result<
     }
     app.emit(HUD_MODE_EVENT, mode)?;
     Ok(())
+}
+
+/// Окно HUD: полный экран без рамки ↔ обычное окно. Возвращает новое состояние (`true` = полный экран).
+pub fn toggle_hud_fullscreen<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<bool> {
+    let Some(h) = app.get_webview_window(HUD) else { return Ok(false) };
+    let next = !h.is_fullscreen()?;
+    h.set_fullscreen(next)?;
+    h.set_focus()?;
+    Ok(next)
+}
+
+/// Выйти из полного экрана HUD. `true`, если HUD был на весь экран.
+pub fn exit_hud_fullscreen<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<bool> {
+    let Some(h) = app.get_webview_window(HUD) else { return Ok(false) };
+    if h.is_fullscreen()? {
+        h.set_fullscreen(false)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 pub fn toggle_mode<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<HudMode> {
