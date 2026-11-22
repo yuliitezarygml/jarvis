@@ -5,10 +5,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Модели по умолчанию (выбраны замером, см. README): потоковая для partial и офлайн для final.
-pub const DEFAULT_STREAMING: &str = "t-one:sherpa-onnx-streaming-t-one-russian-2025-09-08";
-pub const DEFAULT_OFFLINE: &str =
-    "gigaam-rnnt:sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16";
+/// Модели по умолчанию (выбраны замером, см. README): GigaAM v3 CTC даёт и final, и partial
+/// («симулированный стриминг» каждые `JARVIS_STT_PARTIAL_MS`); потоковая модель не нужна.
+pub const DEFAULT_STREAMING: &str = "none";
+pub const DEFAULT_OFFLINE: &str = "gigaam-ctc:sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16";
 
 /// Модель: семейство и каталог с файлами.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +104,8 @@ pub struct Config {
     pub threads: usize,
     /// Экземпляров каждого распознавателя (параллельных декодирований).
     pub pool: usize,
+    /// Без потоковой модели: partial из офлайн-модели каждые N мс звука (0 — partial нет).
+    pub partial_ms: u64,
     pub limits: Limits,
 }
 
@@ -158,10 +160,15 @@ impl Config {
             streaming.is_some() || offline.is_some(),
             "нужна хотя бы одна модель (JARVIS_STT_STREAMING/OFFLINE)"
         );
-        let threads: usize = num(&get, "JARVIS_STT_THREADS", 2)?;
+        let threads: usize = num(&get, "JARVIS_STT_THREADS", 4)?;
         ensure!((1..=16).contains(&threads), "JARVIS_STT_THREADS: 1..16");
         let pool: usize = num(&get, "JARVIS_STT_POOL", 2)?;
         ensure!((1..=8).contains(&pool), "JARVIS_STT_POOL: 1..8");
+        let partial_ms: u64 = num(&get, "JARVIS_STT_PARTIAL_MS", 300)?;
+        ensure!(
+            partial_ms == 0 || (100..=5000).contains(&partial_ms),
+            "JARVIS_STT_PARTIAL_MS: 0 или 100..5000"
+        );
         let d = Limits::default();
         let secs = |key: &str, def: Duration| -> Result<Duration> {
             let v: f64 = num(&get, key, def.as_secs_f64())?;
@@ -198,6 +205,7 @@ impl Config {
             offline,
             threads,
             pool,
+            partial_ms,
             limits,
         })
     }
@@ -221,12 +229,13 @@ mod tests {
         let c = cfg(&[]).unwrap();
         assert_eq!(c.bind.to_string(), "127.0.0.1:8182");
         assert!(c.tls.is_none());
-        assert_eq!(c.threads, 2);
-        let s = c.streaming.unwrap();
-        assert_eq!(s.kind, "t-one");
+        assert_eq!((c.threads, c.pool, c.partial_ms), (4, 2, 300));
+        assert!(c.streaming.is_none());
+        let s = c.offline.unwrap();
+        assert_eq!(s.kind, "gigaam-ctc");
         assert!(s.dir.starts_with("/opt/jarvis-stt-rs/models"));
-        assert_eq!(s.short_name(), "streaming-t-one-russian-2025-09-08");
-        assert!(c.offline.is_some());
+        assert_eq!(s.short_name(), "nemo-ctc-giga-am-v3-russian-2025-12-16");
+        assert!(cfg(&[("JARVIS_STT_PARTIAL_MS", "50")]).is_err());
     }
 
     #[test]

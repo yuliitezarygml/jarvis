@@ -58,7 +58,7 @@ pub fn count_class(n: u64) -> CountClass {
 }
 
 /// Выбор из трёх форм: `plural(5, ["файл", "файла", "файлов"])` → «файлов».
-pub fn plural<'a>(n: u64, forms: [&'a str; 3]) -> &'a str {
+pub fn plural(n: u64, forms: [&str; 3]) -> &str {
     match count_class(n) {
         CountClass::One => forms[0],
         CountClass::Few => forms[1],
@@ -419,7 +419,7 @@ pub fn ordinal(n: u64, form: OrdForm, case: Case) -> String {
         }
     };
     if r != 0 {
-        if r <= 20 || r % 10 == 0 {
+        if r <= 20 || r.is_multiple_of(10) {
             push_prefix(&mut words, n - r);
             let (stem, kind) = ord_unit(r);
             words.push(format!("{stem}{}", ord_ending(kind, form, case)));
@@ -434,9 +434,9 @@ pub fn ordinal(n: u64, form: OrdForm, case: Case) -> String {
         words.push(format!("{stem}{}", ord_ending(kind, form, case)));
     } else {
         // Круглые тысячи/миллионы/миллиарды: «двухтысячный», «миллионный».
-        let (scale, word) = if n % 1_000_000_000 == 0 {
+        let (scale, word) = if n.is_multiple_of(1_000_000_000) {
             (1_000_000_000, "миллиардн")
-        } else if n % 1_000_000 == 0 {
+        } else if n.is_multiple_of(1_000_000) {
             (1_000_000, "миллионн")
         } else {
             (1_000, "тысячн")

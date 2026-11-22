@@ -151,7 +151,7 @@ impl WakeFilter {
             return Some(false);
         }
         let ws: Vec<&str> = w.iter().map(String::as_str).collect();
-        CONFIRM.iter().any(|c| *c == ws.as_slice()).then_some(true)
+        CONFIRM.contains(&ws.as_slice()).then_some(true)
     }
 
     pub fn classify(&self, text: &str, ctx: WakeContext) -> Intent {

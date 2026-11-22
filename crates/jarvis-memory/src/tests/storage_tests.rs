@@ -277,3 +277,40 @@ async fn concurrent_access_from_many_tasks_and_two_handles() {
     let shared = Arc::new(b);
     assert_eq!(shared.stats().unwrap(), s);
 }
+
+/// Регрессия: FTS5-кэш соединения устаревал, когда другое соединение коммитило в ту же FTS-таблицу,
+/// пока это читало её («fts5: corruption found reading blob …» при целом файле). Исправлено сверкой
+/// `PRAGMA data_version` и переоткрытием соединения после чужих коммитов (см. `Memory::conn`).
+#[test]
+fn fts_stays_coherent_when_another_connection_writes() {
+    for round in 0..5 {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("memory.db");
+        let a = Memory::open(&p).unwrap();
+        let b = Memory::open(&p).unwrap();
+        let mut threads = Vec::new();
+        for t in 0..8 {
+            let m = if t % 2 == 0 { a.clone() } else { b.clone() };
+            threads.push(std::thread::spawn(move || {
+                for i in 0..20 {
+                    let w = code(t * 20 + i);
+                    m.add_lesson(lesson_stub_from_tool_error("t", None, &format!("err {w}"))).unwrap();
+                    m.upsert_fact(NewFact::explicit(format!("значение {w} хранится"))).unwrap();
+                    m.retrieve_context("значение err", Some("t"), None).unwrap();
+                    m.search_lessons(&w, 3).unwrap();
+                }
+            }));
+        }
+        for th in threads {
+            th.join().unwrap();
+        }
+        a.check_integrity().unwrap_or_else(|e| panic!("раунд {round}, хэндл a: {e}"));
+        b.check_integrity().unwrap_or_else(|e| panic!("раунд {round}, хэндл b: {e}"));
+        // запись, сделанная через b, находится поиском через a (и наоборот)
+        let from_b = code(20 + 7); // поток t = 1 (хэндл b)
+        let from_a = code(2 * 20 + 3); // поток t = 2 (хэндл a)
+        assert_eq!(a.search_lessons(&from_b, 3).unwrap().len(), 1, "раунд {round}");
+        assert_eq!(b.search_facts(&from_a, 3).unwrap().len(), 1, "раунд {round}");
+        assert_eq!(a.stats().unwrap(), b.stats().unwrap());
+    }
+}

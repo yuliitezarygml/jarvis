@@ -291,7 +291,9 @@ mod tests {
 
     fn run(vad: &mut Vad, pcm: &[i16]) -> Vec<VadEvent> {
         let t0 = Instant::now();
-        pcm.chunks_exact(FRAME_SAMPLES)
+        pcm.as_chunks::<FRAME_SAMPLES>()
+            .0
+            .iter()
             .enumerate()
             .filter_map(|(i, f)| vad.push_at(f, t0 + Duration::from_millis(i as u64 * 16)))
             .filter(|e| *e != VadEvent::Speech)

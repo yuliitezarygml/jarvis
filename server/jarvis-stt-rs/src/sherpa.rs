@@ -77,6 +77,8 @@ struct Online {
 struct Offline {
     pool: BlockingPool<OfflineRecognizer>,
     wait: Duration,
+    /// Без потоковой модели: partial — офлайн-декодирование всего буфера каждые N сэмплов.
+    partial_every: Option<usize>,
 }
 
 struct Inner {
@@ -95,6 +97,8 @@ pub struct EngineOptions {
     pub pool: usize,
     /// Сколько ждать свободный офлайн-распознаватель.
     pub queue_timeout: Duration,
+    /// Если потоковой модели нет: partial из офлайн-модели каждые N мс звука (0 — без partial).
+    pub partial_ms: u64,
 }
 
 fn online_config(
@@ -200,9 +204,12 @@ impl SherpaEngine {
                             .with_context(|| format!("не удалось загрузить {}", spec.dir.display()))
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let partial_every = (streaming_spec.is_none() && opt.partial_ms > 0)
+                    .then(|| (opt.partial_ms * SAMPLE_RATE as u64 / 1000) as usize);
                 Some(Offline {
                     pool: BlockingPool::new(recs),
                     wait: opt.queue_timeout,
+                    partial_every,
                 })
             }
         };
@@ -323,6 +330,7 @@ impl Engine for SherpaEngine {
             stream,
             slot,
             audio: Vec::new(),
+            decoded: None,
             inner: self.inner.clone(),
         }))
     }
@@ -358,12 +366,15 @@ struct SherpaRecognition {
     slot: usize,
     /// Звук текущей фразы для офлайн-модели.
     audio: Vec<f32>,
+    /// Последнее офлайн-декодирование для partial: (длина буфера, текст).
+    decoded: Option<(usize, String)>,
     inner: Arc<Inner>,
 }
 
 impl SherpaRecognition {
     fn restart(&mut self) {
         self.audio.clear();
+        self.decoded = None;
         if let Some(on) = &self.inner.online {
             self.stream = None; // сначала освобождаем старый поток
             self.stream = Some(new_stream(on, self.slot));
@@ -377,7 +388,24 @@ impl Recognition for SherpaRecognition {
             self.audio.extend_from_slice(samples);
         }
         let (Some(on), Some(s)) = (&self.inner.online, &self.stream) else {
-            return Ok(String::new());
+            // «Симулированный стриминг»: шаг занимает 0,1–0,3 с; пока он идёт, кадры копятся в
+            // сокете, поэтому частота partial сама подстраивается под нагрузку.
+            let Some(off) = &self.inner.offline else {
+                return Ok(String::new());
+            };
+            let Some(every) = off.partial_every else {
+                return Ok(String::new());
+            };
+            let since = self.decoded.as_ref().map_or(0, |d| d.0);
+            if self.audio.len() >= since + every {
+                let text = off.decode(&self.audio)?;
+                self.decoded = Some((self.audio.len(), text));
+            }
+            return Ok(self
+                .decoded
+                .as_ref()
+                .map(|d| d.1.clone())
+                .unwrap_or_default());
         };
         let slot = &on.slots[self.slot];
         let _g = slot.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -388,6 +416,15 @@ impl Recognition for SherpaRecognition {
 
     fn finish(&mut self) -> Result<String> {
         let text = match (&self.inner.offline, &self.inner.online, &self.stream) {
+            // буфер не вырос после последнего partial — текст уже готов
+            (Some(_), _, _)
+                if self
+                    .decoded
+                    .as_ref()
+                    .is_some_and(|d| d.0 == self.audio.len()) =>
+            {
+                Ok(self.decoded.take().map(|d| d.1).unwrap_or_default())
+            }
             (Some(off), _, _) => off.decode(&self.audio),
             (None, Some(on), Some(s)) => Ok(finish_online(on, self.slot, s)),
             _ => Ok(String::new()),

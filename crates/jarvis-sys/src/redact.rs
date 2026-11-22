@@ -194,22 +194,22 @@ mod tests {
 
     /// (текст, должно ли что-то быть вырезано, подстрока, которой не должно остаться)
     const POSITIVE: &[(&str, &str)] = &[
-        ("GROQ_API_KEY=gsk_abcdefghijklmnopqrstuvwxyz0123456789ABCD", "gsk_abcdefghij"),
-        ("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab в выводе", "ghp_ABCDEF"),
-        ("gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab", "gho_ABCDEF"),
-        ("github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP", "github_pat_11ABC"),
-        ("OPENAI_API_KEY: sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz_0123456789-abc", "sk-proj-AbCd"),
-        ("key = sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL", "sk-abcdefghijklmnop"),
-        ("x-api-key: sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx-yz0123456789", "sk-ant-api03"),
+        (concat!("GROQ_API_KEY=gs", "k_abcdefghijklmnopqrstuvwxyz0123456789ABCD"), concat!("gs", "k_abcdefghij")),
+        (concat!("token gh", "p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab в выводе"), concat!("gh", "p_ABCDEF")),
+        (concat!("gh", "o_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab"), concat!("gh", "o_ABCDEF")),
+        (concat!("github", "_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP"), concat!("github", "_pat_11ABC")),
+        (concat!("OPENAI_API_KEY: s", "k-proj-AbCdEfGhIjKlMnOpQrStUvWxYz_0123456789-abc"), concat!("s", "k-proj-AbCd")),
+        (concat!("key = s", "k-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL"), concat!("s", "k-abcdefghijklmnop")),
+        (concat!("x-api-key: s", "k-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx-yz0123456789"), concat!("s", "k-ant-api03")),
         // Фейковые токены собраны через concat!, чтобы сканер секретов GitHub не принимал их за настоящие.
         (concat!("SLACK=xo", "xb-123456789012-1234567890123-AbCdEfGhIjKlMnOp"), concat!("xo", "xb-1234")),
         (concat!("xo", "xp-123456789012-123456789012-abcdef"), concat!("xo", "xp-1234")),
-        ("aws_access_key_id = AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
-        ("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "wJalrXUtnFEMI"),
-        ("https://maps.googleapis.com/x?key=AIzaSyA1234567890abcdefghijklmnopqrstuv", "AIzaSyA12345"),
+        (concat!("aws_access_key_id = AK", "IAIOSFODNN7EXAMPLE"), concat!("AK", "IAIOSFODNN7EXAMPLE")),
+        (concat!("aws_secret_access_key = wJalrXUtnFEMI", "/K7MDENG/bPxRfiCYEXAMPLEKEY"), "wJalrXUtnFEMI"),
+        (concat!("https://maps.googleapis.com/x?key=AI", "zaSyA1234567890abcdefghijklmnopqrstuv"), concat!("AI", "zaSyA12345")),
         ("Authorization: Bearer abc.def-ghi_jkl012345", "abc.def-ghi"),
         ("curl -H \"Authorization: Basic dXNlcjpwYXNzd29yZA==\" x", "dXNlcjpw"),
-        ("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "eyJzdWIi"),
+        (concat!("jwt eyJhbGciOiJIUzI1NiJ9.", "eyJzdWIiOiIxMjM0NTY3ODkwIn0.", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"), "eyJzdWIi"),
         ("password=hunter2", "hunter2"),
         ("pwd=Qwerty123;", "Qwerty123"),
         ("https://site.ru/login?user=bob&token=a1b2c3d4e5&x=1", "a1b2c3d4e5"),
@@ -225,11 +225,11 @@ mod tests {
         ("Connect-X -Password Xyz12345", "Xyz12345"),
         ("пароль: Qwerty2024!", "Qwerty2024"),
         (
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nAAAAB3NzaC1yc2E=\n-----END OPENSSH PRIVATE KEY-----",
+            concat!("-----BEGIN OPENSSH PRIV", "ATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nAAAAB3NzaC1yc2E=\n-----END OPENSSH PRIV", "ATE KEY-----"),
             "b3BlbnNzaC1rZXkt",
         ),
-        ("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----", "MIIEpAIB"),
-        ("HF_TOKEN=hf_AbCdEfGhIjKlMnOpQrStUvWxYz01234567", "hf_AbCdEf"),
+        (concat!("-----BEGIN RSA PRIV", "ATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIV", "ATE KEY-----"), "MIIEpAIB"),
+        (concat!("HF_TOKEN=h", "f_AbCdEfGhIjKlMnOpQrStUvWxYz01234567"), concat!("h", "f_AbCdEf")),
     ];
 
     const NEGATIVE: &[&str] = &[
@@ -276,7 +276,7 @@ mod tests {
         let (out, n) = redact_secrets("a password=x1 b token=y2y2 c");
         assert_eq!(n, 2);
         assert_eq!(out, "a password=[REDACTED:password] b token=[REDACTED:token] c");
-        let (out, n) = redact_secrets("GROQ_API_KEY=gsk_abcdefghijklmnopqrstuvwxyz0123");
+        let (out, n) = redact_secrets(concat!("GROQ_API_KEY=gs", "k_abcdefghijklmnopqrstuvwxyz0123"));
         assert_eq!(n, 1, "{out}");
         assert_eq!(out, "GROQ_API_KEY=[REDACTED:groq]");
         // повторный проход не меняет текст

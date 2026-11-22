@@ -57,7 +57,7 @@ async fn remember_recall_forget_flow() {
     // неуверенное совпадение — ничего не удаляется, возвращаются кандидаты
     let out = forget.call(json!({"query": "кофе и погода в Москве"}), &ctx).await.unwrap();
     assert!(out.content.contains("ничего не удалено"), "{}", out.content);
-    assert!(out.content.contains("чёрный кофе"), "кандидаты перечислены: {}", out.content);
+    assert!(out.content.contains("черный кофе"), "кандидаты перечислены: {}", out.content);
     let out = forget.call(json!({"query": "квантовая физика"}), &ctx).await.unwrap();
     assert!(out.content.starts_with("В памяти нет ничего"), "{}", out.content);
     assert_eq!(mem.stats().unwrap().facts, 2);

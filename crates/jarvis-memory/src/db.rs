@@ -26,8 +26,40 @@ pub struct Memory {
 }
 
 struct Inner {
-    conn: Mutex<Connection>,
+    conn: Mutex<ConnState>,
     path: Option<PathBuf>,
+}
+
+/// Соединение + последнее увиденное `PRAGMA data_version`.
+pub(crate) struct ConnState {
+    conn: Connection,
+    data_version: i64,
+}
+
+impl std::ops::Deref for ConnState {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+impl std::ops::DerefMut for ConnState {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+}
+
+fn data_version(c: &Connection) -> rusqlite::Result<i64> {
+    c.query_row("PRAGMA data_version", [], |r| r.get(0))
+}
+
+/// Настройки соединения (без миграций).
+fn configure(conn: &Connection, file_backed: bool) -> rusqlite::Result<()> {
+    conn.busy_timeout(Duration::from_secs(5))?;
+    if file_backed {
+        let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
+    }
+    conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")
 }
 
 impl std::fmt::Debug for Memory {
@@ -95,13 +127,10 @@ impl Memory {
     }
 
     fn init(mut conn: Connection, path: Option<PathBuf>) -> Result<Self> {
-        conn.busy_timeout(Duration::from_secs(5))?;
-        if path.is_some() {
-            let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
-        }
-        conn.execute_batch("PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")?;
+        configure(&conn, path.is_some())?;
         schema::migrate(&mut conn)?;
-        Ok(Self { inner: Arc::new(Inner { conn: Mutex::new(conn), path }) })
+        let data_version = data_version(&conn)?;
+        Ok(Self { inner: Arc::new(Inner { conn: Mutex::new(ConnState { conn, data_version }), path }) })
     }
 
     pub fn path(&self) -> Option<&Path> {
@@ -117,12 +146,7 @@ impl Memory {
         schema::user_version(&self.conn())
     }
 
-    /// Чтение в явной транзакции (`BEGIN DEFERRED … COMMIT`).
-    ///
-    /// Нужна для FTS5: если базу пишет другое соединение (второй процесс/хэндл), а это соединение
-    /// читает FTS-индекс в autocommit-режиме, FTS5 может держать устаревший кэш структуры индекса
-    /// и читать не те блоки («fts5: corruption found», хотя файл цел). В явной транзакции кэш
-    /// сбрасывается на xBegin. Проверено тестом `concurrent_access_from_many_tasks_and_two_handles`.
+    /// Чтение одной согласованной выборкой (явная транзакция `BEGIN DEFERRED … COMMIT`).
     pub(crate) fn read<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         let mut c = self.conn();
         let tx = c.transaction()?;
@@ -131,9 +155,33 @@ impl Memory {
         Ok(r)
     }
 
-    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
+    /// Соединение под мьютексом.
+    ///
+    /// **Защита FTS5 от чужих записей.** FTS5 кэширует структуру индекса в каждом соединении. Если
+    /// это соединение читает FTS-таблицу, пока другое соединение (другой процесс или второй
+    /// `Memory::open` того же файла) коммитит в неё, кэш может остаться устаревшим навсегда:
+    /// поиск читает несуществующие страницы («fts5: corruption found reading blob …»), хотя файл цел
+    /// (воспроизводилось на SQLite 3.54.1; свежее соединение всегда видит индекс целым). Поэтому
+    /// перед каждой операцией сверяем `PRAGMA data_version` (меняется только от чужих коммитов) и при
+    /// изменении переоткрываем соединение — FTS5 начинает с чистого кэша. Свои записи соединение
+    /// не переоткрывают, так что в обычной работе (один `Memory` на процесс) это один лёгкий PRAGMA.
+    pub(crate) fn conn(&self) -> MutexGuard<'_, ConnState> {
         // отравленный мьютекс не делает соединение невалидным: SQLite сам откатит незавершённое
-        self.inner.conn.lock().unwrap_or_else(|e| e.into_inner())
+        let mut st = self.inner.conn.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(path) = &self.inner.path
+            && let Ok(v) = data_version(&st.conn)
+            && v != st.data_version
+        {
+            match Connection::open(path).and_then(|c| configure(&c, true).map(|()| c)) {
+                Ok(fresh) => {
+                    st.data_version = data_version(&fresh).unwrap_or(0);
+                    st.conn = fresh;
+                }
+                // не удалось переоткрыть — работаем со старым соединением, проверим в следующий раз
+                Err(_) => st.data_version = v,
+            }
+        }
+        st
     }
 
     /// Выполнить синхронную операцию с памятью в пуле блокирующих задач tokio.

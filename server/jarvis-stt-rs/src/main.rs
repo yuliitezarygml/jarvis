@@ -5,8 +5,10 @@ use std::time::Instant;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
+    use std::io::IsTerminal;
     tracing_subscriber::fmt()
         .with_target(false)
+        .with_ansi(std::io::stdout().is_terminal()) // в journald — без цветовых кодов
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
@@ -42,6 +44,7 @@ fn load_engine(config: &Config) -> Result<Arc<dyn Engine>> {
         threads: config.threads,
         pool: config.pool,
         queue_timeout: config.limits.queue_timeout,
+        partial_ms: config.partial_ms,
     };
     let engine = SherpaEngine::load(config.streaming.as_ref(), config.offline.as_ref(), &opt)?;
     let t = Instant::now();

@@ -16,9 +16,11 @@ Environment=JARVIS_STT_BIND=127.0.0.1:8182
 Environment=JARVIS_TLS_CERT=/etc/jarvis-tts-rs/tls/server.pem
 Environment=JARVIS_TLS_KEY=/etc/jarvis-tts-rs/tls/server.key
 Environment=JARVIS_STT_MODEL_DIR=/opt/jarvis-stt-rs/models
-Environment=JARVIS_STT_STREAMING=t-one:sherpa-onnx-streaming-t-one-russian-2025-09-08
-Environment=JARVIS_STT_OFFLINE=gigaam-rnnt:sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16
-Environment=JARVIS_STT_THREADS=2
+# GigaAM v3 CTC: final по всей фразе и partial каждые 300 мс (см. README, «Выбор модели»)
+Environment=JARVIS_STT_STREAMING=none
+Environment=JARVIS_STT_OFFLINE=gigaam-ctc:sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16
+Environment=JARVIS_STT_PARTIAL_MS=300
+Environment=JARVIS_STT_THREADS=4
 Environment=JARVIS_STT_POOL=2
 Environment=JARVIS_STT_MAX_SESSIONS=8
 Environment=RUST_LOG=info

@@ -63,7 +63,7 @@ impl StreamResampler {
             }
             Self::run_chunk(r, &self.pending[offset..offset + need], None, &mut self.scratch)?;
             offset += need;
-            Self::emit(&mut self.scratch, &mut self.skip, &mut self.total_out, out, None);
+            Self::emit(&self.scratch, &mut self.skip, &mut self.total_out, out, None);
         }
         self.pending.drain(..offset);
         Ok(())
@@ -84,7 +84,7 @@ impl StreamResampler {
             chunk.resize(need, 0.0);
             Self::run_chunk(r, &chunk, Some(have), &mut self.scratch)?;
             let limit = (expected - self.total_out) as usize;
-            Self::emit(&mut self.scratch, &mut self.skip, &mut self.total_out, out, Some(limit));
+            Self::emit(&self.scratch, &mut self.skip, &mut self.total_out, out, Some(limit));
         }
         self.reset_inner();
         Ok(())
@@ -118,7 +118,7 @@ impl StreamResampler {
         Ok(())
     }
 
-    fn emit(scratch: &mut Vec<f32>, skip: &mut usize, total_out: &mut u64, out: &mut Vec<f32>, limit: Option<usize>) {
+    fn emit(scratch: &[f32], skip: &mut usize, total_out: &mut u64, out: &mut Vec<f32>, limit: Option<usize>) {
         let drop_n = (*skip).min(scratch.len());
         *skip -= drop_n;
         let mut slice = &scratch[drop_n..];

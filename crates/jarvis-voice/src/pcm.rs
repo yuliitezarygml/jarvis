@@ -53,9 +53,9 @@ impl S16Decoder {
                 }
             }
         }
-        let mut chunks = rest.chunks_exact(2);
-        out.extend(chunks.by_ref().map(|c| i16_to_f32(i16::from_le_bytes([c[0], c[1]]))));
-        if let [b] = chunks.remainder() {
+        let (pairs, tail) = rest.as_chunks::<2>();
+        out.extend(pairs.iter().map(|c| i16_to_f32(i16::from_le_bytes(*c))));
+        if let [b] = tail {
             self.carry = Some(*b);
         }
     }
@@ -247,16 +247,16 @@ pub fn wav_decode(bytes: &[u8]) -> Result<Wav> {
                 }
                 let samples: Vec<f32> = match (format, bits) {
                     (1, 8) => body.iter().map(|b| (*b as f32 - 128.0) / 128.0).collect(),
-                    (1, 16) => body.chunks_exact(2).map(|c| i16_to_f32(i16::from_le_bytes([c[0], c[1]]))).collect(),
+                    (1, 16) => body.as_chunks::<2>().0.iter().map(|c| i16_to_f32(i16::from_le_bytes([c[0], c[1]]))).collect(),
                     (1, 24) => body
-                        .chunks_exact(3)
+                        .as_chunks::<3>().0.iter()
                         .map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / 8_388_608.0)
                         .collect(),
                     (1, 32) => body
-                        .chunks_exact(4)
+                        .as_chunks::<4>().0.iter()
                         .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0)
                         .collect(),
-                    (3, 32) => body.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
+                    (3, 32) => body.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect(),
                     _ => return Err(bad(&format!("неподдерживаемый формат {format}/{bits} бит"))),
                 };
                 return Ok(Wav { sample_rate, channels, bits_per_sample: bits, samples });

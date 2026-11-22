@@ -13,6 +13,7 @@ mod tests;
 pub use paths::{PathOp, PathZone, path_tier, path_zone};
 #[allow(unused_imports)]
 pub(crate) use paths::{Hive, RegPath, parse_reg_path};
+pub(crate) use rules::CRITICAL_PROCESSES;
 
 use jarvis_core::RiskTier;
 use serde::{Deserialize, Serialize};
