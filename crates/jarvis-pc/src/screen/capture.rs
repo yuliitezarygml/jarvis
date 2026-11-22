@@ -1,4 +1,5 @@
-//! Захват экрана в память через GDI (BitBlt + CAPTUREBLT). Окна с WDA_EXCLUDEFROMCAPTURE (HUD/overlay) не попадают.
+//! Захват экрана в память через GDI (BitBlt + CAPTUREBLT). Свои окна (HUD, виджет, оверлей) на время
+//! снимка получают WDA_EXCLUDEFROMCAPTURE ([`win::hide_self_for_capture`]) и в снимок не попадают.
 
 use image::RgbaImage;
 use jarvis_core::{Rect, ToolError};
@@ -75,6 +76,8 @@ pub fn capture_rect(r: Rect) -> Result<RgbaImage, ToolError> {
     }
     let (w, h) = (r.w, r.h);
     let mut buf = vec![0u8; w as usize * h as usize * 4];
+    // Модель не должна видеть интерфейс Джарвиса; после снимка окна снова видны пользователю.
+    let _hidden = win::hide_self_for_capture();
     // SAFETY: стандартная последовательность GDI; все объекты освобождаются в конце.
     unsafe {
         let screen = GetDC(None);

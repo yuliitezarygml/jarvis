@@ -25,7 +25,7 @@ pub use terminal::{
     HookShell, PtySessions, TerminalContext, shell_hook_install, shell_hook_script, shell_hook_uninstall,
 };
 pub use uia::{UiElement, UiSnapshot, Uia};
-pub use win::{exclude_from_capture, include_in_capture};
+pub use win::{SelfHidden, exclude_from_capture, hide_self_for_capture, include_in_capture, register_self_window};
 
 /// Классификатор риска команды терминала (интегратор подставляет классификатор из `jarvis-sys`).
 pub type CommandClassifier = Arc<dyn Fn(&str) -> RiskTier + Send + Sync>;

@@ -7,8 +7,8 @@
 //!   клики насквозь (`set_ignore_cursor_events(true)`);
 //! - `settings` — обычное окно (создаётся по требованию).
 //!
-//! На `hud`, `corner` и `overlay` ставится `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, чтобы
-//! интерфейс не попадал в скриншоты, которые агент отправляет vision-модели.
+//! `hud`, `corner` и `overlay` видны в обычных скриншотах и записи экрана (Ножницы, NVIDIA, OBS), а на время
+//! снимка экрана самим Джарвисом прячутся (`WDA_EXCLUDEFROMCAPTURE` на ~0,1 с), чтобы модель не видела интерфейс.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -118,10 +118,16 @@ pub fn exclude_from_capture<R: Runtime>(_w: &WebviewWindow<R>) -> Result<(), Str
     Ok(())
 }
 
+/// Своё окно: видно пользователю в «Ножницах», NVIDIA/OBS и записи экрана, но прячется
+/// на время снимков экрана, которые Джарвис делает для модели (`jarvis_pc::hide_self_for_capture`).
 fn protect<R: Runtime>(w: &WebviewWindow<R>) {
-    if let Err(e) = exclude_from_capture(w) {
-        eprintln!("[jarvis] WDA_EXCLUDEFROMCAPTURE для «{}» не установлен: {e}", w.label());
+    #[cfg(windows)]
+    match w.hwnd() {
+        Ok(h) => jarvis_pc::register_self_window(h.0 as isize),
+        Err(e) => eprintln!("[jarvis] окно «{}» без HWND, не скрывается от снимков Джарвиса: {e}", w.label()),
     }
+    #[cfg(not(windows))]
+    let _ = w;
 }
 
 // ───────────────────────────── мониторы ─────────────────────────────

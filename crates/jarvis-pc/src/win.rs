@@ -397,6 +397,53 @@ pub(crate) fn monitor_for(r: Rect) -> Option<MonitorInfo> {
         .cloned()
 }
 
+// ───────────── свои окна и снимки экрана ─────────────
+//
+// Окна Джарвиса (HUD, виджет, оверлей) обычно ВИДНЫ для «Ножниц», NVIDIA ShadowPlay, OBS и т. п.:
+// постоянный WDA_EXCLUDEFROMCAPTURE ломает пользователю скриншоты («JARVIS препятствует записи…»).
+// Прячем их только на время собственного снимка Джарвиса — чтобы модель не видела интерфейс.
+
+static SELF_WINDOWS: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
+/// Снимки по одному: иначе второй снимок вернул бы окна раньше времени.
+static SELF_CAPTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Сколько ждать, пока DWM применит скрытие (несколько кадров при 60 Гц).
+const HIDE_SETTLE: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Запомнить своё окно: оно прячется только на время снимков Джарвиса, в остальное время видно всем.
+pub fn register_self_window(hwnd_raw: isize) {
+    let mut list = SELF_WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+    if !list.contains(&hwnd_raw) {
+        list.push(hwnd_raw);
+    }
+    drop(list);
+    let _ = include_in_capture(hwnd_raw);
+}
+
+/// Пока жив — свои окна скрыты из снимков экрана.
+pub struct SelfHidden {
+    hidden: Vec<isize>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for SelfHidden {
+    fn drop(&mut self) {
+        for &h in &self.hidden {
+            let _ = include_in_capture(h);
+        }
+    }
+}
+
+/// Спрятать свои окна на время снимка экрана Джарвисом.
+pub fn hide_self_for_capture() -> SelfHidden {
+    let lock = SELF_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+    let list = SELF_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let hidden: Vec<isize> = list.into_iter().filter(|&h| exclude_from_capture(h).is_ok()).collect();
+    if !hidden.is_empty() {
+        std::thread::sleep(HIDE_SETTLE);
+    }
+    SelfHidden { hidden, _lock: lock }
+}
+
 /// Скрыть окно из любых снимков экрана (включая наши): вызывать для окон HUD и оверлея.
 /// `hwnd` — сырой дескриптор (`tauri::WebviewWindow::hwnd()?.0 as isize`). Окно должно принадлежать этому процессу.
 pub fn exclude_from_capture(hwnd_raw: isize) -> Result<(), ToolError> {

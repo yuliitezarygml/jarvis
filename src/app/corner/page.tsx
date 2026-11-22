@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import ConfirmDialog from '@/components/hud/ConfirmDialog';
 import Reactor from '@/components/reactor/Reactor';
 import RichText from '@/components/RichText';
-import { call, startDragging } from '@/lib/bridge';
+import { call, inTauri, startDragging } from '@/lib/bridge';
 import { STATE_LABEL } from '@/lib/glow';
 import type { ActionItem, SubtitleLine } from '@/lib/reducer';
 import { useJarvis, useNow } from '@/lib/store';
@@ -52,6 +52,14 @@ export default function CornerPage() {
   const [side, setSide] = useState<Side>('none');
 
   const expand = () => void call('set_hud_mode', { mode: 'fullscreen' });
+
+  // Просто браузер (без Tauri): тёмный «рабочий стол» под прозрачным виджетом и `?demo` — сценарий
+  // (для скриншотов и проверки вёрстки).
+  useEffect(() => {
+    if (inTauri()) return;
+    document.documentElement.dataset.browser = '';
+    if (new URLSearchParams(window.location.search).has('demo')) void call('simulate_demo');
+  }, []);
 
   const user = lastOf(history, 'user', subtitle);
   const jarvis = lastOf(history, 'jarvis', subtitle);
