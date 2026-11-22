@@ -1,5 +1,6 @@
 //! Цикл агента «наблюдай → действуй → проверь».
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -8,7 +9,7 @@ use jarvis_core::event::{ActionStatus, Speaker};
 use jarvis_core::{
     AssistantState, Attachment, CancellationToken, ChatEvent, ChatMessage, ChatModel, ChatRequest, ChatResponse,
     Event, EventSink, ImageData, LlmError, NullSink, RiskTier, ToolCall, ToolCtx, ToolError, ToolOutput,
-    ToolRegistry, requires_confirmation, wrap_untrusted,
+    ToolRegistry, ToolSpec, requires_confirmation, wrap_untrusted,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -19,8 +20,9 @@ use crate::hooks::{
     Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, ProtectedPathCheck, Redactor, SpeechSink,
     identity_redactor, no_protected_paths,
 };
-use crate::prompt::build_system_prompt;
+use crate::prompt::{TOOLS_LOAD_NOTE, build_system_prompt};
 use crate::text::{canonical_json, normalize_args, preview, redact_value, summarize_call, truncate_output};
+use crate::toolsets::{CORE, GROUPS, TOOLS_LOAD, group_of, parse_load_args, route, tools_load_spec};
 use crate::transcript::{StepStatus, StopReason, Transcript, TranscriptStep};
 
 /// Финальный текст при отмене.
@@ -61,6 +63,8 @@ pub struct Agent {
     redactor: Redactor,
     protected: ProtectedPathCheck,
     history: Mutex<History>,
+    /// Группы инструментов, использованные в прошлом ходе (для «закрой его» и прочих продолжений).
+    sticky_groups: Mutex<BTreeSet<&'static str>>,
     run_lock: tokio::sync::Mutex<()>,
     run_seq: AtomicU64,
 }
@@ -121,6 +125,7 @@ impl AgentBuilder {
             redactor: self.redactor,
             protected: self.protected,
             history: Mutex::new(History::default()),
+            sticky_groups: Mutex::new(BTreeSet::new()),
             run_lock: tokio::sync::Mutex::new(()),
             run_seq: AtomicU64::new(0),
         }
@@ -159,6 +164,7 @@ impl Agent {
     /// Забыть диалог («новый разговор»).
     pub fn clear_history(&self) {
         self.history.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.sticky_groups.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Сколько прошлых ходов в краткосрочной памяти.
@@ -195,6 +201,7 @@ impl Agent {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(Turn { entries: std::mem::take(&mut r.entries) }, cfg_turns);
+        *self.sticky_groups.lock().unwrap_or_else(|e| e.into_inner()) = std::mem::take(&mut r.used_groups);
         self.memory.on_task_done(&outcome.transcript).await;
         outcome
     }
@@ -216,6 +223,12 @@ struct Run<'a> {
     repeats: usize,
     last_tool: Option<String>,
     memory_cache: Option<(Option<String>, String)>,
+    /// Все инструменты реестра (снимок на задачу).
+    all_specs: Vec<ToolSpec>,
+    /// Группы, чьи инструменты уходят модели в этой задаче.
+    active: BTreeSet<&'static str>,
+    /// Группы, которые реально понадобились (вызов инструмента или `tools_load`) — станут «липкими».
+    used_groups: BTreeSet<&'static str>,
 }
 
 enum ModelFail {
@@ -254,9 +267,19 @@ enum Exec {
 impl<'a> Run<'a> {
     fn new(agent: &'a Agent, user_text: &str, cancel: CancellationToken, run_id: u64) -> Self {
         let started_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let cfg = agent.config();
+        let all_specs = agent.tools.specs();
+        let mut active: BTreeSet<&'static str> = if cfg.lazy_tools {
+            let mut a = route(user_text);
+            a.extend(agent.sticky_groups.lock().unwrap_or_else(|e| e.into_inner()).iter().copied());
+            a
+        } else {
+            GROUPS.iter().map(|g| g.id).collect()
+        };
+        active.insert(CORE);
         Self {
             agent,
-            cfg: agent.config(),
+            cfg,
             cancel,
             run_id,
             user_text: user_text.to_string(),
@@ -268,7 +291,77 @@ impl<'a> Run<'a> {
             repeats: 0,
             last_tool: None,
             memory_cache: None,
+            all_specs,
+            active,
+            used_groups: BTreeSet::new(),
         }
+    }
+
+    /// `tools_load` обрабатывает агент (если в реестре нет инструмента с таким именем).
+    fn meta_load_enabled(&self) -> bool {
+        self.cfg.lazy_tools && self.agent.tools.get(TOOLS_LOAD).is_none()
+    }
+
+    /// Группы с инструментами в реестре, которые ещё не подключены (в порядке `GROUPS`).
+    fn inactive_groups(&self) -> Vec<&'static str> {
+        GROUPS
+            .iter()
+            .map(|g| g.id)
+            .filter(|g| !self.active.contains(g) && self.all_specs.iter().any(|s| group_of(&s.name) == *g))
+            .collect()
+    }
+
+    /// Инструменты для очередного запроса: активные группы + `tools_load`, если есть что подключать.
+    fn request_tools(&self) -> Vec<ToolSpec> {
+        if !self.cfg.lazy_tools {
+            return self.all_specs.clone();
+        }
+        let mut v: Vec<ToolSpec> =
+            self.all_specs.iter().filter(|s| self.active.contains(group_of(&s.name))).cloned().collect();
+        let available = self.inactive_groups();
+        if !available.is_empty() && self.meta_load_enabled() {
+            v.push(tools_load_spec(&available));
+        }
+        v
+    }
+
+    /// Вызов `tools_load`: подключить группы до конца задачи и коротко ответить модели.
+    fn load_groups(&mut self, step: usize, call_id: &str, args: &Value) -> CallResult {
+        let (known, mut unknown) = parse_load_args(args);
+        let mut loaded = Vec::new();
+        let mut already = Vec::new();
+        for g in known {
+            let names: Vec<&str> =
+                self.all_specs.iter().filter(|s| group_of(&s.name) == g).map(|s| s.name.as_str()).collect();
+            if names.is_empty() {
+                unknown.push(g.to_string());
+                continue;
+            }
+            self.used_groups.insert(g);
+            if self.active.insert(g) {
+                loaded.push(format!("{g} ({})", names.join(", ")));
+            } else {
+                already.push(g);
+            }
+        }
+        let mut parts = Vec::new();
+        if !loaded.is_empty() {
+            parts.push(format!("Подключено: {}.", loaded.join("; ")));
+            self.transcript.notes.push(format!("tools_load: {}", loaded.join("; ")));
+        }
+        if !already.is_empty() {
+            parts.push(format!("Уже подключены: {}.", already.join(", ")));
+        }
+        if !unknown.is_empty() || parts.is_empty() {
+            let rest = self.inactive_groups();
+            let rest = if rest.is_empty() { "все уже подключены".to_string() } else { rest.join(", ") };
+            parts.push(if unknown.is_empty() {
+                format!("Укажи groups. Можно подключить: {rest}.")
+            } else {
+                format!("Нет таких групп: {}. Можно подключить: {rest}.", preview(&unknown.join(", "), 120))
+            });
+        }
+        Self::short_result(call_id, step, TOOLS_LOAD, parts.join(" "))
     }
 
     fn emit(&self, e: Event) {
@@ -295,21 +388,26 @@ impl<'a> Run<'a> {
     }
 
     async fn execute(&mut self) -> TaskOutcome {
-        let specs = self.agent.tools.specs();
         for step in 1..=self.cfg.max_steps.max(1) {
             if self.cancel.is_cancelled() {
                 return self.finish_cancelled();
             }
             self.set_state(AssistantState::Thinking);
             let memory = self.memory_block().await;
-            let system = ChatMessage::system(build_system_prompt(&self.cfg.persona, &memory, self.cfg.vision_enabled));
+            let tools = self.request_tools();
+            let mut prompt = build_system_prompt(&self.cfg.persona, &memory, self.cfg.vision_enabled);
+            if tools.iter().any(|t| t.name == TOOLS_LOAD) && self.meta_load_enabled() {
+                prompt.push_str("\n\n");
+                prompt.push_str(TOOLS_LOAD_NOTE);
+            }
+            let system = ChatMessage::system(prompt);
             let messages = {
                 let h = self.agent.history.lock().unwrap_or_else(|e| e.into_inner());
                 assemble(system, h.turns(), &self.entries, self.cfg.history_budget_tokens)
             };
             let req = ChatRequest {
                 messages,
-                tools: specs.clone(),
+                tools,
                 temperature: self.cfg.temperature,
                 max_tokens: self.cfg.max_tokens,
             };
@@ -511,7 +609,12 @@ impl<'a> Run<'a> {
             return Ok(res);
         }
 
-        // 2. Инструмент существует?
+        // 2. Мета-инструмент: подключить группы (T0, без подтверждения и свечения, не действие на ПК).
+        if name == TOOLS_LOAD && self.meta_load_enabled() {
+            return Ok(self.load_groups(step, &call.id, &args));
+        }
+
+        // 3. Инструмент существует?
         let Some(tool) = self.agent.tools.get(&name) else {
             let available: Vec<String> = self.agent.tools.specs().into_iter().take(80).map(|s| s.name).collect();
             let text = format!(
@@ -523,8 +626,14 @@ impl<'a> Run<'a> {
             self.record(step, &name, &args, None, None, started, StepStatus::UnknownTool, &text, None, None);
             return Ok(Self::short_result(&call.id, step, &name, text));
         };
+        // Настоящий инструмент вне активных групп: выполняем как обычно (политика та же) и подключаем его группу.
+        let group = group_of(&name);
+        self.used_groups.insert(group);
+        if self.active.insert(group) {
+            self.transcript.notes.push(format!("Группа {group} подключена: модель вызвала {name}."));
+        }
 
-        // 3. Политика рисков и подтверждение.
+        // 4. Политика рисков и подтверждение.
         let tier = tool.tier_for(&args);
         let protected = (self.agent.protected)(&name, &args);
         let mut confirmed = None;
@@ -550,7 +659,7 @@ impl<'a> Run<'a> {
             }
         }
 
-        // 4. Выполнение: свечение, лента действий, таймаут, отмена.
+        // 5. Выполнение: свечение, лента действий, таймаут, отмена.
         let glows = tier.glows();
         if glows {
             self.emit(Event::ControlStart { tier });
@@ -604,7 +713,7 @@ impl<'a> Run<'a> {
             Exec::Err(e) => (StepStatus::Failed, e.to_string()),
         };
 
-        // 5. Ошибка: сначала известное решение из памяти, затем заготовка урока.
+        // 6. Ошибка: сначала известное решение из памяти, затем заготовка урока.
         if glows {
             self.emit(Event::ControlStop);
         }

@@ -96,7 +96,7 @@ pub enum ChatEvent {
 pub enum LlmError {
     #[error("ключ не принят провайдером")]
     Auth,
-    #[error("лимит запросов (повтор через {retry_after_ms:?} мс)")]
+    #[error("лимит запросов{}", retry_suffix(.retry_after_ms))]
     RateLimited { retry_after_ms: Option<u64> },
     #[error("модель не найдена: {0}")]
     ModelNotFound(String),
@@ -112,6 +112,14 @@ pub enum LlmError {
     BadResponse(String),
     #[error("{0}")]
     Other(String),
+}
+
+/// « (повторю через 33 с)» — секунды с округлением вверх; без `retry_after` — пусто.
+fn retry_suffix(retry_after_ms: &Option<u64>) -> String {
+    match retry_after_ms {
+        Some(ms) => format!(" (повторю через {} с)", ms.div_ceil(1000).max(1)),
+        None => String::new(),
+    }
 }
 
 impl LlmError {
@@ -186,5 +194,13 @@ mod tests {
         assert!(LlmError::RateLimited { retry_after_ms: None }.should_failover());
         assert!(!LlmError::Cancelled.should_failover());
         assert!(!LlmError::BadResponse("x".into()).should_failover());
+    }
+
+    #[test]
+    fn rate_limit_text_is_human() {
+        assert_eq!(LlmError::RateLimited { retry_after_ms: Some(33_000) }.to_string(), "лимит запросов (повторю через 33 с)");
+        assert_eq!(LlmError::RateLimited { retry_after_ms: Some(1_200) }.to_string(), "лимит запросов (повторю через 2 с)");
+        assert_eq!(LlmError::RateLimited { retry_after_ms: Some(0) }.to_string(), "лимит запросов (повторю через 1 с)");
+        assert_eq!(LlmError::RateLimited { retry_after_ms: None }.to_string(), "лимит запросов");
     }
 }

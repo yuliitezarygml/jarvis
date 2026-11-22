@@ -43,7 +43,11 @@ pub fn provider_presets(core: &Core) -> Vec<api::ProviderPreset> {
             kind: p.kind,
             base_url: p.base_url.clone(),
             key_url: p.key_url.clone(),
+            docs_url: p.docs_url.clone(),
             needs_key: p.needs_key,
+            local: p.local,
+            free_tier: p.free_tier,
+            tagline: p.tagline.clone(),
             note: p.notes.clone(),
         })
         .collect()
@@ -260,6 +264,135 @@ pub fn audio_devices() -> Result<api::AudioDevices, String> {
     let inputs = jarvis_voice::device::input_devices().map_err(|e| e.to_string())?;
     let outputs = jarvis_voice::device::output_devices().map_err(|e| e.to_string())?;
     Ok(api::AudioDevices { demo: false, inputs: list(inputs, &def_in), outputs: list(outputs, &def_out) })
+}
+
+/// Пустое имя устройства из UI = «по умолчанию Windows».
+fn device_arg(device: Option<String>) -> Option<String> {
+    device.map(|d| d.trim().to_string()).filter(|d| !d.is_empty())
+}
+
+/// «Проверить микрофон»: открыть выбранный микрофон на `secs` с (≤30) и отдавать уровень RMS (≈30 Гц) в `on_level`.
+/// Микрофон открывается только по кнопке; `stop` прерывает проверку. Возвращает имя реально открытого устройства
+/// (если выбранного нет — микрофон Windows по умолчанию).
+pub fn mic_test(
+    device: Option<String>,
+    secs: u64,
+    stop: &std::sync::atomic::AtomicBool,
+    on_level: impl Fn(f32) + Send + Sync + 'static,
+) -> Result<String, String> {
+    use std::sync::atomic::Ordering;
+    use jarvis_core::{Event, EventSink};
+    struct Levels<F>(F);
+    impl<F: Fn(f32) + Send + Sync> EventSink for Levels<F> {
+        fn emit(&self, event: Event) {
+            if let Event::AudioLevel { rms, .. } = event {
+                (self.0)(rms);
+            }
+        }
+    }
+    let cfg = jarvis_voice::CaptureConfig { device: device_arg(device), ..Default::default() };
+    let (mut capture, mut frames) =
+        jarvis_voice::Capture::start(cfg, std::sync::Arc::new(Levels(on_level))).map_err(|e| format!("Микрофон не открылся: {e}"))?;
+    let name = capture.device_name().to_string();
+    let until = Instant::now() + Duration::from_secs(secs.clamp(1, 30));
+    while Instant::now() < until && !stop.load(Ordering::Acquire) {
+        while frames.try_recv().is_ok() {}
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    capture.stop();
+    Ok(name)
+}
+
+pub const SOUND_TEST_PHRASE: &str = "Проверка звука. Вы меня хорошо слышите, сэр?";
+
+/// «Проверить звук»: короткая фраза TTS через выбранное устройство вывода с выбранной громкостью.
+/// Сервер речи недоступен — короткий сигнал, чтобы всё равно проверить динамики.
+pub async fn sound_test(cfg: &Config, root: &Path, device: Option<String>, volume: f32) -> api::ServiceCheck {
+    let t0 = Instant::now();
+    let mut app = cfg.clone();
+    app.audio.output_device = device_arg(device);
+    app.audio.volume = volume;
+    let wanted = app.audio.output().map(str::to_string);
+    let (app2, root2) = (app.clone(), root.to_path_buf());
+    let built = tokio::task::spawn_blocking(move || {
+        jarvis_voice::VoicePipeline::from_config(
+            jarvis_voice::VoiceConfig::default(),
+            &app2,
+            &root2,
+            std::sync::Arc::new(jarvis_core::NullSink),
+        )
+    })
+    .await;
+    let tts_problem = match built {
+        Ok(Ok(p)) => match tokio::time::timeout(Duration::from_secs(25), p.say(SOUND_TEST_PHRASE)).await {
+            Ok(Ok(_)) => {
+                return api::ServiceCheck {
+                    demo: false,
+                    ok: true,
+                    message: format!("Джарвис сказал тестовую фразу через {}.", out_name(wanted.as_deref())),
+                    latency_ms: ms(t0.elapsed()),
+                };
+            }
+            Ok(Err(e)) => e.to_string(),
+            Err(_) => "сервер речи не ответил за 25 с".to_string(),
+        },
+        Ok(Err(e)) => e.to_string(),
+        Err(e) => e.to_string(),
+    };
+    // Запасной вариант: сигнал напрямую в устройство.
+    let gain = app.audio.gain();
+    let beep = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use jarvis_voice::AudioOutput;
+        let player = jarvis_voice::Player::start(
+            jarvis_voice::PlayerConfig { device: wanted, volume: gain, ..Default::default() },
+            std::sync::Arc::new(jarvis_core::NullSink),
+        )
+        .map_err(|e| e.to_string())?;
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().map_err(|e| e.to_string())?;
+        rt.block_on(async {
+            player.play(beep_samples(24_000), 24_000).await.map_err(|e| e.to_string())?;
+            player.finish().await.map_err(|e| e.to_string())?;
+            player.drain(&jarvis_core::CancellationToken::new()).await;
+            Ok::<(), String>(())
+        })?;
+        Ok(player.device_name().to_string())
+    })
+    .await;
+    match beep {
+        Ok(Ok(name)) => api::ServiceCheck {
+            demo: false,
+            ok: false,
+            message: format!("Голос недоступен ({tts_problem}), поэтому прозвучал сигнал через «{name}». Слышно — значит динамики выбраны верно."),
+            latency_ms: None,
+        },
+        Ok(Err(e)) => api::ServiceCheck { demo: false, ok: false, message: format!("Устройство вывода не открылось: {e}"), latency_ms: None },
+        Err(e) => api::ServiceCheck { demo: false, ok: false, message: e.to_string(), latency_ms: None },
+    }
+}
+
+fn out_name(device: Option<&str>) -> String {
+    match device {
+        Some(d) => format!("«{d}»"),
+        None => "динамики Windows по умолчанию".into(),
+    }
+}
+
+/// Два коротких тона (≈0,5 с) с плавным началом и концом — без щелчков.
+pub fn beep_samples(rate: u32) -> Vec<f32> {
+    let tone = |hz: f32, secs: f32| -> Vec<f32> {
+        let n = (rate as f32 * secs) as usize;
+        let fade = (rate as f32 * 0.02) as usize;
+        (0..n)
+            .map(|i| {
+                let env = (i.min(n - 1 - i) as f32 / fade.max(1) as f32).min(1.0);
+                (i as f32 / rate as f32 * hz * std::f32::consts::TAU).sin() * 0.35 * env
+            })
+            .collect()
+    };
+    let mut out = tone(660.0, 0.18);
+    out.extend(std::iter::repeat_n(0.0, (rate as f32 * 0.08) as usize));
+    out.extend(tone(880.0, 0.22));
+    out
 }
 
 // ───────────────────────────── память ─────────────────────────────
@@ -508,6 +641,24 @@ mod tests {
         assert_eq!(again, steps);
         assert!(parse_steps(&["просто текст".into()]).is_err());
         assert!(parse_steps(&[]).is_err());
+    }
+
+    #[test]
+    fn beep_is_short_quiet_and_clickless() {
+        let b = beep_samples(24_000);
+        assert!((10_000..14_000).contains(&b.len()), "{}", b.len());
+        assert!(b.iter().all(|s| s.abs() <= 0.35 + f32::EPSILON));
+        assert!(b[0].abs() < 0.01 && b[b.len() - 1].abs() < 0.02, "плавные края");
+        assert_eq!(device_arg(Some("  ".into())), None);
+        assert_eq!(device_arg(Some(" USB ".into())).as_deref(), Some("USB"));
+    }
+
+    #[test]
+    fn presets_view_carries_tagline_not_notes() {
+        let p = jarvis_llm::Presets::builtin();
+        let groq = p.get("groq").unwrap();
+        assert!(!groq.tagline.contains("/models"));
+        assert!(groq.free_tier);
     }
 
     #[test]

@@ -25,22 +25,23 @@ pub struct ToolGroup {
 
 /// Все группы в порядке показа модели.
 pub const GROUPS: &[ToolGroup] = &[
-    ToolGroup { id: CORE, about: "базовые: состояние ПК, открыть программу/файл/сайт, поиск файлов, PowerShell, веб-поиск, память" },
-    ToolGroup { id: "pc_input", about: "мышь, клавиатура, горячие клавиши, медиаклавиши, буфер обмена" },
-    ToolGroup { id: "ui", about: "окна и элементы интерфейса (UIA): найти, нажать, ввести, прокрутить, переключить окно" },
-    ToolGroup { id: "screen", about: "скриншот, распознавание текста (OCR), метки на экране" },
-    ToolGroup { id: "terminal", about: "терминал: вывод и ошибки, ввод и запуск команд, cmd, хук оболочки" },
-    ToolGroup { id: "files", about: "файлы: прочитать, записать, копировать, переместить, удалить, показать в проводнике, отменить" },
-    ToolGroup { id: "process", about: "процессы: список, завершить, приоритет, приостановить" },
-    ToolGroup { id: "system", about: "службы, автозагрузка, планировщик, схема питания, очистка временных файлов" },
-    ToolGroup { id: "apps", about: "программы через winget: найти, установить, обновить, удалить" },
-    ToolGroup { id: "network", about: "сеть: адаптеры и IP, ping, сброс DNS" },
-    ToolGroup { id: "web", about: "веб: открыть и прочитать страницу, исследование по нескольким источникам" },
-    ToolGroup { id: "memory", about: "память: забыть сохранённое" },
-    ToolGroup { id: "kb", about: "база знаний Windows: команды, состояние базы" },
+    ToolGroup { id: CORE, about: "состояние ПК, открыть программу/файл/сайт, поиск файлов, PowerShell, веб-поиск, память" },
+    ToolGroup { id: "pc_input", about: "мышь, клавиатура, медиаклавиши, буфер обмена" },
+    ToolGroup { id: "ui", about: "окна и их элементы (UIA): найти, нажать, ввести, прокрутить" },
+    ToolGroup { id: "screen", about: "скриншот, OCR, метки на экране" },
+    ToolGroup { id: "terminal", about: "терминал: вывод и ошибки, команды, cmd" },
+    ToolGroup { id: "files", about: "файлы: читать, писать, копировать, удалять, проводник, отмена" },
+    ToolGroup { id: "process", about: "процессы: список, завершить, приоритет" },
+    ToolGroup { id: "system", about: "службы, автозагрузка, планировщик, питание, очистка" },
+    ToolGroup { id: "apps", about: "программы (winget): найти, установить, обновить, удалить" },
+    ToolGroup { id: "network", about: "сеть: IP, ping, DNS" },
+    ToolGroup { id: "web", about: "открыть и прочитать страницу, исследование темы" },
+    ToolGroup { id: "memory", about: "память: забыть факт" },
+    ToolGroup { id: "kb", about: "база знаний Windows: как настроить/исправить, команды" },
 ];
 
-/// Инструменты, которые всегда в запросе (держать мало: ~10).
+/// Инструменты, которые всегда в запросе (держать мало: ~10). `kb_search` (≈900 симв.) — в группе `kb`:
+/// вопросы «как настроить Windows» её подключают по словам, остальные — через `tools_load`.
 const CORE_TOOLS: &[&str] = &[
     "sys_snapshot",
     "open_target",
@@ -50,7 +51,6 @@ const CORE_TOOLS: &[&str] = &[
     "web_search",
     "memory_remember",
     "memory_recall",
-    "kb_search",
 ];
 
 /// Явные имена вне общего префикса группы.
@@ -194,8 +194,9 @@ const ROUTES: &[(&[&str], &[&str])] = &[
     (
         &[
             "windows", "виндовс", "винд", "как настро", "как отключ", "как включ", "как исправ", "как смен",
-            "как помен", "как убрать", "как сделать", "настройк", "параметр", "реестр", "политик", "powercfg",
-            "gpedit", "regedit", "registry", "how to",
+            "как помен", "как убрать", "как сделать", "как ускор", "почему", "не работает", "настройк", "параметр",
+            "реестр", "политик", "защитник", "defender", "брандмауэр", "firewall", "bitlocker", "powercfg", "gpedit",
+            "regedit", "registry", "how to",
         ],
         &["kb"],
     ),
@@ -235,10 +236,7 @@ pub fn route(text: &str) -> BTreeSet<&'static str> {
 
 /// Спецификация `tools_load` для групп, которые ещё можно подключить (`available` — их id).
 pub fn tools_load_spec(available: &[&'static str]) -> ToolSpec {
-    let mut description = String::from(
-        "Подключить группы инструментов. Сейчас доступна только часть; если нужного инструмента нет — \
-         подключи группу и продолжай. Группы:",
-    );
+    let mut description = String::from("Подключить группы инструментов, если нужного нет среди доступных. Группы:");
     for g in GROUPS.iter().filter(|g| available.contains(&g.id)) {
         description.push_str(&format!("\n{} — {}", g.id, g.about));
     }
@@ -315,6 +313,7 @@ mod tests {
         assert_eq!(group_of("winget_install"), "apps");
         assert_eq!(group_of("web_open"), "web");
         assert_eq!(group_of("web_search"), CORE);
+        assert_eq!(group_of("kb_search"), "kb");
         // новое имя с известным префиксом — в свою группу, совсем незнакомое — в core
         assert_eq!(group_of("ui_drag_and_drop"), "ui");
         assert_eq!(group_of("brand_new_tool"), CORE);
@@ -350,6 +349,9 @@ mod tests {
         assert!(r("какой у меня IP").contains(&"network"));
         // короткая основа не ловит середину слова
         assert!(!r("типа того").contains(&"network"));
+        assert!(!r("наведи курсор").contains(&"web"), "курсор — не «курс»");
+        assert!(!r("запусти в powershell").contains(&"system"), "powershell — не «power»");
+        assert!(!r("получи список").contains(&"ui"));
     }
 
     #[test]

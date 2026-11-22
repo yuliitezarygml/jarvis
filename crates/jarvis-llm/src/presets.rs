@@ -57,6 +57,11 @@ pub struct ProviderPreset {
     pub needs_key: bool,
     /// Локальный сервер (Ollama, LM Studio): бесплатно, без ключа.
     pub local: bool,
+    /// Можно начать бесплатно (бесплатный ключ или бесплатные модели).
+    pub free_tier: bool,
+    /// Одна строка для пользователя в настройках («очень быстрый, есть бесплатный ключ»).
+    pub tagline: String,
+    /// Заметки разработчика про API — пользователю не показываются (разве что в «подробнее»).
     pub notes: String,
     /// По умолчанию: Bearer для OpenAI-совместимых, x-api-key для Anthropic.
     pub auth: Option<AuthStyle>,
@@ -88,6 +93,8 @@ impl Default for ProviderPreset {
             docs_url: String::new(),
             needs_key: true,
             local: false,
+            free_tier: false,
+            tagline: String::new(),
             notes: String::new(),
             auth: None,
             models_path: "/models".into(),
@@ -257,6 +264,17 @@ mod tests {
         }
         assert_eq!(p.get("anthropic").unwrap().kind, ProviderKind::Anthropic);
         assert!(!p.get("ollama").unwrap().needs_key);
+    }
+
+    #[test]
+    fn every_preset_has_short_user_tagline() {
+        for p in &Presets::builtin().providers {
+            let t = p.tagline.trim();
+            assert!(!t.is_empty(), "{}: нет tagline", p.id);
+            assert!(t.chars().count() <= 70, "{}: tagline длинный для карточки", p.id);
+            assert!(!t.contains("/models") && !t.contains("GET "), "{}: в tagline заметки разработчика", p.id);
+            assert!(!p.local || p.free_tier, "{}: локальный — значит бесплатный", p.id);
+        }
     }
 
     #[test]

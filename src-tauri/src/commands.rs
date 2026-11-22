@@ -83,8 +83,10 @@ pub fn config_get(store: State<'_, ConfigStore>) -> Config {
 /// Модели и провайдеры, автономия, зрение, поиск, серверы голоса и resource guard применяются сразу
 /// (`Core::apply_config`); папка данных и папки поиска — после перезапуска (об этом сообщение в HUD).
 #[tauri::command]
-pub fn config_set(store: State<'_, ConfigStore>, core: State<'_, CoreState>, config: Config) -> CmdResult<Config> {
-    let saved = store.set_from_ui(config)?;
+/// `base` — конфиг, который экран получил при открытии: поля, которые пользователь не менял, берутся из
+/// файла (правки config.json снаружи и режим/позиция HUD не затираются старой копией).
+pub fn config_set(store: State<'_, ConfigStore>, core: State<'_, CoreState>, config: Config, base: Option<Config>) -> CmdResult<Config> {
+    let saved = store.set_from_ui(config, base)?;
     core.0.apply_config(&saved);
     Ok(config_store::masked(&saved))
 }
@@ -297,11 +299,10 @@ pub fn provider_apply_best(
     store: State<'_, ConfigStore>,
     core: State<'_, CoreState>,
     config: Config,
+    base: Option<Config>,
     provider_ids: Option<Vec<String>>,
 ) -> CmdResult<Config> {
-    let mut merged = config_store::merge_from_ui(&store.get(), config);
-    services::apply_best(&core.0, &mut merged, provider_ids.as_deref())?;
-    let saved = store.update(|c| *c = merged)?;
+    let saved = store.set_from_ui_with(config, base, |merged| services::apply_best(&core.0, merged, provider_ids.as_deref()))?;
     core.0.apply_config(&saved);
     Ok(config_store::masked(&saved))
 }
@@ -329,6 +330,45 @@ pub async fn search_check(store: State<'_, ConfigStore>, id: String, api_key: St
 #[tauri::command]
 pub async fn audio_devices() -> CmdResult<api::AudioDevices> {
     tauri::async_runtime::spawn_blocking(services::audio_devices).await.map_err(err)?
+}
+
+/// Уровень микрофона во время «Проверить микрофон» (f32 RMS 0…1, ≈30 Гц).
+pub const MIC_TEST_EVENT: &str = "jarvis://mic_test_level";
+
+/// Флаг остановки текущей проверки микрофона.
+static MIC_TEST: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>> = Mutex::new(None);
+
+/// «Проверить микрофон» в настройках: открыть выбранный (ещё не сохранённый) микрофон на `seconds` с,
+/// уровень — событиями `MIC_TEST_EVENT`. Возвращает имя открытого устройства. Микрофон без кнопки не открывается.
+#[tauri::command]
+pub async fn audio_mic_test(app: AppHandle, device: Option<String>, seconds: Option<u64>) -> CmdResult<String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stop = Arc::new(AtomicBool::new(false));
+    if let Some(prev) = MIC_TEST.lock().unwrap().replace(stop.clone()) {
+        prev.store(true, Ordering::Release);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        services::mic_test(device, seconds.unwrap_or(10), &stop, move |rms| {
+            let _ = app.emit(MIC_TEST_EVENT, rms);
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub fn audio_mic_test_stop() {
+    if let Some(stop) = MIC_TEST.lock().unwrap().take() {
+        stop.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// «Проверить звук»: тестовая фраза голосом Джарвиса через выбранное устройство и громкость (без сохранения).
+#[tauri::command]
+pub async fn audio_sound_test(core: State<'_, CoreState>, device: Option<String>, volume: Option<f32>) -> CmdResult<api::ServiceCheck> {
+    let c = core.0.clone();
+    let cfg = c.config();
+    Ok(services::sound_test(&cfg, &c.root, device, volume.unwrap_or_else(|| cfg.audio.gain())).await)
 }
 
 // ───────────────────────────── память, KB, история ─────────────────────────────

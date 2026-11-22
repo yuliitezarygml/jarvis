@@ -8,7 +8,7 @@ import { AudioTab, PermissionsTab, SearchTab, VoiceTab, WindowsTab } from '@/com
 import { call, errorText } from '@/lib/bridge';
 import { useTauriEvent } from '@/lib/store';
 import { isDirty } from '@/lib/settings';
-import { SETTINGS_TAB_EVENT, type Config } from '@/lib/types';
+import { CONFIG_CHANGED_EVENT, SETTINGS_TAB_EVENT, type Config } from '@/lib/types';
 
 const TABS = [
   { id: 'providers', name: 'Провайдеры и модели' },
@@ -49,6 +49,15 @@ export default function SettingsPage() {
     if (isTab(t)) setTab(t);
   });
 
+  // config.json поменяли снаружи (руками, другим окном): без своих правок — просто показать новое;
+  // с правками — черновик остаётся, а при сохранении ядро сольёт его с файлом (base = saved).
+  useTauriEvent<Config>(CONFIG_CHANGED_EVENT, (fresh) => {
+    if (!isDirty(saved, draft)) {
+      setSaved(fresh);
+      setDraft(fresh);
+    }
+  });
+
   const update = useCallback((f: (c: Config) => Config) => {
     setDraft((d) => (d ? f(d) : d));
     setStatus(null);
@@ -63,10 +72,9 @@ export default function SettingsPage() {
     if (!draft || !saved) return;
     setSaving(true);
     try {
-      // позиция виджета и режим могли измениться, пока открыто окно: если в черновике их не трогали — берём свежие
-      const latest = await call<Config>('config_get');
-      const toSave = JSON.stringify(draft.hud) === JSON.stringify(saved.hud) ? { ...draft, hud: latest.hud } : draft;
-      const result = await call<Config>('config_set', { config: toSave });
+      // base — что экран видел при открытии: поля, которые здесь не трогали (режим и позиция HUD, правки
+      // config.json снаружи), ядро возьмёт из файла, а не из устаревшего черновика
+      const result = await call<Config>('config_set', { config: draft, base: saved });
       setSaved(result);
       setDraft(result);
       setStatus({ ok: true, text: 'Сохранено' });
@@ -98,6 +106,7 @@ export default function SettingsPage() {
           {tab === 'providers' && (
             <ProvidersTab
               draft={draft}
+              base={saved}
               update={update}
               onSaved={(c) => {
                 setSaved(c);
@@ -106,7 +115,7 @@ export default function SettingsPage() {
             />
           )}
           {tab === 'voice' && <VoiceTab draft={draft} update={update} />}
-          {tab === 'audio' && <AudioTab />}
+          {tab === 'audio' && <AudioTab draft={draft} update={update} />}
           {tab === 'permissions' && <PermissionsTab draft={draft} update={update} />}
           {tab === 'windows' && <WindowsTab draft={draft} update={update} />}
           {tab === 'search' && <SearchTab draft={draft} update={update} />}

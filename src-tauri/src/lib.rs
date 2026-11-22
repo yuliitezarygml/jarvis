@@ -59,6 +59,8 @@ pub fn run() {
             app.state::<AppHooks>().set(Arc::new(CoreHooks(Arc::downgrade(&core))));
             let problems = core.startup_problems();
             app.manage(CoreState(core));
+            // правки config.json снаружи — в ядро без перезапуска
+            config_store::spawn_watcher(handle.clone());
 
             windows_manager::create_windows(&handle, &initial)?;
             tray::create(&handle)?;
@@ -112,6 +114,9 @@ pub fn run() {
             commands::search_presets,
             commands::search_check,
             commands::audio_devices,
+            commands::audio_mic_test,
+            commands::audio_mic_test_stop,
+            commands::audio_sound_test,
             commands::memory_list,
             commands::memory_upsert,
             commands::memory_delete,

@@ -2,7 +2,7 @@
 // в приложении все команды обслуживает Rust (src-tauri/src/commands.rs).
 
 import { playDemo } from './simulator';
-import { EVENT_NAME, type Config, type JarvisEvent } from './types';
+import { EVENT_NAME, MIC_TEST_EVENT, type Config, type JarvisEvent } from './types';
 
 type Handler = (payload: unknown) => void;
 
@@ -55,6 +55,7 @@ export function defaultConfig(): Config {
     resource_guard: true,
     search_roots: ['%USERPROFILE%', 'D:\\'],
     hud: { mode: 'corner', corner_x: null, corner_y: null },
+    audio: { input_device: null, output_device: null, volume: 1, listen_on_start: true },
   };
 }
 
@@ -127,6 +128,7 @@ const memory = {
   ],
 };
 let nextId = 100;
+let mockMicTest: (() => void) | null = null;
 let mockMic = { enabled: false, listening: false, voice_ready: false, error: 'в браузере микрофон не используется' as string | null };
 
 export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Promise<T> {
@@ -211,11 +213,12 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
       return r(masked(a.config as Config));
     case 'provider_presets':
       return r([
-        { id: 'groq', name: 'Groq', kind: 'openai_compat', base_url: 'https://api.groq.com/openai/v1', key_url: 'https://console.groq.com/keys', needs_key: true, note: 'Быстрые открытые модели' },
-        { id: 'opencode-zen', name: 'OpenCode Zen', kind: 'openai_compat', base_url: 'https://opencode.ai/inference/openai/v1', key_url: 'https://opencode.ai/auth', needs_key: true, note: '' },
-        { id: 'openrouter', name: 'OpenRouter', kind: 'openai_compat', base_url: 'https://openrouter.ai/api/v1', key_url: 'https://openrouter.ai/keys', needs_key: true, note: '' },
-        { id: 'anthropic', name: 'Anthropic (Claude)', kind: 'anthropic', base_url: 'https://api.anthropic.com/v1', key_url: '', needs_key: true, note: '' },
-        { id: 'ollama', name: 'Ollama (локально)', kind: 'openai_compat', base_url: 'http://127.0.0.1:11434/v1', key_url: '', needs_key: false, note: 'Без ключа' },
+        { id: 'groq', name: 'Groq', kind: 'openai_compat', base_url: 'https://api.groq.com/openai/v1', key_url: 'https://console.groq.com/keys', docs_url: '', needs_key: true, local: false, free_tier: true, tagline: 'Очень быстрые ответы, есть бесплатный ключ', note: 'GET /models отдаёт context_window.' },
+        { id: 'opencode-zen', name: 'OpenCode Zen', kind: 'openai_compat', base_url: 'https://opencode.ai/inference/openai/v1', key_url: 'https://opencode.ai/console', docs_url: '', needs_key: true, local: false, free_tier: false, tagline: 'Подборка сильных моделей (Claude, GPT, Qwen) по одному ключу', note: '' },
+        { id: 'openrouter', name: 'OpenRouter', kind: 'openai_compat', base_url: 'https://openrouter.ai/api/v1', key_url: 'https://openrouter.ai/keys', docs_url: '', needs_key: true, local: false, free_tier: true, tagline: 'Сотни моделей через один ключ, есть бесплатные', note: '' },
+        { id: 'anthropic', name: 'Anthropic (Claude)', kind: 'anthropic', base_url: 'https://api.anthropic.com/v1', key_url: 'https://platform.claude.com/settings/keys', docs_url: '', needs_key: true, local: false, free_tier: false, tagline: 'Claude — сильный в рассуждениях и коде', note: '' },
+        { id: 'ollama', name: 'Ollama (локально)', kind: 'openai_compat', base_url: 'http://localhost:11434/v1', key_url: '', docs_url: '', needs_key: false, local: true, free_tier: true, tagline: 'Модели на вашем ПК, без ключа и интернета', note: '' },
+        { id: 'custom', name: 'Свой OpenAI-совместимый URL', kind: 'openai_compat', base_url: '', key_url: '', docs_url: '', needs_key: false, local: false, free_tier: false, tagline: 'Свой сервер: vLLM, llama.cpp, прокси', note: '' },
       ]);
     case 'provider_check': {
       const key = String(a.apiKey ?? '');
@@ -258,9 +261,37 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
     case 'audio_devices':
       return r({
         demo: true,
-        inputs: [{ id: 'default-in', name: 'Микрофон (по умолчанию)', default: true }],
-        outputs: [{ id: 'default-out', name: 'Динамики (по умолчанию)', default: true }],
+        inputs: [
+          { id: 'Микрофон (Realtek Audio)', name: 'Микрофон (Realtek Audio)', default: true },
+          { id: 'Гарнитура (USB Audio)', name: 'Гарнитура (USB Audio)', default: false },
+        ],
+        outputs: [
+          { id: 'Динамики (Realtek Audio)', name: 'Динамики (Realtek Audio)', default: true },
+          { id: 'Наушники (USB Audio)', name: 'Наушники (USB Audio)', default: false },
+        ],
       });
+    case 'audio_mic_test': {
+      // в браузере — синтетический уровень, чтобы видеть индикатор
+      const secs = Number(a.seconds ?? 10);
+      mockMicTest?.();
+      const t0 = Date.now();
+      const timer = setInterval(() => browserBus.emit(MIC_TEST_EVENT, Math.abs(Math.sin((Date.now() - t0) / 300)) * 0.25 * Math.random()), 33);
+      return new Promise<T>((resolve) => {
+        const done = () => {
+          clearInterval(timer);
+          clearTimeout(to);
+          mockMicTest = null;
+          resolve(r(String(a.device ?? '') || 'Микрофон (Realtek Audio)'));
+        };
+        const to = setTimeout(done, secs * 1000);
+        mockMicTest = done;
+      });
+    }
+    case 'audio_mic_test_stop':
+      mockMicTest?.();
+      return r(null);
+    case 'audio_sound_test':
+      return r({ demo: true, ok: true, message: 'Джарвис сказал тестовую фразу (демо).', latency_ms: 900 });
     case 'memory_list':
       return r(structuredClone(memory));
     case 'memory_upsert': {

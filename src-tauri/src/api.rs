@@ -15,7 +15,15 @@ pub struct ProviderPreset {
     pub base_url: String,
     /// Где получить ключ.
     pub key_url: String,
+    pub docs_url: String,
     pub needs_key: bool,
+    /// Локальный сервер (Ollama, LM Studio).
+    pub local: bool,
+    /// Можно начать бесплатно.
+    pub free_tier: bool,
+    /// Короткое описание для карточки провайдера.
+    pub tagline: String,
+    /// Технические заметки (только в свёрнутом «Подробнее для опытных»).
     pub note: String,
 }
 

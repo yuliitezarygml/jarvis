@@ -100,15 +100,63 @@ type Observer = Arc<dyn Fn(&FailoverEvent) + Send + Sync>;
 
 /// Цепочка «provider/model» с failover: при `LlmError::should_failover` — к следующей модели.
 /// Кто ответил, видно в `ChatResponse.model`.
+///
+/// Цепочка из одной модели переключаться некуда: при `RateLimited` с коротким `retry_after`
+/// (≤ [`ModelChain::DEFAULT_RATE_LIMIT_WAIT`]) она ждёт (с отменой) и повторяет запрос один раз.
 pub struct ModelChain {
     models: Vec<Arc<dyn ChatModel>>,
     breaker: Arc<CircuitBreaker>,
     observer: Option<Observer>,
+    rate_limit_wait: Duration,
+}
+
+/// Итог ожидания перед повтором.
+enum Wait {
+    /// Повторить запрос.
+    Retry,
+    /// Не повторять — вернуть ошибку как есть.
+    GiveUp,
+    Cancelled,
 }
 
 impl ModelChain {
+    /// Сколько максимум ждать `retry_after` в цепочке из одной модели.
+    pub const DEFAULT_RATE_LIMIT_WAIT: Duration = Duration::from_secs(20);
+
     pub fn new(models: Vec<Arc<dyn ChatModel>>, breaker: Arc<CircuitBreaker>) -> Self {
-        Self { models, breaker, observer: None }
+        Self { models, breaker, observer: None, rate_limit_wait: Self::DEFAULT_RATE_LIMIT_WAIT }
+    }
+
+    /// Предел ожидания `retry_after` для цепочки из одной модели (`Duration::ZERO` — не ждать).
+    pub fn with_rate_limit_wait(mut self, max: Duration) -> Self {
+        self.rate_limit_wait = max;
+        self
+    }
+
+    /// Ждать ли перед повтором: только цепочка из одной модели, только `RateLimited` с коротким `retry_after`.
+    fn retry_delay(&self, err: &LlmError) -> Option<Duration> {
+        if self.models.len() != 1 {
+            return None;
+        }
+        match err {
+            LlmError::RateLimited { retry_after_ms: Some(ms) } => {
+                let d = Duration::from_millis(*ms);
+                // Небольшой запас: окно лимита провайдера считается с точностью до секунды.
+                (d <= self.rate_limit_wait && !self.rate_limit_wait.is_zero())
+                    .then(|| d + Duration::from_millis(250))
+            }
+            _ => None,
+        }
+    }
+
+    async fn wait_retry(&self, model: &str, err: &LlmError, cancel: &CancellationToken) -> Wait {
+        let Some(d) = self.retry_delay(err) else { return Wait::GiveUp };
+        tracing::info!(model, wait_ms = d.as_millis() as u64, "лимит запросов: жду и повторяю один раз");
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Wait::Cancelled,
+            _ = tokio::time::sleep(d) => Wait::Retry,
+        }
     }
 
     pub fn with_observer(mut self, f: impl Fn(&FailoverEvent) + Send + Sync + 'static) -> Self {
@@ -133,6 +181,26 @@ impl ModelChain {
         let ready: Vec<_> =
             self.models.iter().filter(|m| !self.breaker.is_open(&Self::provider_of(&m.id()))).cloned().collect();
         if ready.is_empty() { self.models.clone() } else { ready }
+    }
+
+    /// Один потоковый запрос к модели; второе значение — успело ли уйти хоть одно событие.
+    async fn stream_once(
+        m: &Arc<dyn ChatModel>,
+        req: &ChatRequest,
+        tx: &mpsc::Sender<ChatEvent>,
+        cancel: &CancellationToken,
+    ) -> (Result<ChatResponse, LlmError>, bool) {
+        let (itx, mut irx) = mpsc::channel::<ChatEvent>(64);
+        let mut forwarded = false;
+        let fut = m.chat_stream(req.clone(), itx, cancel.clone());
+        let fwd = async {
+            while let Some(ev) = irx.recv().await {
+                forwarded = true;
+                let _ = http::emit(tx, ev, cancel).await;
+            }
+        };
+        let (res, ()) = tokio::join!(fut, fwd);
+        (res, forwarded)
     }
 
     fn on_error(&self, model: &str, err: &LlmError, next: Option<String>) {
@@ -162,7 +230,15 @@ impl ChatModel for ModelChain {
                 return Err(LlmError::Cancelled);
             }
             let id = m.id();
-            match m.chat(req.clone(), cancel.clone()).await {
+            let mut res = m.chat(req.clone(), cancel.clone()).await;
+            if let Err(e) = &res {
+                match self.wait_retry(&id, e, &cancel).await {
+                    Wait::Retry => res = m.chat(req.clone(), cancel.clone()).await,
+                    Wait::Cancelled => return Err(LlmError::Cancelled),
+                    Wait::GiveUp => {}
+                }
+            }
+            match res {
                 Ok(r) => {
                     self.breaker.record_success(&Self::provider_of(&id));
                     return Ok(r);
@@ -191,16 +267,16 @@ impl ChatModel for ModelChain {
                 return Err(LlmError::Cancelled);
             }
             let id = m.id();
-            let (itx, mut irx) = mpsc::channel::<ChatEvent>(64);
-            let mut forwarded = false;
-            let fut = m.chat_stream(req.clone(), itx, cancel.clone());
-            let fwd = async {
-                while let Some(ev) = irx.recv().await {
-                    forwarded = true;
-                    let _ = http::emit(&tx, ev, &cancel).await;
+            let (mut res, mut forwarded) = Self::stream_once(m, &req, &tx, &cancel).await;
+            if let Err(e) = &res
+                && !forwarded
+            {
+                match self.wait_retry(&id, e, &cancel).await {
+                    Wait::Retry => (res, forwarded) = Self::stream_once(m, &req, &tx, &cancel).await,
+                    Wait::Cancelled => return Err(LlmError::Cancelled),
+                    Wait::GiveUp => {}
                 }
-            };
-            let (res, ()) = tokio::join!(fut, fwd);
+            }
             match res {
                 Ok(r) => {
                     self.breaker.record_success(&Self::provider_of(&id));
@@ -360,6 +436,105 @@ mod tests {
         b.record_success("p");
         assert!(!b.is_open("p"));
         assert_eq!(b.failures("p"), 0);
+    }
+
+    /// Модель, которая первые `fail` раз отвечает 429 с `retry_ms`.
+    struct Limited {
+        id: &'static str,
+        fail: usize,
+        retry_ms: Option<u64>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Limited {
+        fn new(id: &'static str, fail: usize, retry_ms: Option<u64>) -> Arc<Self> {
+            Arc::new(Self { id, fail, retry_ms, calls: Default::default() })
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl ChatModel for Limited {
+        fn id(&self) -> String {
+            self.id.into()
+        }
+        async fn chat(&self, _req: ChatRequest, _c: CancellationToken) -> Result<ChatResponse, LlmError> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n < self.fail {
+                return Err(LlmError::RateLimited { retry_after_ms: self.retry_ms });
+            }
+            Ok(ChatResponse { message: jarvis_core::ChatMessage::assistant("ok"), model: self.id(), usage: None })
+        }
+    }
+
+    fn chain_of(models: Vec<Arc<dyn ChatModel>>) -> ModelChain {
+        ModelChain::new(models, Arc::new(CircuitBreaker::new(3, Duration::from_secs(60))))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn single_model_waits_short_retry_after_once() {
+        let m = Limited::new("groq/x", 1, Some(3_000));
+        let chain = chain_of(vec![m.clone()]);
+        let t0 = tokio::time::Instant::now();
+        let r = chain.chat(ChatRequest::default(), CancellationToken::new()).await.unwrap();
+        assert_eq!(r.message.content, "ok");
+        assert_eq!(m.calls(), 2);
+        assert!(t0.elapsed() >= Duration::from_secs(3), "ждали retry_after");
+        assert_eq!(chain.breaker().failures("groq"), 0);
+
+        // Стрим тоже повторяет (до первого события ничего не ушло).
+        let m = Limited::new("groq/x", 1, Some(1_000));
+        let chain = chain_of(vec![m.clone()]);
+        let (tx, _rx) = mpsc::channel(8);
+        assert!(chain.chat_stream(ChatRequest::default(), tx, CancellationToken::new()).await.is_ok());
+        assert_eq!(m.calls(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn single_model_retries_only_once_and_not_long_waits() {
+        // Повтор тоже 429 — ошибка, третьей попытки нет.
+        let m = Limited::new("groq/x", 5, Some(2_000));
+        let err = chain_of(vec![m.clone()]).chat(ChatRequest::default(), CancellationToken::new()).await.unwrap_err();
+        assert_eq!(err, LlmError::RateLimited { retry_after_ms: Some(2_000) });
+        assert_eq!(m.calls(), 2);
+        // Долгое ожидание (33 с) и неизвестное — сразу ошибка.
+        for retry in [Some(33_000), None] {
+            let m = Limited::new("groq/x", 1, retry);
+            assert!(chain_of(vec![m.clone()]).chat(ChatRequest::default(), CancellationToken::new()).await.is_err());
+            assert_eq!(m.calls(), 1);
+        }
+        // Ожидание выключено.
+        let m = Limited::new("groq/x", 1, Some(1_000));
+        let chain = chain_of(vec![m.clone()]).with_rate_limit_wait(Duration::ZERO);
+        assert!(chain.chat(ChatRequest::default(), CancellationToken::new()).await.is_err());
+        assert_eq!(m.calls(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn multi_model_chain_fails_over_without_waiting() {
+        let a = Limited::new("pa/x", 1, Some(3_000));
+        let b = Limited::new("pb/y", 0, None);
+        let chain = chain_of(vec![a.clone(), b.clone()]);
+        let t0 = tokio::time::Instant::now();
+        let r = chain.chat(ChatRequest::default(), CancellationToken::new()).await.unwrap();
+        assert_eq!(r.model, "pb/y");
+        assert_eq!((a.calls(), b.calls()), (1, 1));
+        assert!(t0.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_rate_limit_is_cancellable() {
+        let m = Limited::new("groq/x", 1, Some(15_000));
+        let chain = Arc::new(chain_of(vec![m.clone()]));
+        let cancel = CancellationToken::new();
+        let (c2, cancel2) = (chain.clone(), cancel.clone());
+        let task = tokio::spawn(async move { c2.chat(ChatRequest::default(), cancel2).await });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel.cancel();
+        assert_eq!(task.await.unwrap().unwrap_err(), LlmError::Cancelled);
+        assert_eq!(m.calls(), 1, "после отмены повтора нет");
     }
 
     fn zen() -> ProviderSpec {

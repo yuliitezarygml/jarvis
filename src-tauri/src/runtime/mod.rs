@@ -233,6 +233,7 @@ impl Core {
         );
 
         let presets = Presets::load_or_builtin(root.join("crates/jarvis-llm/presets/providers.json"));
+        let listen_on_start = cfg.audio.listen_on_start;
         let core = Arc::new_cyclic(|me| Core {
             root,
             handle: handle.clone(),
@@ -258,7 +259,7 @@ impl Core {
             task_seq: AtomicU64::new(0),
             serial: tokio::sync::Mutex::new(()),
             last_action: Mutex::new(None),
-            mic: Mutex::new(MicState { wanted: true, error: None, handle: None }),
+            mic: Mutex::new(MicState { wanted: listen_on_start, error: None, handle: None }),
             telemetry: Mutex::new(None),
             reports: Mutex::new(HashMap::new()),
             opts,
@@ -348,6 +349,8 @@ impl Core {
         self.events.emit(Event::Error { message: problem.clone() });
         let phrase = if problem == NO_KEY_TEXT {
             "Сэр, у меня нет ключа к языковой модели. Добавьте его в настройках, раздел «Провайдеры и модели».".to_string()
+        } else if let Some(rest) = problem.strip_prefix("Модель «Мозг» недоступна") {
+            format!("Сэр, модель «Мозг» недоступна{rest}")
         } else {
             format!("Сэр, языковая модель недоступна: {problem}")
         };
@@ -407,6 +410,13 @@ impl Core {
             let cfg = core.config();
             let root = core.root.clone();
             let sink: Arc<dyn EventSink> = Arc::new(VoiceEvents::new(core.events.clone(), core.busy.clone()));
+            // Выбранный микрофон/динамики отключены — Capture/Player возьмут устройства по умолчанию; сказать об этом.
+            let audio = cfg.audio.clone();
+            if let Ok(warnings) = tokio::task::spawn_blocking(move || jarvis_voice::device::missing_device_warnings(&audio)).await {
+                for message in warnings {
+                    core.events.emit(Event::Error { message });
+                }
+            }
             let built =
                 tokio::task::spawn_blocking(move || VoicePipeline::from_config(VoiceConfig::default(), &cfg, &root, sink)).await;
             match built {
@@ -549,7 +559,10 @@ impl Core {
                 Arc::new(SearchChain::from_config(&new.web_search, &jarvis_web::http::default_client()));
             *self.web_pages.0.write().unwrap() = Arc::new(Fetcher::from_config(new));
         }
-        if self.opts.voice && (old.tts != new.tts || old.stt != new.stt) {
+        // Микрофон, динамики или громкость сменились — конвейер голоса собирается заново (как при смене серверов).
+        let audio_changed = (old.audio.input(), old.audio.output(), old.audio.gain())
+            != (new.audio.input(), new.audio.output(), new.audio.gain());
+        if self.opts.voice && (old.tts != new.tts || old.stt != new.stt || audio_changed) {
             self.restart_voice();
         }
         if self.opts.telemetry && old.resource_guard != new.resource_guard {

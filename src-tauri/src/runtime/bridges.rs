@@ -3,7 +3,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use jarvis_agent::{Confirmer, MemoryHooks, StepStatus, StopReason, Transcript};
@@ -15,7 +15,7 @@ use jarvis_pc::{GlowControl, GlowHold};
 use jarvis_sys::ConfirmGate;
 use serde_json::Value;
 
-use super::models::Models;
+use super::models::{Models, SHARED_REFLECT_DELAY, SHARED_REFLECT_MAX_TOKENS, shared_reflection_allowed};
 use super::speech::SpeechQueue;
 
 // ───────────────────────────── свечение ─────────────────────────────
@@ -212,12 +212,27 @@ impl MemoryHooks for MemoryBridge {
         if !self.reflect || t.stop_reason == StopReason::Cancelled || !(t.used_tools() || t.error.is_some()) {
             return;
         }
-        let Some(model) = self.models.reflection_model() else { return };
+        let Some(choice) = self.models.reflection_choice() else { return };
         let task = to_task_transcript(t);
         let mem = self.mem.clone();
+        let brain = self.models.brain.clone();
+        let task_end = Instant::now();
         self.handle.spawn(async move {
+            // Без своей цепочки рефлексия идёт в модель «мозга» и съедает тот же лимит (Groq: 8000 токенов
+            // в минуту). Поэтому — позже, когда окно лимита задачи прошло, только если пользователь за это время
+            // ничего не просил и 429 давно не было, и с меньшим бюджетом ответа.
+            if choice.shared_with_brain {
+                tokio::time::sleep(SHARED_REFLECT_DELAY).await;
+                if !shared_reflection_allowed(brain.activity(), task_end, Instant::now()) {
+                    eprintln!("[jarvis] рефлектор: пропуск — модель «мозга» занята или недавно упёрлась в лимит");
+                    return;
+                }
+            }
             let cancel = CancellationToken::new();
-            let reflector = Reflector::new(model);
+            let mut reflector = Reflector::new(choice.model);
+            if choice.shared_with_brain {
+                reflector.max_tokens = SHARED_REFLECT_MAX_TOKENS;
+            }
             let run = reflector.reflect_and_apply(&mem, &task, cancel.clone());
             match tokio::time::timeout(Duration::from_secs(90), run).await {
                 Ok(Ok(_)) => {}

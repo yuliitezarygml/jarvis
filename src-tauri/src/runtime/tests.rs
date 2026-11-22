@@ -145,8 +145,16 @@ async fn text_command_runs_real_t0_tool_and_answers() {
     let second = &h.model.requests()[1];
     let tool_msg = second.messages.iter().find(|m| m.role == Role::Tool).expect("ответ инструмента");
     assert!(!tool_msg.content.trim().is_empty() && !tool_msg.content.contains("Ошибка"), "{}", tool_msg.content);
-    // Инструменты всех модулей ушли модели.
-    assert!(second.tools.iter().any(|t| t.name == "web_search") && second.tools.iter().any(|t| t.name == "mouse_click"));
+    // Ленивая загрузка: базовые инструменты + группа по словам («памяти» → процессы) + tools_load для остального,
+    // но не весь реестр (мышь/UI для такого вопроса не нужны).
+    let names: Vec<&str> = second.tools.iter().map(|t| t.name.as_str()).collect();
+    for n in ["sys_snapshot", "web_search", "powershell_run", "open_target", "process_list", jarvis_agent::TOOLS_LOAD] {
+        assert!(names.contains(&n), "нет {n}: {names:?}");
+    }
+    assert!(!names.contains(&"mouse_click") && !names.contains(&"ui_find"), "{names:?}");
+    assert!(second.tools.len() < h.core.agent.tools().len() / 2, "{names:?}");
+    let load = second.tools.iter().find(|t| t.name == jarvis_agent::TOOLS_LOAD).unwrap();
+    assert!(load.description.contains("pc_input") && load.description.contains("screen"), "{}", load.description);
     // Журнал диалога записан в память (экран «Журнал»).
     let mem = h.core.memory.clone().unwrap();
     let mut items = vec![];
@@ -176,22 +184,37 @@ async fn wake_word_alone_gets_spoken_reply() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "замер размера запроса"]
 async fn measure_request_size() {
-    let h = harness(vec![ChatMessage::assistant("ok")], None);
-    h.core.submit("привет", false).unwrap();
-    for _ in 0..500 {
-        if !h.model.requests().is_empty() {
-            break;
+    // Весь реестр (так было до ленивой загрузки) — для сравнения.
+    let h = harness(vec![], real_kb());
+    let all = h.core.agent.tools().specs();
+    let all_chars = serde_json::to_string(&all).unwrap().chars().count();
+    println!("ВЕСЬ РЕЕСТР: n={} chars={all_chars}", all.len());
+    drop(h);
+
+    for phrase in ["привет", "сколько памяти занято?", "кликни по кнопке ОК", "что за ошибка в терминале", "загугли новости"] {
+        let h = harness(vec![ChatMessage::assistant("ok")], real_kb());
+        h.core.submit(phrase, false).unwrap();
+        for _ in 0..500 {
+            if !h.model.requests().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        let r = &h.model.requests()[0];
+        let tools = serde_json::to_string(&r.tools).unwrap().chars().count();
+        let msgs: usize = r.messages.iter().map(|m| m.content.chars().count()).sum();
+        let mut per: Vec<(usize, String)> =
+            r.tools.iter().map(|t| (serde_json::to_string(t).unwrap().chars().count(), t.name.clone())).collect();
+        per.sort_by(|a, b| b.0.cmp(&a.0));
+        println!(
+            "«{phrase}»: TOOLS n={} chars={tools} | MSG chars={msgs} | ≈{} ток. (≈3 симв./ток.) | max_tokens={:?}",
+            r.tools.len(),
+            (tools + msgs) / 3,
+            r.max_tokens
+        );
+        println!("   {}", per.iter().map(|(n, s)| format!("{s}:{n}")).collect::<Vec<_>>().join(" "));
+        assert!(r.tools.len() < all.len());
     }
-    let r = &h.model.requests()[0];
-    let tools = serde_json::to_string(&r.tools).unwrap();
-    let msgs: usize = r.messages.iter().map(|m| m.content.chars().count()).sum();
-    let mut per: Vec<(usize, String)> = r.tools.iter().map(|t| (serde_json::to_string(t).unwrap().chars().count(), t.name.clone())).collect();
-    per.sort_by(|a, b| b.0.cmp(&a.0));
-    println!("TOOLS n={} chars={} | MSG chars={} max_tokens={:?}", r.tools.len(), tools.chars().count(), msgs, r.max_tokens);
-    println!("TOP {:?}", &per[..12]);
-    println!("ALL {}", per.iter().map(|(n, s)| format!("{s}:{n}")).collect::<Vec<_>>().join(" "));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -5,6 +5,8 @@
     {
       "id": "groq",
       "name": "Groq",
+      "tagline": "Очень быстрые ответы, есть бесплатный ключ",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "https://api.groq.com/openai/v1",
       "key_url": "https://console.groq.com/keys",
@@ -16,6 +18,8 @@
     {
       "id": "opencode-zen",
       "name": "OpenCode Zen",
+      "tagline": "Подборка сильных моделей (Claude, GPT, Qwen) по одному ключу",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://opencode.ai/inference/openai/v1",
       "key_url": "https://opencode.ai/console",
@@ -35,6 +39,8 @@
     {
       "id": "openrouter",
       "name": "OpenRouter",
+      "tagline": "Сотни моделей через один ключ, есть бесплатные",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "https://openrouter.ai/api/v1",
       "key_url": "https://openrouter.ai/keys",
@@ -46,6 +52,8 @@
     {
       "id": "openai",
       "name": "OpenAI",
+      "tagline": "GPT от OpenAI — оплата по факту",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.openai.com/v1",
       "key_url": "https://platform.openai.com/api-keys",
@@ -58,6 +66,8 @@
     {
       "id": "anthropic",
       "name": "Anthropic (Claude)",
+      "tagline": "Claude — сильный в рассуждениях и коде",
+      "free_tier": false,
       "kind": "anthropic",
       "base_url": "https://api.anthropic.com/v1",
       "key_url": "https://platform.claude.com/settings/keys",
@@ -70,6 +80,8 @@
     {
       "id": "gemini",
       "name": "Google Gemini (OpenAI-совместимый)",
+      "tagline": "Gemini от Google, щедрый бесплатный лимит",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
       "key_url": "https://aistudio.google.com/apikey",
@@ -80,6 +92,8 @@
     {
       "id": "mistral",
       "name": "Mistral (La Plateforme)",
+      "tagline": "Европейские модели, есть бесплатный тариф",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "https://api.mistral.ai/v1",
       "key_url": "https://console.mistral.ai/api-keys",
@@ -90,6 +104,8 @@
     {
       "id": "deepseek",
       "name": "DeepSeek",
+      "tagline": "Сильные модели по низкой цене",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.deepseek.com",
       "key_url": "https://platform.deepseek.com/api_keys",
@@ -100,6 +116,8 @@
     {
       "id": "together",
       "name": "Together AI",
+      "tagline": "Открытые модели в облаке",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.together.ai/v1",
       "key_url": "https://api.together.ai/settings/projects/~current/api-keys",
@@ -110,6 +128,8 @@
     {
       "id": "fireworks",
       "name": "Fireworks AI",
+      "tagline": "Быстрые открытые модели в облаке",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "key_url": "https://app.fireworks.ai/settings/users/api-keys",
@@ -120,6 +140,8 @@
     {
       "id": "cerebras",
       "name": "Cerebras",
+      "tagline": "Рекордная скорость, есть бесплатный тариф",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "https://api.cerebras.ai/v1",
       "key_url": "https://cloud.cerebras.ai",
@@ -130,6 +152,8 @@
     {
       "id": "xai",
       "name": "xAI (Grok)",
+      "tagline": "Grok от xAI",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.x.ai/v1",
       "key_url": "https://console.x.ai/team/default/api-keys",
@@ -141,6 +165,8 @@
     {
       "id": "zai",
       "name": "Z.AI (GLM)",
+      "tagline": "GLM от Z.AI — недорого",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "https://api.z.ai/api/paas/v4",
       "key_url": "https://z.ai/manage-apikey/apikey-list",
@@ -152,6 +178,8 @@
     {
       "id": "ollama",
       "name": "Ollama (локально)",
+      "tagline": "Модели на вашем ПК, без ключа и интернета",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "http://localhost:11434/v1",
       "key_url": "",
@@ -163,6 +191,8 @@
     {
       "id": "lmstudio",
       "name": "LM Studio (локально)",
+      "tagline": "Локальные модели через LM Studio, без ключа",
+      "free_tier": true,
       "kind": "openai_compat",
       "base_url": "http://localhost:1234/v1",
       "key_url": "",
@@ -174,6 +204,8 @@
     {
       "id": "custom",
       "name": "Свой OpenAI-совместимый URL",
+      "tagline": "Свой сервер: vLLM, llama.cpp, прокси",
+      "free_tier": false,
       "kind": "openai_compat",
       "base_url": "",
       "key_url": "",

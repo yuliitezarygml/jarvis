@@ -49,6 +49,10 @@ export const CURSOR_EVENT = 'jarvis://cursor';
 export const HUD_MODE_EVENT = 'jarvis://hud_mode';
 export const EMERGENCY_EVENT = 'jarvis://emergency_stop';
 export const SETTINGS_TAB_EVENT = 'jarvis://settings_tab';
+/** config.json изменили снаружи (payload — замаскированный `Config`). */
+export const CONFIG_CHANGED_EVENT = 'jarvis://config_changed';
+/** Уровень микрофона во время «Проверить микрофон» (RMS 0…1). */
+export const MIC_TEST_EVENT = 'jarvis://mic_test_level';
 
 // ───────────── config.json (jarvis_core::Config) ─────────────
 
@@ -94,6 +98,16 @@ export interface Config {
   resource_guard: boolean;
   search_roots: string[];
   hud: { mode: HudMode; corner_x: number | null; corner_y: number | null };
+  audio: AudioConfig;
+}
+
+/** Микрофон, динамики, громкость (jarvis_core::config::AudioConfig). `null` — устройство Windows по умолчанию. */
+export interface AudioConfig {
+  input_device: string | null;
+  output_device: string | null;
+  /** 0…1.5, 1 — как пришло с сервера речи. */
+  volume: number;
+  listen_on_start: boolean;
 }
 
 // ───────────── ответы команд экранов (src-tauri/src/api.rs; `demo` всегда false в приложении) ─────────────
@@ -104,7 +118,15 @@ export interface ProviderPreset {
   kind: ProviderKind;
   base_url: string;
   key_url: string;
+  docs_url: string;
   needs_key: boolean;
+  /** Локальный сервер (Ollama, LM Studio). */
+  local: boolean;
+  /** Можно начать бесплатно. */
+  free_tier: boolean;
+  /** Короткое описание для карточки. */
+  tagline: string;
+  /** Технические заметки разработчика — только в свёрнутом «Подробнее». */
   note: string;
 }
 
