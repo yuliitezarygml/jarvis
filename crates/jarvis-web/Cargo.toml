@@ -5,8 +5,6 @@ edition = "2024"
 rust-version = "1.88"
 description = "Интернет для J.A.R.V.I.S.: поиск (цепочка провайдеров с failover), чтение страниц в Markdown, исследование с источниками"
 
-# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
-[workspace]
 
 [dependencies]
 jarvis-core = { path = "../jarvis-core" }

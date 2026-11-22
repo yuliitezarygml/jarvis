@@ -5,8 +5,6 @@ edition = "2024"
 rust-version = "1.85"
 description = "Сборщик базы знаний Windows J.A.R.V.I.S.: sparse-клоны MicrosoftDocs → Markdown → фрагменты → data/kb.sqlite (FTS5); оценка Recall@5/MRR"
 
-# Отдельная сборка (свой target), как у остальных крейтов до интеграции в общий workspace.
-[workspace]
 
 [lib]
 name = "kb_build"

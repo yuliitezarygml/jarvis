@@ -6,9 +6,6 @@ rust-version = "1.90"
 description = "J.A.R.V.I.S. — оболочка Tauri 2: окна hud/corner/overlay/settings, трей, хоткеи, мост событий"
 default-run = "jarvis"
 
-# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
-# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
-[workspace]
 
 [lib]
 name = "jarvis_lib"
@@ -39,10 +36,3 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 tauri = { version = "2.12", features = ["tray-icon", "test"] }
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = "s"
-panic = "abort"
-strip = true

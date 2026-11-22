@@ -5,9 +5,6 @@ edition = "2024"
 rust-version = "1.85"
 description = "База знаний Windows J.A.R.V.I.S.: SQLite FTS5 (bm25 с весами полей), поиск по нескольким запросам со слиянием RRF, точный поиск команд, инструменты kb_search / kb_lookup_command / kb_status"
 
-# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
-# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
-[workspace]
 
 [dependencies]
 jarvis-core = { path = "../jarvis-core" }

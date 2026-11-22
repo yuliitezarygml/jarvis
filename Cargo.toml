@@ -1,0 +1,37 @@
+# Общий Cargo workspace J.A.R.V.I.S.: один target/ и один Cargo.lock на всё.
+#
+# `server/jarvis-tts-rs` сюда не входит: он собирается на Linux-сервере Xeon (нативная часть, свой lock).
+# `server/jarvis-stt-rs` входит: без фичи `sherpa` (движок только на Linux) он собирается и тестируется на Windows.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/jarvis-core",
+    "crates/jarvis-agent",
+    "crates/jarvis-llm",
+    "crates/jarvis-voice",
+    "crates/jarvis-memory",
+    "crates/jarvis-pc",
+    "crates/jarvis-sys",
+    "crates/jarvis-web",
+    "crates/jarvis-kb",
+    "src-tauri",
+    "tools/kb-build",
+    "server/jarvis-stt-rs",
+]
+exclude = ["server/jarvis-tts-rs"]
+
+# Профили задаются только в корне workspace (в членах игнорируются).
+# `panic = "abort"` из прежнего src-tauri не берём: при unwind паника в одной задаче tokio (инструмент, команда)
+# не роняет весь процесс ассистента и сервер STT.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+# Сервер STT: символы строк для разбора паник на Xeon (было в его собственном Cargo.toml).
+[profile.release.package.jarvis-stt-rs]
+debug = "line-tables-only"
+strip = false
+opt-level = 3
