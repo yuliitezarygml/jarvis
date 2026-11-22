@@ -375,7 +375,19 @@ impl Core {
         }
         self.busy.store(true, Ordering::Release);
         self.glow_sink.begin_task();
+        let t0 = std::time::Instant::now();
+        tracing::info!(text = %text, "агент: задача");
         let outcome = self.agent.run(&text, token).await;
+        tracing::info!(
+            ms = t0.elapsed().as_millis() as u64,
+            model = ?outcome.transcript.model,
+            model_calls = outcome.transcript.model_calls,
+            tools = ?outcome.transcript.steps.iter().map(|s| format!("{}:{:?}", s.tool, s.status)).collect::<Vec<_>>(),
+            stop = ?outcome.stop_reason,
+            error = ?outcome.error,
+            answer = %outcome.final_text.chars().take(200).collect::<String>(),
+            "агент: готово"
+        );
         self.glow_sink.end_task();
         self.busy.store(false, Ordering::Release);
         *self.last_action.lock().unwrap() =

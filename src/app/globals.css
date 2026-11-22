@@ -789,9 +789,119 @@ code,
 }
 .corner-hit {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  aspect-ratio: 1 / 1;
+  height: 100%;
   cursor: pointer;
   border-radius: 50%;
+}
+/* панель подписей справа (виджет у левого края экрана) — реактор слева */
+.corner[data-caption='right'] .corner-hit {
+  right: auto;
+  left: 0;
+}
+
+/* Панель подписей рядом с реактором: что сказали, что отвечает, что делает. */
+.corner-caption {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 8px;
+  right: calc(100vh + 4px);
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(var(--void-rgb), 0.86);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 0 calc(18px * var(--glow-k)) rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.35;
+  animation: cc-in 180ms ease-out;
+}
+.corner[data-caption='right'] .corner-caption {
+  left: calc(100vh + 4px);
+  right: 8px;
+}
+@keyframes cc-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.97);
+  }
+}
+.cc-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.cc-line {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cc-line[data-final='false'] {
+  opacity: 0.75;
+}
+.cc-who {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cc-jarvis .cc-who {
+  color: var(--cyan);
+}
+.cc-action {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ice);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-action[data-status='failed'] {
+  color: var(--red);
+}
+.cc-action[data-status='awaiting_confirm'] {
+  color: var(--amber);
+}
+.cc-icon {
+  display: inline-block;
+  width: 1.2em;
+}
+.cc-action[data-status='running'] .cc-icon {
+  animation: cc-spin 1s linear infinite;
+}
+@keyframes cc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.cc-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+.cc-hint {
+  margin: 0;
+  color: var(--muted);
 }
 .reactor-corner {
   width: 100%;

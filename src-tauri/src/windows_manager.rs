@@ -335,11 +335,55 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     }
 }
 
+// ───────────────────────────── подписи у виджета ─────────────────────────────
+
+/// Ширина панели подписей рядом с реактором (логические пиксели).
+pub const CORNER_CAPTION_W: f64 = 360.0;
+/// Сколько физических пикселей добавлено слева (панель слева от реактора); `-1` — панель закрыта,
+/// `0` — панель справа (виджет у левого края экрана).
+static CAPTION_LEFT_PX: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// Открыть/закрыть панель подписей у виджета: окно расширяется в сторону от края экрана,
+/// реактор остаётся на месте. Возвращает сторону панели: `"left"`, `"right"` или `"none"`.
+pub fn set_corner_caption<R: Runtime>(app: &AppHandle<R>, open: bool) -> tauri::Result<&'static str> {
+    let Some(w) = app.get_webview_window(CORNER) else { return Ok("none") };
+    let added = CAPTION_LEFT_PX.load(Ordering::SeqCst);
+    let (pos, size) = (w.outer_position()?, w.outer_size()?);
+    let side = size.height; // реактор квадратный: высота окна = его сторона
+    if open {
+        if added >= 0 {
+            return Ok(if added > 0 { "left" } else { "right" });
+        }
+        let cap = (CORNER_CAPTION_W * w.scale_factor()?).round() as i32;
+        let mon_left = w.current_monitor()?.map(|m| m.position().x).unwrap_or(i32::MIN);
+        let grow_left = pos.x - cap >= mon_left;
+        CAPTION_LEFT_PX.store(if grow_left { cap } else { 0 }, Ordering::SeqCst);
+        w.set_size(PhysicalSize::new(side + cap as u32, side))?;
+        if grow_left {
+            w.set_position(PhysicalPosition::new(pos.x - cap, pos.y))?;
+        }
+        Ok(if grow_left { "left" } else { "right" })
+    } else {
+        if added < 0 {
+            return Ok("none");
+        }
+        // Сначала сбросить сдвиг: событие Moved от set_position должно сохранить позицию реактора как есть.
+        CAPTION_LEFT_PX.store(-1, Ordering::SeqCst);
+        w.set_size(PhysicalSize::new(side, side))?;
+        if added > 0 {
+            w.set_position(PhysicalPosition::new(pos.x + added, pos.y))?;
+        }
+        Ok("none")
+    }
+}
+
 /// Сохранить позицию виджета с задержкой 600 мс (во время перетаскивания событий много).
+/// Пока открыта панель подписей слева, сохраняется позиция самого реактора, а не расширенного окна.
 fn remember_corner<R: Runtime>(app: &AppHandle<R>, pos: PhysicalPosition<i32>, visible: bool) {
     if !visible {
         return;
     }
+    let pos = PhysicalPosition::new(pos.x + CAPTION_LEFT_PX.load(Ordering::SeqCst).max(0), pos.y);
     let state = app.state::<WindowsState>();
     let generation = state.corner_move_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let app = app.clone();

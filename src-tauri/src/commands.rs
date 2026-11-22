@@ -49,6 +49,13 @@ pub async fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
     windows_manager::toggle_mode(&app).map_err(err)
 }
 
+/// Виджет в углу: открыть/закрыть панель подписей (что сказали, что отвечает, что делает).
+/// Возвращает сторону панели: `left` / `right` / `none`.
+#[tauri::command]
+pub async fn corner_caption(app: AppHandle, open: bool) -> CmdResult<String> {
+    windows_manager::set_corner_caption(&app, open).map(str::to_string).map_err(err)
+}
+
 /// HUD: полный экран ↔ обычное окно. `true` = теперь полный экран.
 #[tauri::command]
 pub async fn toggle_hud_fullscreen(app: AppHandle) -> CmdResult<bool> {
@@ -109,6 +116,8 @@ pub fn after_save<R: tauri::Runtime>(app: &AppHandle<R>, core: &Core, saved: &Co
 /// Размер виджета в углу (`appearance.corner_size`). Правый нижний угол остаётся на месте,
 /// поэтому виджет у края экрана не уезжает за край.
 pub fn apply_corner_size<R: tauri::Runtime>(app: &AppHandle<R>, size: jarvis_core::config::CornerSize) {
+    // Размер считается по квадрату реактора — сначала закрыть панель подписей (страница откроет снова).
+    let _ = windows_manager::set_corner_caption(app, false);
     let Some(w) = app.get_webview_window(windows_manager::CORNER) else { return };
     let scale = w.scale_factor().unwrap_or(1.0);
     let side = (size.px() * scale).round() as i32;

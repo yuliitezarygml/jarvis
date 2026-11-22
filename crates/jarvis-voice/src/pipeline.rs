@@ -396,6 +396,7 @@ impl Inner {
             follow_up: self.in_follow_up() && !during_speech,
         };
         let intent = self.wake.classify(text, ctx);
+        tracing::info!(?intent, follow_up = ctx.follow_up, awaiting_confirm = ctx.awaiting_confirm, "голос: реплика разобрана");
         match &intent {
             Intent::Ignored => return,
             // «Да» засчитывается только после окончания речи Джарвиса — защита от самоподтверждения.
@@ -424,6 +425,8 @@ impl Inner {
 struct Pending {
     utt: Utterance,
     deadline: Instant,
+    /// Когда VAD решил, что фраза закончилась (для замера задержки STT).
+    ended: Instant,
 }
 
 async fn listen_loop(
@@ -441,14 +444,21 @@ async fn listen_loop(
     let mut pending: VecDeque<Pending> = VecDeque::new();
     let mut was_muted = false;
     let (tr_tx, mut tr_rx) = mpsc::channel::<(String, Instant)>(8);
-    let transcribe = |utt: Utterance| {
+    let transcribe = |utt: Utterance, ended: Instant| {
         let (stt, tx, t) = (inner.stt.clone(), tr_tx.clone(), token.clone());
         tokio::spawn(async move {
+            let audio_ms = utt.pcm16k.len() / 16;
             match stt.transcribe(&utt.pcm16k, &t).await {
                 Ok(r) => {
+                    tracing::info!(
+                        after_end_ms = ended.elapsed().as_millis() as u64,
+                        audio_ms,
+                        text = %r.text,
+                        "STT (POST): фраза распознана"
+                    );
                     let _ = tx.send((r.text, utt.started_at)).await;
                 }
-                Err(e) => tracing::warn!(error = %e, "STT: фраза не распознана"),
+                Err(e) => tracing::warn!(error = %e, audio_ms, "STT: фраза не распознана"),
             }
         });
     };
@@ -481,9 +491,13 @@ async fn listen_loop(
                         Some(s) if !s.is_closed() => {
                             s.send_audio(&frame);
                             s.end();
-                            pending.push_back(Pending { deadline: Instant::now() + inner.cfg.final_timeout, utt });
+                            let now = Instant::now();
+                            pending.push_back(Pending { deadline: now + inner.cfg.final_timeout, utt, ended: now });
                         }
-                        _ => transcribe(utt),
+                        _ => {
+                            tracing::info!("STT: потоковое соединение закрыто, фраза уходит через POST");
+                            transcribe(utt, Instant::now());
+                        }
                     },
                     Some(VadEvent::Discarded { .. }) => {
                         if let Some(s) = &stream { s.reset(); }
@@ -493,7 +507,13 @@ async fn listen_loop(
             }
             ev = ev_rx.recv(), if stream.is_some() => match ev {
                 Some(SttEvent::Final { text, .. }) => {
-                    let started = pending.pop_front().map(|p| p.utt.started_at).unwrap_or_else(Instant::now);
+                    let p = pending.pop_front();
+                    tracing::info!(
+                        after_end_ms = p.as_ref().map(|p| p.ended.elapsed().as_millis() as u64),
+                        text = %text,
+                        "STT: фраза распознана"
+                    );
+                    let started = p.map(|p| p.utt.started_at).unwrap_or_else(Instant::now);
                     inner.handle_transcript(&text, started, on_intent.as_ref());
                 }
                 Some(SttEvent::Partial { text }) => {
@@ -512,8 +532,12 @@ async fn listen_loop(
             _ = sleep_until(deadline), if deadline.is_some() => {
                 // Потоковый STT молчит — та же фраза через `transcribe` (POST /stt).
                 if let Some(p) = pending.pop_front() {
+                    tracing::warn!(
+                        waited_ms = p.ended.elapsed().as_millis() as u64,
+                        "STT: потоковый ответ не пришёл, повтор через POST"
+                    );
                     if let Some(s) = &stream { s.reset(); }
-                    transcribe(p.utt);
+                    transcribe(p.utt, p.ended);
                 }
             }
         }

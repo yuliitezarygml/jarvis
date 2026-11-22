@@ -29,9 +29,32 @@ use crate::runtime::{Core, CoreHooks, CoreOptions};
 use crate::sink::TauriSink;
 use crate::windows_manager::{WindowEffects, WindowsState};
 
+/// Журнал модулей (`tracing`): в консоль и в `data/logs/jarvis.log`. Уровень — `RUST_LOG`,
+/// по умолчанию info для своих крейтов (голос, LLM, агент…) и warn для остального.
+fn init_logging(root: &std::path::Path) {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("warn,jarvis=info,jarvis_lib=info,jarvis_voice=info,jarvis_llm=info,jarvis_agent=info,jarvis_memory=info,jarvis_pc=info,jarvis_sys=info,jarvis_web=info,jarvis_kb=info")
+    });
+    let dir = root.join("data").join("logs");
+    let file = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::OpenOptions::new().create(true).append(true).open(dir.join("jarvis.log")))
+        .ok();
+    let builder = tracing_subscriber::fmt().with_env_filter(filter).with_target(true).with_ansi(false);
+    let res = match file {
+        Some(f) => builder.with_writer(std::io::stderr.and(std::sync::Mutex::new(f))).try_init(),
+        None => builder.with_writer(std::io::stderr).try_init(),
+    };
+    if let Err(e) = res {
+        eprintln!("[jarvis] журнал не включён: {e}");
+    }
+}
+
 pub fn run() {
     let config_path = config_store::config_path();
     let root = config_store::project_root(&config_path);
+    init_logging(&root);
     let (store, config_error) = ConfigStore::open(config_path);
     let initial = store.get();
 
@@ -91,6 +114,7 @@ pub fn run() {
             commands::get_hud_mode,
             commands::toggle_hud_mode,
             commands::toggle_hud_fullscreen,
+            commands::corner_caption,
             commands::exit_hud_fullscreen,
             commands::open_settings,
             commands::overlay_geometry,
