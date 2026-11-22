@@ -149,6 +149,28 @@ impl ModelChain {
         }
     }
 
+    /// Вся цепочка упёрлась в лимит: какую модель ждать (освободится раньше всех) и сколько.
+    /// `None` — не все ошибки «лимит» с известным `retry_after` в пределах `rate_limit_wait`.
+    fn soonest_free(&self, limited: &[(Duration, usize)], attempted: usize) -> Option<(Duration, usize)> {
+        if self.models.len() < 2 || self.rate_limit_wait.is_zero() || limited.len() != attempted || attempted == 0 {
+            return None;
+        }
+        limited
+            .iter()
+            .copied()
+            .min_by_key(|(d, _)| *d)
+            .filter(|(d, _)| *d <= self.rate_limit_wait)
+            .map(|(d, i)| (d + Duration::from_millis(250), i))
+    }
+
+    async fn sleep_or_cancel(d: Duration, cancel: &CancellationToken) -> bool {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => false,
+            _ = tokio::time::sleep(d) => true,
+        }
+    }
+
     async fn wait_retry(&self, model: &str, err: &LlmError, cancel: &CancellationToken) -> Wait {
         let Some(d) = self.retry_delay(err) else { return Wait::GiveUp };
         tracing::info!(model, wait_ms = d.as_millis() as u64, "лимит запросов: жду и повторяю один раз");
@@ -225,12 +247,16 @@ impl ChatModel for ModelChain {
     async fn chat(&self, req: ChatRequest, cancel: CancellationToken) -> Result<ChatResponse, LlmError> {
         let plan = self.plan();
         let mut last = LlmError::Other("в цепочке нет моделей".into());
+        let mut limited: Vec<(Duration, usize)> = Vec::new();
         for (i, m) in plan.iter().enumerate() {
             if cancel.is_cancelled() {
                 return Err(LlmError::Cancelled);
             }
             let id = m.id();
             let mut res = m.chat(req.clone(), cancel.clone()).await;
+            if let Err(LlmError::RateLimited { retry_after_ms: Some(ms) }) = &res {
+                limited.push((Duration::from_millis(*ms), i));
+            }
             if let Err(e) = &res {
                 match self.wait_retry(&id, e, &cancel).await {
                     Wait::Retry => res = m.chat(req.clone(), cancel.clone()).await,
@@ -250,6 +276,19 @@ impl ChatModel for ModelChain {
                 Err(e) => return Err(e),
             }
         }
+        // Все модели упёрлись в лимит, но одна скоро освободится — подождать её и повторить один раз.
+        if let Some((d, i)) = self.soonest_free(&limited, plan.len()) {
+            let m = &plan[i];
+            tracing::info!(model = %m.id(), wait_ms = d.as_millis() as u64, "вся цепочка в лимите: жду ближайшую модель");
+            if !Self::sleep_or_cancel(d, &cancel).await {
+                return Err(LlmError::Cancelled);
+            }
+            let r = m.chat(req, cancel).await;
+            if r.is_ok() {
+                self.breaker.record_success(&Self::provider_of(&m.id()));
+            }
+            return r;
+        }
         Err(last)
     }
 
@@ -262,12 +301,16 @@ impl ChatModel for ModelChain {
     ) -> Result<ChatResponse, LlmError> {
         let plan = self.plan();
         let mut last = LlmError::Other("в цепочке нет моделей".into());
+        let mut limited: Vec<(Duration, usize)> = Vec::new();
         for (i, m) in plan.iter().enumerate() {
             if cancel.is_cancelled() {
                 return Err(LlmError::Cancelled);
             }
             let id = m.id();
             let (mut res, mut forwarded) = Self::stream_once(m, &req, &tx, &cancel).await;
+            if let (Err(LlmError::RateLimited { retry_after_ms: Some(ms) }), false) = (&res, forwarded) {
+                limited.push((Duration::from_millis(*ms), i));
+            }
             if let Err(e) = &res
                 && !forwarded
             {
@@ -293,6 +336,19 @@ impl ChatModel for ModelChain {
                     return Err(e);
                 }
             }
+        }
+        // Все модели упёрлись в лимит, но одна скоро освободится — подождать её и повторить один раз.
+        if let Some((d, i)) = self.soonest_free(&limited, plan.len()) {
+            let m = &plan[i];
+            tracing::info!(model = %m.id(), wait_ms = d.as_millis() as u64, "вся цепочка в лимите: жду ближайшую модель");
+            if !Self::sleep_or_cancel(d, &cancel).await {
+                return Err(LlmError::Cancelled);
+            }
+            let (r, _) = Self::stream_once(m, &req, &tx, &cancel).await;
+            if r.is_ok() {
+                self.breaker.record_success(&Self::provider_of(&m.id()));
+            }
+            return r;
         }
         Err(last)
     }
@@ -490,6 +546,39 @@ mod tests {
         let (tx, _rx) = mpsc::channel(8);
         assert!(chain.chat_stream(ChatRequest::default(), tx, CancellationToken::new()).await.is_ok());
         assert_eq!(m.calls(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn whole_chain_limited_waits_for_soonest_model() {
+        // groq: лимит 12 с, groq-2: 5 с → ждём 5 с и повторяем groq-2 (один раз).
+        let a = Limited::new("groq/m", 1, Some(12_000));
+        let b = Limited::new("groq-2/m", 1, Some(5_000));
+        let chain = chain_of(vec![a.clone(), b.clone()]);
+        let t0 = tokio::time::Instant::now();
+        let (tx, _rx) = mpsc::channel(8);
+        let r = chain.chat_stream(ChatRequest::default(), tx, CancellationToken::new()).await.unwrap();
+        assert_eq!(r.model, "groq-2/m");
+        assert_eq!((a.calls(), b.calls()), (1, 2));
+        let waited = t0.elapsed();
+        assert!(waited >= Duration::from_secs(5) && waited < Duration::from_secs(12), "{waited:?}");
+
+        // Долгий лимит у всех (> 20 с) — сразу ошибка, без ожидания.
+        let a = Limited::new("groq/m", 1, Some(40_000));
+        let b = Limited::new("groq-2/m", 1, Some(30_000));
+        assert!(chain_of(vec![a.clone(), b.clone()]).chat(ChatRequest::default(), CancellationToken::new()).await.is_err());
+        assert_eq!((a.calls(), b.calls()), (1, 1));
+
+        // Отмена во время ожидания.
+        let a = Limited::new("groq/m", 1, Some(9_000));
+        let b = Limited::new("groq-2/m", 1, Some(9_000));
+        let cancel = CancellationToken::new();
+        let c2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            c2.cancel();
+        });
+        let e = chain_of(vec![a, b]).chat(ChatRequest::default(), cancel).await.unwrap_err();
+        assert_eq!(e, LlmError::Cancelled);
     }
 
     #[tokio::test(start_paused = true)]
