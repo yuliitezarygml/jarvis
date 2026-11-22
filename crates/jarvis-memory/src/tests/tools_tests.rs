@@ -48,7 +48,8 @@ async fn remember_recall_forget_flow() {
 
     // («пил» ↔ «пью» — разные основы, стеммер такие формы не связывает; «кофе» — связывает)
     let out = recall.call(json!({"query": "какой кофе я пью?"}), &ctx).await.unwrap();
-    assert!(out.content.contains("чёрный кофе"), "{}", out.content);
+    // текст — от последней явной формулировки («черный» без ё)
+    assert!(out.content.contains("я пью черный кофе"), "{}", out.content);
     assert!(!out.untrusted);
     let out = recall.call(json!({"query": "погода на Марсе"}), &ctx).await.unwrap();
     assert!(out.content.starts_with("В памяти ничего не нашлось"));

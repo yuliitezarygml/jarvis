@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import ProvidersTab from '@/components/settings/ProvidersTab';
 import { AudioTab, PermissionsTab, SearchTab, VoiceTab, WindowsTab } from '@/components/settings/tabs';
-import { call, errorText, listenTo } from '@/lib/bridge';
+import { call, errorText } from '@/lib/bridge';
+import { useTauriEvent } from '@/lib/store';
 import { isDirty } from '@/lib/settings';
 import { SETTINGS_TAB_EVENT, type Config } from '@/lib/types';
 
@@ -35,19 +36,18 @@ export default function SettingsPage() {
     };
     fromHash();
     window.addEventListener('hashchange', fromHash);
-    let unlisten: (() => void) | undefined;
-    void listenTo<string>(SETTINGS_TAB_EVENT, (t) => isTab(t) && setTab(t)).then((u) => (unlisten = u));
     call<Config>('config_get')
       .then((c) => {
         setSaved(c);
         setDraft(c);
       })
       .catch((e) => setStatus({ ok: false, text: `Не удалось прочитать config.json: ${errorText(e)}` }));
-    return () => {
-      window.removeEventListener('hashchange', fromHash);
-      unlisten?.();
-    };
+    return () => window.removeEventListener('hashchange', fromHash);
   }, []);
+
+  useTauriEvent<string>(SETTINGS_TAB_EVENT, (t) => {
+    if (isTab(t)) setTab(t);
+  });
 
   const update = useCallback((f: (c: Config) => Config) => {
     setDraft((d) => (d ? f(d) : d));

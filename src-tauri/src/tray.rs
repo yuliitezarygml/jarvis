@@ -32,7 +32,16 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: TrayAction) {
     let res = match action {
         TrayAction::Fullscreen => windows_manager::set_mode(app, HudMode::Fullscreen),
         TrayAction::Corner => windows_manager::set_mode(app, HudMode::Corner),
-        TrayAction::Settings => windows_manager::open_settings(app, None),
+        TrayAction::Settings => {
+            // создание окна — не из обработчика цикла событий, а из отдельного потока
+            let app = app.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = windows_manager::open_settings(&app, None) {
+                    eprintln!("[jarvis] трей: {e}");
+                }
+            });
+            Ok(())
+        }
         TrayAction::Quit => {
             app.exit(0);
             Ok(())

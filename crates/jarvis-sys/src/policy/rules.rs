@@ -1,6 +1,6 @@
 //! Правила классификации: сегменты → команды → уровни риска.
 
-use jarvis_core::RiskTier::{self, T0, T1, T2, T3};
+use jarvis_core::RiskTier::{T1, T2, T3};
 
 use super::lexer::{GroupKind, Tok, lex};
 use super::paths::{Hive, PathOp, PathZone, parse_reg_path, path_tier, ps_provider, zone_of};

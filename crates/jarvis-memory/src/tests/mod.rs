@@ -59,3 +59,4 @@ impl ChatModel for MockModel {
         Ok(ChatResponse { message: ChatMessage::assistant(text), model: self.id(), usage: None })
     }
 }
+mod zz_repro;

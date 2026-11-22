@@ -12,10 +12,10 @@ import Subtitles from '@/components/hud/Subtitles';
 import Telemetry from '@/components/hud/Telemetry';
 import Waveform from '@/components/hud/Waveform';
 import Reactor from '@/components/reactor/Reactor';
-import { call, listenTo } from '@/lib/bridge';
+import { call } from '@/lib/bridge';
 import { fmtClock } from '@/lib/format';
 import { STATE_LABEL, TIER_LABEL } from '@/lib/glow';
-import { useJarvis, useNow } from '@/lib/store';
+import { useJarvis, useNow, useTauriEvent } from '@/lib/store';
 import { EMERGENCY_EVENT } from '@/lib/types';
 
 function Clock() {
@@ -28,17 +28,14 @@ export default function HudPage() {
   const control = useJarvis((s) => s.control);
   const [stopped, setStopped] = useState<number | null>(null);
 
+  useTauriEvent(EMERGENCY_EVENT, () => setStopped(Date.now()));
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.querySelector('.confirm')) void call('set_hud_mode', { mode: 'corner' });
     };
     window.addEventListener('keydown', onKey);
-    let unlisten: (() => void) | undefined;
-    void listenTo(EMERGENCY_EVENT, () => setStopped(Date.now())).then((u) => (unlisten = u));
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      unlisten?.();
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   useEffect(() => {

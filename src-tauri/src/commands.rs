@@ -30,9 +30,11 @@ pub struct SinkState(pub TauriSink<tauri::Wry>);
 pub struct SimState(Mutex<Option<CancellationToken>>);
 
 // ───────────────────────────── окна ─────────────────────────────
+// Команды, которые трогают окна, — async: синхронная команда выполняется в потоке WebView2,
+// и создание/показ окна из неё на Windows может зависнуть (предупреждение в документации Tauri).
 
 #[tauri::command]
-pub fn set_hud_mode(app: AppHandle, mode: HudMode) -> CmdResult<()> {
+pub async fn set_hud_mode(app: AppHandle, mode: HudMode) -> CmdResult<()> {
     windows_manager::set_mode(&app, mode).map_err(err)
 }
 
@@ -42,18 +44,18 @@ pub fn get_hud_mode(state: State<'_, WindowsState>) -> HudMode {
 }
 
 #[tauri::command]
-pub fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
+pub async fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
     windows_manager::toggle_mode(&app).map_err(err)
 }
 
 #[tauri::command]
-pub fn open_settings(app: AppHandle, tab: Option<String>) -> CmdResult<()> {
+pub async fn open_settings(app: AppHandle, tab: Option<String>) -> CmdResult<()> {
     windows_manager::open_settings(&app, tab.as_deref()).map_err(err)
 }
 
 #[tauri::command]
-pub fn overlay_geometry(app: AppHandle) -> Option<OverlayGeometry> {
-    windows_manager::overlay_geometry(&app)
+pub async fn overlay_geometry(app: AppHandle) -> CmdResult<Option<OverlayGeometry>> {
+    Ok(windows_manager::overlay_geometry(&app))
 }
 
 // ───────────────────────────── конфиг ─────────────────────────────

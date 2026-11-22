@@ -4,9 +4,9 @@
 // компонент только при смене выбранного среза (селектор должен возвращать готовый объект из состояния).
 // Канвас-реактор читает `jarvisStore.getState()` прямо в кадре — без перерисовок React 30 раз в секунду.
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 
-import { call, onJarvisEvent } from './bridge';
+import { call, listenTo, onJarvisEvent } from './bridge';
 import { initialState, reduce, reduceAll, type JarvisState } from './reducer';
 
 type Listener = () => void;
@@ -66,6 +66,29 @@ export function useJarvis<T>(selector: (s: JarvisState) => T): T {
     () => selector(jarvisStore.getState()),
     () => selector(initialState),
   );
+}
+
+/**
+ * Подписка на Tauri-событие на время жизни компонента. Подписка асинхронная, поэтому отписка
+ * учитывает размонтирование до её завершения (StrictMode монтирует эффекты дважды).
+ */
+export function useTauriEvent<T>(name: string, handler: (payload: T) => void) {
+  const ref = useRef(handler);
+  useEffect(() => {
+    ref.current = handler;
+  });
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listenTo<T>(name, (p) => ref.current(p)).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [name]);
 }
 
 /** Текущее время, обновляемое с периодом `ms` (часы, таймеры). */

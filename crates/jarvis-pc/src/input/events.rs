@@ -298,13 +298,15 @@ mod tests {
 
     #[test]
     fn text_to_events_cyrillic_newlines_surrogates() {
+        // П р ⏎ и ⇥ в е т 😀 ⏎
         let g = text_events("Пр\r\nи\tвет😀\n");
-        assert_eq!(g.len(), 8);
+        assert_eq!(g.len(), 10);
         assert_eq!(g[0], vec![InputEvent::Unicode { unit: 'П' as u16, up: false }, InputEvent::Unicode { unit: 'П' as u16, up: true }]);
         assert_eq!(g[2], key_tap(vk::RETURN).to_vec(), "\\r\\n — один Enter");
         assert_eq!(g[4], key_tap(vk::TAB).to_vec());
-        assert_eq!(g[6].len(), 4, "эмодзи — суррогатная пара");
-        assert_eq!(g[7], key_tap(vk::RETURN).to_vec());
+        assert_eq!(g[8].len(), 4, "эмодзи — суррогатная пара");
+        assert!(matches!(g[8][0], InputEvent::Unicode { unit, up: false } if (0xD800..0xDC00).contains(&unit)));
+        assert_eq!(g[9], key_tap(vk::RETURN).to_vec());
         assert!(text_events("").is_empty());
     }
 

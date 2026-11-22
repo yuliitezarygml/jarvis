@@ -69,7 +69,14 @@ fn pre_score(m: &ModelInfo) -> i64 {
         crate::SpeedHint::Medium => 1,
         crate::SpeedHint::Slow => 0,
     };
-    m.quality as i64 * 10 + if m.tools { 6 } else { 0 } + if ctx_ok { 3 } else { 0 } + speed + i64::from(m.vision)
+    // Родной API модели поддержан здесь (без перевода на стороне провайдера) — надёжнее.
+    let native = m.api.as_ref().is_none_or(|a| a.native_api.is_none());
+    m.quality as i64 * 10
+        + if m.tools { 6 } else { 0 }
+        + if ctx_ok { 3 } else { 0 }
+        + speed
+        + i64::from(m.vision)
+        + if native { 2 } else { 0 }
 }
 
 /// Сравнение с учётом чисел: `gpt-5.10` > `gpt-5.9`, `claude-sonnet-5-5` > `claude-sonnet-5`.
@@ -112,7 +119,13 @@ fn blended_price(m: &ModelInfo) -> Option<f64> {
 /// лучшие по метаданным (по одной на семейство, новые версии первыми) + места под зрение, самую быструю и самую дешёвую.
 pub fn select_candidates<'a>(models: &'a [ModelInfo], spec: &ProviderSpec, max: usize, vision_slots: usize) -> Vec<&'a ModelInfo> {
     let mut pool: Vec<&ModelInfo> = models.iter().filter(|m| !spec.skip_probe(&m.id)).collect();
-    pool.sort_by(|a, b| pre_score(b).cmp(&pre_score(a)).then_with(|| natural_cmp(&b.id, &a.id)));
+    // При равном счёте: дешевле раньше (неизвестная цена — в конце), затем новее.
+    pool.sort_by(|a, b| {
+        pre_score(b)
+            .cmp(&pre_score(a))
+            .then_with(|| blended_price(a).unwrap_or(f64::MAX).total_cmp(&blended_price(b).unwrap_or(f64::MAX)))
+            .then_with(|| natural_cmp(&b.id, &a.id))
+    });
     let family = |m: &ModelInfo| m.family.clone().unwrap_or_else(|| m.id.clone());
 
     let mut picked: Vec<&ModelInfo> = Vec::new();
@@ -269,5 +282,35 @@ mod tests {
         assert_eq!(a[0], "deepseek-v4-pro");
         assert!(a.iter().any(|i| i.contains("llama-4-scout")), "vision-модель попала в кандидаты: {a:?}");
         assert!(!a.iter().any(|i| i == "beam-free"), "probe_skip");
+        assert!(a.iter().any(|i| i == "openai/gpt-oss-20b"), "место под быструю модель: {a:?}");
+    }
+
+    #[test]
+    fn one_per_family_newest_first_plus_cheap() {
+        let mut models: Vec<ModelInfo> =
+            ["claude-sonnet-4-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gemini-4-argon", "gemini-4-neon"]
+                .iter()
+                .map(|i| mk(i))
+                .collect();
+        let mut cheap = mk("tiny-cheap-model");
+        cheap.price_in = Some(0.01);
+        cheap.price_out = Some(0.02);
+        models.push(cheap);
+        let spec = ProviderSpec::from_config(&ProviderConfig { id: "x".into(), ..Default::default() });
+        let a: Vec<_> = select_candidates(&models, &spec, 4, 1).iter().map(|m| m.id.clone()).collect();
+        let sonnets: Vec<_> = a.iter().filter(|i| i.starts_with("claude-sonnet")).collect();
+        assert_eq!(sonnets, ["claude-sonnet-5-5"], "одна модель на семейство, самая новая: {a:?}");
+        assert!(a.contains(&"tiny-cheap-model".to_string()), "место под дешёвую: {a:?}");
+        assert!(a.contains(&"claude-haiku-5-5".to_string()), "место под быструю: {a:?}");
+    }
+
+    #[test]
+    fn natural_order() {
+        use std::cmp::Ordering::*;
+        assert_eq!(natural_cmp("gpt-5.10", "gpt-5.9"), Greater);
+        assert_eq!(natural_cmp("claude-sonnet-5-5", "claude-sonnet-5"), Greater);
+        assert_eq!(natural_cmp("claude-sonnet-4-6", "claude-sonnet-5"), Less);
+        assert_eq!(natural_cmp("a1", "a01"), Equal);
+        assert_eq!(natural_cmp("abc", "abd"), Less);
     }
 }

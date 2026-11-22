@@ -67,13 +67,18 @@ function CursorTrail({ geometry, color }: { geometry: OverlayGeometry; color: st
       }
       if (pts.length) raf = requestAnimationFrame(draw);
     };
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     void listenTo<{ x: number; y: number }>(CURSOR_EVENT, (p) => {
       const q = toOverlayPoint(p.x, p.y, geometry);
       pts.push({ ...q, t: performance.now() });
       if (!raf) raf = requestAnimationFrame(draw);
-    }).then((u) => (unlisten = u));
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
     return () => {
+      disposed = true;
       unlisten?.();
       if (raf) cancelAnimationFrame(raf);
     };
@@ -95,7 +100,6 @@ export default function OverlayPage() {
 
   useEffect(() => {
     setBrowser(!inTauri());
-    document.documentElement.classList.add('transparent-window');
   }, []);
 
   const glow = glowFor({ tier: control.active ? control.tier : null, confirmPending: confirm !== null, assistant });

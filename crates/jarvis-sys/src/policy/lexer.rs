@@ -450,7 +450,8 @@ impl<'a> PsLexer<'a> {
         for w in rest.split_whitespace() {
             let quoted = w.contains('"');
             let text = w.replace('"', "");
-            self.push(Tok::Word { expandable: text.contains('%'), text, quoted, attached: false, comma: false });
+            let expandable = text.contains('%');
+            self.push(Tok::Word { expandable, text, quoted, attached: false, comma: false });
         }
     }
 
@@ -555,7 +556,8 @@ impl<'a> PsLexer<'a> {
             self.i += 1;
             return Ok((c.to_string(), false, false));
         }
-        Ok((text, expandable || (any_bare && text.contains('$')), quoted))
+        let expandable = expandable || (any_bare && text.contains('$'));
+        Ok((text, expandable, quoted))
     }
 }
 

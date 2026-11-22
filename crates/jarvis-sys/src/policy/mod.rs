@@ -11,6 +11,7 @@ mod rules;
 mod tests;
 
 pub use paths::{PathOp, PathZone, path_tier, path_zone};
+#[allow(unused_imports)]
 pub(crate) use paths::{Hive, RegPath, parse_reg_path};
 
 use jarvis_core::RiskTier;

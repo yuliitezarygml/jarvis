@@ -34,6 +34,8 @@ export default function DevPanel({ defaultOpen = false }: { defaultOpen?: boolea
   useEffect(() => {
     if (!inTauri()) {
       setVisible(true);
+      // в браузере `?demo` сразу запускает сценарий (удобно для скриншотов и проверки вёрстки)
+      if (new URLSearchParams(window.location.search).has('demo')) void call('simulate_demo');
     } else {
       call<{ debug_build: boolean }>('app_info')
         .then((i) => setVisible(i.debug_build))
