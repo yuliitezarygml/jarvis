@@ -37,7 +37,7 @@ fn request(http: &Client, method: reqwest::Method, path: &str) -> Result<Request
     provider::base(&url)?;
     Ok(http
         .request(method, format!("{}{path}", url.trim_end_matches('/')))
-        .bearer_auth(std::env::var("JARVIS_TTS_TOKEN").context("Токен TTS не настроен")?))
+        .bearer_auth(std::env::var("JARVIS_TTS_TOKEN").context("Токен TTS не настроен: задайте JARVIS_TTS_TOKEN в backend.env (%APPDATA%\\com.jarvis.desktop)")?))
 }
 pub async fn ready(http: &Client) -> Result<Value> {
     let r = request(http, reqwest::Method::GET, "/ready")?

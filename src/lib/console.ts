@@ -224,11 +224,8 @@ export function useConsole() {
             setMic(liveMic.current);
             micLevels.current.fill(0);
             setPermission(3);
-            if (liveMic.current !== "off") {
-              if (!turn.current) setPhase("LISTENING");
-            } else if (!turn.current) {
-              setPhase((last) => last === "PROCESSING" ? last : paused.current ? "STOPPED" : "IDLE");
-            }
+            if (liveMic.current !== "off") setPhase("LISTENING");
+            else if (!turn.current) setPhase((last) => last === "PROCESSING" ? last : "IDLE");
             break;
           case "speech":
             if (e.data.state === "cleared") {
@@ -268,7 +265,7 @@ export function useConsole() {
               e.kind === "error"
                 ? "ERROR"
                 : liveMic.current === "off"
-                  ? (paused.current ? "STOPPED" : "IDLE")
+                  ? "IDLE"
                   : "LISTENING",
             );
             if (e.kind === "error") setError(String(e.data));
@@ -433,7 +430,6 @@ export function useConsole() {
     send,
     stop,
     capture,
-    paused,
     save,
     preference,
     report,

@@ -159,12 +159,11 @@ impl Files {
                 {
                     names.push(name);
                 }
-                if names.len() == 100 {
-                    break;
-                }
             }
             names.sort();
-            return Ok(json!({"files":names,"limit":100}));
+            let truncated = names.len() > 100;
+            names.truncate(100);
+            return Ok(json!({"files":names,"limit":100,"truncated":truncated}));
         }
         let a: Named = serde_json::from_value(args.clone())?;
         let text = self.read(&a.name)?.context("Файл отсутствует")?;

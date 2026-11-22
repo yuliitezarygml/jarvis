@@ -113,7 +113,14 @@ impl LlmProvider for Compatible {
         cancel: &CancellationToken,
         on_text: &mut (dyn for<'a> FnMut(&'a str) -> Result<()> + Send),
     ) -> Result<Vec<Value>> {
-        let mut body = json!({"model":s.model,"messages":messages,"stream":true,"max_tokens":1024});
+        // 1024 cut long answers off silently; JARVIS_MAX_TOKENS overrides the default.
+        let max_tokens = std::env::var("JARVIS_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(2048)
+            .clamp(128, 8192);
+        let mut body =
+            json!({"model":s.model,"messages":messages,"stream":true,"max_tokens":max_tokens});
         if !tools.is_empty() {
             body["tools"] = tools.into();
         }

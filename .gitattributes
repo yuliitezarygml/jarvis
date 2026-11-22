@@ -1,0 +1,7 @@
+* text=auto
+*.sh text eol=lf
+*.rs text eol=lf
+*.wav binary
+*.mp3 binary
+*.sqlite3 binary
+*.png binary

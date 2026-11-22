@@ -115,18 +115,7 @@ impl Core {
             .map(String::as_str)
             .collect::<Vec<_>>()
             .join(" ");
-        if heard.is_empty() || reference.contains(&heard) {
-            return true;
-        }
-        let mut total = 0;
-        let mut hits = 0;
-        for word in heard.split_whitespace() {
-            total += 1;
-            if reference.split_whitespace().any(|w| w == word) {
-                hits += 1;
-            }
-        }
-        total >= 3 && hits * 4 >= total * 3
+        is_echo(&reference, &heard)
     }
     pub fn start(self: &Arc<Self>, session: String, text: String) -> Result<String> {
         let text = text.trim();
@@ -275,6 +264,7 @@ impl Core {
             None
         };
         let mut text = String::new();
+        let mut used_tools = false;
         let mut first = true;
         let mut schemas = if s.tools {
             ToolRegistry::schemas()
@@ -329,6 +319,7 @@ impl Core {
                 s.tools && !schemas.is_empty() && round < 3,
                 "Превышен лимит вызовов инструментов"
             );
+            used_tools = true;
             context.push(json!({"role":"assistant","content":current,"tool_calls":calls}));
             for call in calls {
                 let name = call["function"]["name"]
@@ -352,6 +343,15 @@ impl Core {
             }
             self.event(id, Kind::Thinking, Value::Null);
         }
+        if text.trim().is_empty() && used_tools {
+            // The tools already ran: report that instead of failing a turn that did real work.
+            let note = "Инструменты отработали, но итоговый ответ не получен. Подробности в журнале действий.";
+            self.event(id, Kind::Delta, json!(note));
+            if s.speak && !tx.is_closed() {
+                let _ = tx.send(note.to_owned());
+            }
+            text.push_str(note);
+        }
         ensure!(!text.trim().is_empty(), "Модель завершила ответ без текста");
         self.for_turn(id, || {
             self.db.lock().unwrap().append(session, "assistant", &text)
@@ -365,6 +365,31 @@ impl Core {
     }
 }
 
+/// Decides whether `heard` is the assistant's own voice picked up by the microphone.
+/// Matching is on word boundaries: a short command such as «да» must not hide inside «когда».
+/// A live partial transcript may end mid-word, so a prefix of the last word is accepted
+/// only for fragments of four or more characters.
+fn is_echo(reference: &str, heard: &str) -> bool {
+    if heard.is_empty() {
+        return true;
+    }
+    let padded = format!(" {reference} ");
+    if padded.contains(&format!(" {heard} "))
+        || (heard.chars().count() >= 4 && padded.contains(&format!(" {heard}")))
+    {
+        return true;
+    }
+    let mut total = 0;
+    let mut hits = 0;
+    for word in heard.split_whitespace() {
+        total += 1;
+        if reference.split_whitespace().any(|w| w == word) {
+            hits += 1;
+        }
+    }
+    total >= 3 && hits * 4 >= total * 3
+}
+
 fn normalize_speech(text: &str) -> String {
     text.to_lowercase()
         .replace('ё', "е")
@@ -372,6 +397,32 @@ fn normalize_speech(text: &str) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod echo_tests {
+    use super::is_echo;
+    const SAID: &str = "добрый вечер сэр чем могу помочь задача выполнена";
+    #[test]
+    fn short_commands_are_not_mistaken_for_echo() {
+        for word in ["да", "нет", "стоп", "ча"] {
+            assert!(!is_echo(SAID, word), "{word}");
+        }
+        assert!(!is_echo(SAID, "да"));
+        assert!(!is_echo("когда задача выполнена", "да"));
+    }
+    #[test]
+    fn real_echo_is_still_filtered() {
+        assert!(is_echo(SAID, ""));
+        assert!(is_echo(SAID, "сэр"));
+        assert!(is_echo(SAID, "добрый вечер"));
+        assert!(is_echo(SAID, "добрый ве"), "partial ending mid-word");
+        assert!(
+            is_echo(SAID, "добрый вечер сэр как"),
+            "three of four words repeat"
+        );
+        assert!(!is_echo(SAID, "включи свет в комнате"));
+    }
 }
 
 #[cfg(test)]
