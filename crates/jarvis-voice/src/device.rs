@@ -34,6 +34,32 @@ pub fn pick_by_name(names: &[String], wanted: &str) -> Option<usize> {
         .or_else(|| names.iter().position(|n| n.to_lowercase().contains(&w)))
 }
 
+/// Предупреждения для HUD: выбранный в настройках микрофон/динамики сейчас не подключены
+/// (тогда `Capture`/`Player` берут устройство Windows по умолчанию). Устройства не открываются.
+pub fn missing_device_warnings(audio: &jarvis_core::config::AudioConfig) -> Vec<String> {
+    missing_warnings(audio, input_devices().ok().as_deref(), output_devices().ok().as_deref())
+}
+
+/// Чистая часть `missing_device_warnings` (список устройств не удалось получить — `None`, молчим).
+pub fn missing_warnings(
+    audio: &jarvis_core::config::AudioConfig,
+    inputs: Option<&[String]>,
+    outputs: Option<&[String]>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if let (Some(w), Some(list)) = (audio.input(), inputs)
+        && pick_by_name(list, w).is_none()
+    {
+        out.push(format!("Микрофон «{w}» не найден — слушаю микрофон Windows по умолчанию. Выберите другой в Настройках → «Аудио»."));
+    }
+    if let (Some(w), Some(list)) = (audio.output(), outputs)
+        && pick_by_name(list, w).is_none()
+    {
+        out.push(format!("Устройство вывода «{w}» не найдено — говорю через динамики Windows по умолчанию. Выберите другое в Настройках → «Аудио»."));
+    }
+    out
+}
+
 pub(crate) fn find_output(wanted: Option<&str>) -> Result<cpal::Device> {
     let host = cpal::default_host();
     if let Some(w) = wanted.filter(|w| !w.trim().is_empty()) {
@@ -71,5 +97,20 @@ mod tests {
         assert_eq!(pick_by_name(&n, "наушники"), Some(1));
         assert_eq!(pick_by_name(&n, "HDMI"), None);
         assert_eq!(pick_by_name(&n, " "), None);
+    }
+
+    #[test]
+    fn warnings_only_for_missing_selected_devices() {
+        use jarvis_core::config::AudioConfig;
+        let ins: Vec<String> = vec!["Микрофон (USB Audio)".into()];
+        let outs: Vec<String> = vec!["Динамики (Realtek)".into()];
+        let mut a = AudioConfig::default();
+        assert!(missing_warnings(&a, Some(&ins), Some(&outs)).is_empty(), "по умолчанию — без предупреждений");
+        a.input_device = Some("Микрофон (USB Audio)".into());
+        a.output_device = Some("Наушники (Bluetooth)".into());
+        let w = missing_warnings(&a, Some(&ins), Some(&outs));
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("Наушники (Bluetooth)"), "{w:?}");
+        assert!(missing_warnings(&a, None, None).is_empty(), "список недоступен — молчим");
     }
 }

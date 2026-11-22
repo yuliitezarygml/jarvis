@@ -100,6 +100,8 @@ mod tests {
         assert_eq!(c.timeout_for("terminal_run"), Duration::from_secs(60));
         assert_eq!(c.timeout_for("web_research"), Duration::from_secs(90));
         assert_eq!(c.autonomy, Autonomy::AskDangerous);
+        assert_eq!(c.max_tokens, Some(DEFAULT_MAX_TOKENS));
+        assert!(c.lazy_tools);
     }
 
     #[test]

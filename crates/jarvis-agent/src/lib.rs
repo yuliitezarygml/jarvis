@@ -10,17 +10,19 @@ mod history;
 pub mod hooks;
 pub mod prompt;
 pub mod text;
+pub mod toolsets;
 pub mod transcript;
 
 pub use agent::{
     Agent, AgentBuilder, CANCELLED_TEXT, DENIED_TEXT, KNOWN_FIX_PREFIX, TaskOutcome, VISION_OFF_MARK,
     humanize_llm_error,
 };
-pub use config::AgentConfig;
+pub use config::{AgentConfig, DEFAULT_MAX_TOKENS};
 pub use history::{IMAGE_TOKENS, estimate_tokens};
 pub use hooks::{
     Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, ProtectedPathCheck, Redactor, SpeechSink,
     identity_redactor, no_protected_paths,
 };
-pub use prompt::{PERSONA_PROMPT, build_system_prompt};
+pub use prompt::{PERSONA_PROMPT, TOOLS_LOAD_NOTE, build_system_prompt};
+pub use toolsets::{TOOLS_LOAD, group_of, route};
 pub use transcript::{StepStatus, StopReason, Transcript, TranscriptStep};
