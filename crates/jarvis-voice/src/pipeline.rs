@@ -41,8 +41,10 @@ pub struct VoiceConfig {
     pub max_phrase_chars: usize,
     /// Сколько ждать `final` от потокового STT, прежде чем отправить фразу через `transcribe`.
     pub final_timeout: Duration,
-    /// Окно после «Джарвис» / ответа, когда команда принимается без обращения.
+    /// Окно после одного «Джарвис», когда команда принимается без обращения.
     pub follow_up: Duration,
+    /// Окно после ответа Джарвиса (короче: в шумной комнате ловит чужие разговоры).
+    pub follow_up_after_answer: Duration,
     /// Слушать во время речи (барж-ин голосом). Если false — чистый полу-дуплекс.
     pub barge_in_while_speaking: bool,
     /// Размер буфера, которым звук уходит в плеер.
@@ -62,6 +64,7 @@ impl Default for VoiceConfig {
             max_phrase_chars: MAX_PHRASE_CHARS,
             final_timeout: Duration::from_millis(2500),
             follow_up: Duration::from_secs(15),
+            follow_up_after_answer: Duration::from_secs(6),
             barge_in_while_speaking: true,
             buffer_ms: 100,
             prefetch_phrases: 2,
@@ -98,6 +101,9 @@ struct Inner {
     speaking: AtomicBool,
     awaiting_confirm: AtomicBool,
     follow_up_until: Mutex<Option<Instant>>,
+    /// Окно после явного «Джарвис» без команды: команда принимается даже поверх его «Слушаю, сэр»
+    /// (люди начинают говорить сразу; собственный голос отсекает проверка эха по словам).
+    addressed_until: Mutex<Option<Instant>>,
 }
 
 #[derive(Clone)]
@@ -151,6 +157,7 @@ impl VoicePipeline {
                 speaking: AtomicBool::new(false),
                 awaiting_confirm: AtomicBool::new(false),
                 follow_up_until: Mutex::new(None),
+                addressed_until: Mutex::new(None),
             }),
         }
     }
@@ -232,6 +239,10 @@ impl Inner {
 
     fn in_follow_up(&self) -> bool {
         self.follow_up_until.lock().unwrap().is_some_and(|t| Instant::now() < t)
+    }
+
+    fn addressed(&self) -> bool {
+        self.addressed_until.lock().unwrap().is_some_and(|t| Instant::now() < t)
     }
 
     async fn speak(self: Arc<Self>, mut deltas: mpsc::Receiver<String>) -> Result<SpeakOutcome> {
@@ -326,7 +337,11 @@ impl Inner {
         let _ = synth.await;
         self.speaking.store(false, Ordering::Release);
         if !interrupted {
-            *self.follow_up_until.lock().unwrap() = Some(Instant::now() + self.cfg.follow_up);
+            // После ответа — короткое окно (уточнить, «а ещё…»), чтобы не ловить разговоры рядом.
+            // Окно после явного «Джарвис» (длиннее) не укорачиваем.
+            let after = Instant::now() + self.cfg.follow_up_after_answer;
+            let mut f = self.follow_up_until.lock().unwrap();
+            *f = Some(f.map_or(after, |t| t.max(after)));
         }
         self.events.emit(Event::State { state: AssistantState::Idle });
         match result {
@@ -393,7 +408,9 @@ impl Inner {
         let during_speech = self.speaking.load(Ordering::Acquire) || self.echo.in_echo_zone(started_at);
         let ctx = WakeContext {
             awaiting_confirm: self.awaiting_confirm.load(Ordering::Acquire),
-            follow_up: self.in_follow_up() && !during_speech,
+            // Во время речи Джарвиса команду без обращения не берём (эхо, разговоры рядом) — кроме окна сразу
+            // после явного «Джарвис»: человек начинает говорить, пока звучит «Слушаю, сэр».
+            follow_up: self.in_follow_up() && (!during_speech || self.addressed()),
         };
         let intent = self.wake.classify(text, ctx);
         tracing::info!(?intent, follow_up = ctx.follow_up, awaiting_confirm = ctx.awaiting_confirm, "голос: реплика разобрана");
@@ -407,12 +424,15 @@ impl Inner {
                     self.barge_in();
                 }
                 *self.follow_up_until.lock().unwrap() = None;
+                *self.addressed_until.lock().unwrap() = None;
             }
             Intent::WakeOnly => {
                 if self.speaking.load(Ordering::Acquire) {
                     self.barge_in();
                 }
-                *self.follow_up_until.lock().unwrap() = Some(Instant::now() + self.cfg.follow_up);
+                let until = Instant::now() + self.cfg.follow_up;
+                *self.follow_up_until.lock().unwrap() = Some(until);
+                *self.addressed_until.lock().unwrap() = Some(until);
                 self.events.emit(Event::State { state: AssistantState::Listening });
             }
             Intent::Confirm | Intent::Deny => {}
