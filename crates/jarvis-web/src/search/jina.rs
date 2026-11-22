@@ -17,7 +17,11 @@ pub struct JinaSearch {
 
 impl JinaSearch {
     pub fn new(client: reqwest::Client, key: Option<String>) -> Self {
-        Self { client, key, base_url: DEFAULT_BASE.into() }
+        Self {
+            client,
+            key,
+            base_url: DEFAULT_BASE.into(),
+        }
     }
     pub fn with_base_url(mut self, base: impl Into<String>) -> Self {
         self.base_url = base.into();

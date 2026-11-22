@@ -14,16 +14,55 @@ const ALIASES: &[(&str, &str)] = &[
     ("джарвиз", "джарвис"),
 ];
 
-const UNITS: [&str; 10] = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
+const UNITS: [&str; 10] = [
+    "ноль",
+    "один",
+    "два",
+    "три",
+    "четыре",
+    "пять",
+    "шесть",
+    "семь",
+    "восемь",
+    "девять",
+];
 const UNITS_F: [&str; 3] = ["", "одна", "две"];
 const TEENS: [&str; 10] = [
-    "десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать",
-    "семнадцать", "восемнадцать", "девятнадцать",
+    "десять",
+    "одиннадцать",
+    "двенадцать",
+    "тринадцать",
+    "четырнадцать",
+    "пятнадцать",
+    "шестнадцать",
+    "семнадцать",
+    "восемнадцать",
+    "девятнадцать",
 ];
-const TENS: [&str; 10] =
-    ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
-const HUNDREDS: [&str; 10] =
-    ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"];
+const TENS: [&str; 10] = [
+    "",
+    "",
+    "двадцать",
+    "тридцать",
+    "сорок",
+    "пятьдесят",
+    "шестьдесят",
+    "семьдесят",
+    "восемьдесят",
+    "девяносто",
+];
+const HUNDREDS: [&str; 10] = [
+    "",
+    "сто",
+    "двести",
+    "триста",
+    "четыреста",
+    "пятьсот",
+    "шестьсот",
+    "семьсот",
+    "восемьсот",
+    "девятьсот",
+];
 
 fn plural<'a>(n: u64, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
     let (d, h) = (n % 10, n % 100);
@@ -65,11 +104,19 @@ pub fn number_to_words(n: u64) -> Vec<String> {
         return vec![UNITS[0].into()];
     }
     if n > 999_999_999_999 {
-        return n.to_string().chars().map(|c| UNITS[c as usize - '0' as usize].to_string()).collect();
+        return n
+            .to_string()
+            .chars()
+            .map(|c| UNITS[c as usize - '0' as usize].to_string())
+            .collect();
     }
     let mut out = Vec::new();
     let groups = [
-        (1_000_000_000, false, ("миллиард", "миллиарда", "миллиардов")),
+        (
+            1_000_000_000,
+            false,
+            ("миллиард", "миллиарда", "миллиардов"),
+        ),
         (1_000_000, false, ("миллион", "миллиона", "миллионов")),
         (1_000, true, ("тысяча", "тысячи", "тысяч")),
     ];
@@ -147,7 +194,9 @@ pub fn edit_distance<T: PartialEq>(a: &[T], b: &[T]) -> usize {
     for (i, x) in a.iter().enumerate() {
         cur[0] = i + 1;
         for (j, y) in b.iter().enumerate() {
-            cur[j + 1] = (prev[j] + usize::from(x != y)).min(prev[j + 1] + 1).min(cur[j] + 1);
+            cur[j + 1] = (prev[j] + usize::from(x != y))
+                .min(prev[j + 1] + 1)
+                .min(cur[j] + 1);
         }
         std::mem::swap(&mut prev, &mut cur);
     }
@@ -183,7 +232,12 @@ pub fn score(reference: &str, hypothesis: &str) -> Score {
     let h = normalize_words(hypothesis);
     let rc: Vec<char> = r.concat().chars().collect();
     let hc: Vec<char> = h.concat().chars().collect();
-    Score { word_errors: edit_distance(&r, &h), words: r.len(), char_errors: edit_distance(&rc, &hc), chars: rc.len() }
+    Score {
+        word_errors: edit_distance(&r, &h),
+        words: r.len(),
+        char_errors: edit_distance(&rc, &hc),
+        chars: rc.len(),
+    }
 }
 
 #[cfg(test)]
@@ -203,12 +257,21 @@ mod tests {
 
     #[test]
     fn normalization() {
-        assert_eq!(normalize_words("Джарвис, открой Блокнот!"), ["джарвис", "открой", "блокнот"]);
-        assert_eq!(normalize_words("Сколько будет 7 + 5?"), ["сколько", "будет", "семь", "плюс", "пять"]);
+        assert_eq!(
+            normalize_words("Джарвис, открой Блокнот!"),
+            ["джарвис", "открой", "блокнот"]
+        );
+        assert_eq!(
+            normalize_words("Сколько будет 7 + 5?"),
+            ["сколько", "будет", "семь", "плюс", "пять"]
+        );
         assert_eq!(normalize_words("Включи вай-фай"), ["включи", "вайфай"]);
         assert_eq!(normalize_words("включи Wi-Fi."), ["включи", "вайфай"]);
         assert_eq!(normalize_words("на 30%"), ["на", "тридцать", "процентов"]);
-        assert_eq!(normalize_words("Ещё раз — и всё"), ["еще", "раз", "и", "все"]);
+        assert_eq!(
+            normalize_words("Ещё раз — и всё"),
+            ["еще", "раз", "и", "все"]
+        );
     }
 
     #[test]

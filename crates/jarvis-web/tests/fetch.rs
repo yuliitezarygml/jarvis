@@ -16,7 +16,11 @@ fn html(body: impl Into<String>) -> ResponseTemplate {
 }
 
 async fn serve(server: &MockServer, p: &str, resp: ResponseTemplate) {
-    Mock::given(method("GET")).and(path(p)).respond_with(resp).mount(server).await;
+    Mock::given(method("GET"))
+        .and(path(p))
+        .respond_with(resp)
+        .mount(server)
+        .await;
 }
 
 #[tokio::test]
@@ -31,7 +35,11 @@ async fn article_main_content_only() {
     assert_eq!(page.title, "Вышел Rust 1.100: что нового");
     assert_eq!(page.content_type, "text/html");
     assert!(!page.truncated);
-    assert_eq!(page.url, format!("{}/news/rust-1-100", server.uri()), "фрагмент отброшен");
+    assert_eq!(
+        page.url,
+        format!("{}/news/rust-1-100", server.uri()),
+        "фрагмент отброшен"
+    );
     let md = &page.markdown;
     for must in [
         "Команда Rust выпустила версию 1.100",
@@ -44,7 +52,16 @@ async fn article_main_content_only() {
     ] {
         assert!(md.contains(must), "нет «{must}» в:\n{md}");
     }
-    for junk in ["Мы используем cookies", "Обзоры", "Популярное", "Реклама", "Все права защищены", "Наконец-то", "gtag", "benchmark.png"] {
+    for junk in [
+        "Мы используем cookies",
+        "Обзоры",
+        "Популярное",
+        "Реклама",
+        "Все права защищены",
+        "Наконец-то",
+        "gtag",
+        "benchmark.png",
+    ] {
         assert!(!md.contains(junk), "мусор «{junk}» в:\n{md}");
     }
 
@@ -55,7 +72,12 @@ async fn article_main_content_only() {
 #[tokio::test]
 async fn documentation_page_keeps_code_drops_sidebar() {
     let server = MockServer::start().await;
-    serve(&server, "/std/vec/struct.Vec.html", html(fixture("docs_page.html"))).await;
+    serve(
+        &server,
+        "/std/vec/struct.Vec.html",
+        html(fixture("docs_page.html")),
+    )
+    .await;
     let page = test_fetcher(FetchOptions::default())
         .fetch(&format!("{}/std/vec/struct.Vec.html", server.uri()))
         .await
@@ -72,7 +94,12 @@ async fn documentation_page_keeps_code_drops_sidebar() {
     ] {
         assert!(md.contains(must), "нет «{must}» в:\n{md}");
     }
-    for junk in ["Trait Implementations", "Keyboard shortcuts", "show sidebar", "[§]"] {
+    for junk in [
+        "Trait Implementations",
+        "Keyboard shortcuts",
+        "show sidebar",
+        "[§]",
+    ] {
         assert!(!md.contains(junk), "мусор «{junk}» в:\n{md}");
     }
 }
@@ -80,10 +107,11 @@ async fn documentation_page_keeps_code_drops_sidebar() {
 #[tokio::test]
 async fn windows_1251_pages_decode() {
     let server = MockServer::start().await;
-    let src = "<html><head><meta charset=\"windows-1251\"><title>Новости</title></head><body><article><p>"
-        .to_string()
-        + &"Сэр, это текст в кодировке windows-1251, его нужно правильно декодировать. ".repeat(10)
-        + "</p></article></body></html>";
+    let src =
+        "<html><head><meta charset=\"windows-1251\"><title>Новости</title></head><body><article><p>"
+            .to_string()
+            + &"Сэр, это текст в кодировке windows-1251, его нужно правильно декодировать. "
+                .repeat(10) + "</p></article></body></html>";
     let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode(&src);
     // charset только в <meta>.
     Mock::given(method("GET"))
@@ -96,14 +124,22 @@ async fn windows_1251_pages_decode() {
     let (bytes2, _, _) = encoding_rs::WINDOWS_1251.encode(&no_meta);
     Mock::given(method("GET"))
         .and(path("/header"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(bytes2.to_vec(), "text/html; charset=windows-1251"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(bytes2.to_vec(), "text/html; charset=windows-1251"),
+        )
         .mount(&server)
         .await;
     let f = test_fetcher(FetchOptions::default());
     for p in ["/meta", "/header"] {
         let page = f.fetch(&format!("{}{p}", server.uri())).await.unwrap();
         assert_eq!(page.title, "Новости", "{p}");
-        assert!(page.markdown.contains("Сэр, это текст в кодировке windows-1251"), "{p}: {}", page.markdown);
+        assert!(
+            page.markdown
+                .contains("Сэр, это текст в кодировке windows-1251"),
+            "{p}: {}",
+            page.markdown
+        );
     }
 }
 
@@ -133,21 +169,36 @@ async fn tiny_pdf_to_text() {
     // Битый PDF — ошибка, а не паника.
     Mock::given(method("GET"))
         .and(path("/broken.pdf"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(b"%PDF-1.4\ngarbage".to_vec(), "application/pdf"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(b"%PDF-1.4\ngarbage".to_vec(), "application/pdf"),
+        )
         .mount(&server)
         .await;
-    assert!(matches!(f.fetch(&format!("{}/broken.pdf", server.uri())).await, Err(FetchError::Pdf(_))));
+    assert!(matches!(
+        f.fetch(&format!("{}/broken.pdf", server.uri())).await,
+        Err(FetchError::Pdf(_))
+    ));
 }
 
 #[tokio::test]
 async fn long_page_truncated_with_marker() {
     let server = MockServer::start().await;
     let para = "<p>Очень длинная статья о том, как Джарвис читает страницы и бережёт контекст модели.</p>\n";
-    let big = format!("<html><head><title>Длинная</title></head><body><article>{}</article></body></html>", para.repeat(1500));
+    let big = format!(
+        "<html><head><title>Длинная</title></head><body><article>{}</article></body></html>",
+        para.repeat(1500)
+    );
     serve(&server, "/long", html(big)).await;
-    let page = test_fetcher(FetchOptions::default()).fetch(&format!("{}/long", server.uri())).await.unwrap();
+    let page = test_fetcher(FetchOptions::default())
+        .fetch(&format!("{}/long", server.uri()))
+        .await
+        .unwrap();
     assert!(page.truncated);
-    let (body, marker) = page.markdown.split_once("\n\n[…текст обрезан: показано ").expect("нет пометки обрезки");
+    let (body, marker) = page
+        .markdown
+        .split_once("\n\n[…текст обрезан: показано ")
+        .expect("нет пометки обрезки");
     assert!(body.chars().count() <= 48_000, "{}", body.chars().count());
     assert!(body.chars().count() > 40_000);
     assert!(marker.contains("символов]"));
@@ -157,14 +208,25 @@ async fn long_page_truncated_with_marker() {
 async fn body_limit_reads_only_beginning() {
     let server = MockServer::start().await;
     let para = "<p>Абзац текста для проверки лимита тела ответа в байтах, а не в символах.</p>\n";
-    let big = format!("<html><head><title>Большая</title></head><body><article>{}</article></body></html>", para.repeat(3000));
+    let big = format!(
+        "<html><head><title>Большая</title></head><body><article>{}</article></body></html>",
+        para.repeat(3000)
+    );
     assert!(big.len() > 200_000);
     serve(&server, "/huge", html(big)).await;
-    let f = test_fetcher(FetchOptions { max_bytes: 64 * 1024, ..Default::default() });
+    let f = test_fetcher(FetchOptions {
+        max_bytes: 64 * 1024,
+        ..Default::default()
+    });
     let page = f.fetch(&format!("{}/huge", server.uri())).await.unwrap();
     assert!(page.truncated);
     assert_eq!(page.title, "Большая");
-    assert!(page.markdown.ends_with("[…страница больше 64 КБ, прочитано только начало]"), "{}", page.markdown);
+    assert!(
+        page.markdown
+            .ends_with("[…страница больше 64 КБ, прочитано только начало]"),
+        "{}",
+        page.markdown
+    );
     assert!(page.markdown.chars().count() < 64 * 1024);
 }
 
@@ -187,59 +249,130 @@ async fn js_page_uses_jina_reader_when_enabled() {
         jina_reader_base: format!("{}/jina", server.uri()),
         ..Default::default()
     });
-    let page = with_jina.fetch(&format!("{}/app", server.uri())).await.unwrap();
+    let page = with_jina
+        .fetch(&format!("{}/app", server.uri()))
+        .await
+        .unwrap();
     assert_eq!(page.content_type, "text/markdown");
     assert_eq!(page.title, "Dashboard");
-    assert!(page.markdown.contains("продажи за ноябрь выросли на 12 %"), "{}", page.markdown);
+    assert!(
+        page.markdown.contains("продажи за ноябрь выросли на 12 %"),
+        "{}",
+        page.markdown
+    );
 
     // Без Jina: честная ошибка «нет текста».
     let plain = test_fetcher(FetchOptions::default());
-    assert_eq!(plain.fetch(&format!("{}/app", server.uri())).await, Err(FetchError::Empty));
+    assert_eq!(
+        plain.fetch(&format!("{}/app", server.uri())).await,
+        Err(FetchError::Empty)
+    );
 }
 
 #[tokio::test]
 async fn redirects_errors_and_types() {
     let server = MockServer::start().await;
-    serve(&server, "/old", ResponseTemplate::new(301).insert_header("location", "/news/rust-1-100")).await;
+    serve(
+        &server,
+        "/old",
+        ResponseTemplate::new(301).insert_header("location", "/news/rust-1-100"),
+    )
+    .await;
     serve(&server, "/news/rust-1-100", html(fixture("article.html"))).await;
     serve(&server, "/missing", ResponseTemplate::new(404)).await;
-    serve(&server, "/logo.png", ResponseTemplate::new(200).set_body_raw(b"\x89PNG\r\n\x1a\n".to_vec(), "image/png")).await;
-    serve(&server, "/notes.txt", ResponseTemplate::new(200).set_body_raw("Заметка   \n\n\n\nвторая строка".as_bytes().to_vec(), "text/plain; charset=utf-8")).await;
+    serve(
+        &server,
+        "/logo.png",
+        ResponseTemplate::new(200).set_body_raw(b"\x89PNG\r\n\x1a\n".to_vec(), "image/png"),
+    )
+    .await;
+    serve(
+        &server,
+        "/notes.txt",
+        ResponseTemplate::new(200).set_body_raw(
+            "Заметка   \n\n\n\nвторая строка".as_bytes().to_vec(),
+            "text/plain; charset=utf-8",
+        ),
+    )
+    .await;
 
     let f = test_fetcher(FetchOptions::default());
     let page = f.fetch(&format!("{}/old", server.uri())).await.unwrap();
     assert_eq!(page.final_url, format!("{}/news/rust-1-100", server.uri()));
     assert_eq!(page.url, format!("{}/old", server.uri()));
 
-    assert_eq!(f.fetch(&format!("{}/missing", server.uri())).await, Err(FetchError::Http(404)));
-    assert_eq!(f.fetch(&format!("{}/logo.png", server.uri())).await, Err(FetchError::Unsupported("image/png".into())));
-    let txt = f.fetch(&format!("{}/notes.txt", server.uri())).await.unwrap();
-    assert_eq!((txt.markdown.as_str(), txt.title.as_str(), txt.content_type.as_str()), ("Заметка\n\nвторая строка", "notes.txt", "text/plain"));
-    assert!(matches!(f.fetch("not a url at all").await, Err(FetchError::InvalidUrl(_))));
+    assert_eq!(
+        f.fetch(&format!("{}/missing", server.uri())).await,
+        Err(FetchError::Http(404))
+    );
+    assert_eq!(
+        f.fetch(&format!("{}/logo.png", server.uri())).await,
+        Err(FetchError::Unsupported("image/png".into()))
+    );
+    let txt = f
+        .fetch(&format!("{}/notes.txt", server.uri()))
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            txt.markdown.as_str(),
+            txt.title.as_str(),
+            txt.content_type.as_str()
+        ),
+        ("Заметка\n\nвторая строка", "notes.txt", "text/plain")
+    );
+    assert!(matches!(
+        f.fetch("not a url at all").await,
+        Err(FetchError::InvalidUrl(_))
+    ));
 }
 
 #[tokio::test]
 async fn timeout_is_reported() {
     let server = MockServer::start().await;
-    serve(&server, "/slow", html("<p>slow</p>").set_delay(Duration::from_secs(3))).await;
-    let f = test_fetcher(FetchOptions { timeout: Duration::from_millis(300), ..Default::default() });
-    assert_eq!(f.fetch(&format!("{}/slow", server.uri())).await, Err(FetchError::Timeout));
+    serve(
+        &server,
+        "/slow",
+        html("<p>slow</p>").set_delay(Duration::from_secs(3)),
+    )
+    .await;
+    let f = test_fetcher(FetchOptions {
+        timeout: Duration::from_millis(300),
+        ..Default::default()
+    });
+    assert_eq!(
+        f.fetch(&format!("{}/slow", server.uri())).await,
+        Err(FetchError::Timeout)
+    );
 }
 
 #[tokio::test]
 async fn private_network_is_forbidden_by_default() {
     let server = MockServer::start().await;
-    Mock::given(method("GET")).respond_with(html("<p>секрет роутера</p>")).expect(0).mount(&server).await;
+    Mock::given(method("GET"))
+        .respond_with(html("<p>секрет роутера</p>"))
+        .expect(0)
+        .mount(&server)
+        .await;
     let port = server.address().port();
     let f = Fetcher::new(FetchOptions::default());
     // IP-литерал внутренней сети — отказ до запроса.
-    assert!(matches!(f.fetch(&format!("http://127.0.0.1:{port}/")).await, Err(FetchError::Forbidden(_))));
-    assert!(matches!(f.fetch("http://192.168.50.38:8443/ready").await, Err(FetchError::Forbidden(_))));
+    assert!(matches!(
+        f.fetch(&format!("http://127.0.0.1:{port}/")).await,
+        Err(FetchError::Forbidden(_))
+    ));
+    assert!(matches!(
+        f.fetch("http://192.168.50.38:8443/ready").await,
+        Err(FetchError::Forbidden(_))
+    ));
     // Локальное имя (резолвер, отбрасывающий внутренние адреса, проверен юнит-тестом в http.rs).
     match f.fetch(&format!("http://localhost:{port}/")).await {
         Err(FetchError::Forbidden(m)) => assert!(m.contains("localhost"), "{m}"),
         other => panic!("{other:?}"),
     }
     // Не http(s).
-    assert!(matches!(f.fetch("file:///C:/Windows/win.ini").await, Err(FetchError::Forbidden(_))));
+    assert!(matches!(
+        f.fetch("file:///C:/Windows/win.ini").await,
+        Err(FetchError::Forbidden(_))
+    ));
 }

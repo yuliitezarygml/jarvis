@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use jarvis_core::event::SourceLink;
-use jarvis_core::{CancellationToken, ChatMessage, ChatModel, ChatRequest, LlmError, wrap_untrusted};
+use jarvis_core::{
+    CancellationToken, ChatMessage, ChatModel, ChatRequest, LlmError, wrap_untrusted,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::fetch::{Page, PageFetcher};
@@ -102,7 +104,11 @@ struct Source {
 
 impl Researcher {
     pub fn new(search: Arc<dyn SearchProvider>, pages: Arc<dyn PageFetcher>) -> Self {
-        Self { search, pages, opts: ResearchOptions::default() }
+        Self {
+            search,
+            pages,
+            opts: ResearchOptions::default(),
+        }
     }
 
     pub fn with_options(mut self, opts: ResearchOptions) -> Self {
@@ -132,7 +138,12 @@ impl Researcher {
         let queries = self.plan(question, model, cancel.clone()).await?;
 
         // 2. Поиск параллельно по всем запросам.
-        let results = join_all(queries.iter().map(|q| self.search.search(q, self.opts.hits_per_query))).await;
+        let results = join_all(
+            queries
+                .iter()
+                .map(|q| self.search.search(q, self.opts.hits_per_query)),
+        )
+        .await;
         let mut per_query = Vec::new();
         let mut first_err = None;
         for r in results {
@@ -148,7 +159,8 @@ impl Researcher {
         }
 
         // 3. Отбор и параллельное чтение страниц (с запасом на неудачные).
-        let candidates = select_candidates(&per_query, self.opts.max_pages + 2, self.opts.min_pages);
+        let candidates =
+            select_candidates(&per_query, self.opts.max_pages + 2, self.opts.min_pages);
         let pages = join_all(candidates.iter().map(|h| self.pages.fetch_page(&h.url))).await;
         let mut sources: Vec<Source> = Vec::new();
         let mut short: Vec<Source> = Vec::new();
@@ -170,7 +182,11 @@ impl Researcher {
                 .iter()
                 .filter(|h| !h.snippet.is_empty())
                 .take(self.opts.max_pages)
-                .map(|h| Source { title: h.title.clone(), url: h.url.clone(), text: h.snippet.clone() })
+                .map(|h| Source {
+                    title: h.title.clone(),
+                    url: h.url.clone(),
+                    text: h.snippet.clone(),
+                })
                 .collect();
         }
         if sources.is_empty() {
@@ -190,11 +206,19 @@ impl Researcher {
         let resp = model.chat(req, cancel).await.map_err(llm_err)?;
         let answer = resp.message.content.trim().to_string();
         if answer.is_empty() {
-            return Err(ResearchError::Llm(LlmError::BadResponse("пустой ответ модели".into())));
+            return Err(ResearchError::Llm(LlmError::BadResponse(
+                "пустой ответ модели".into(),
+            )));
         }
         Ok(ResearchResult {
             answer,
-            sources: sources.into_iter().map(|s| SourceLink { title: s.title, url: s.url }).collect(),
+            sources: sources
+                .into_iter()
+                .map(|s| SourceLink {
+                    title: s.title,
+                    url: s.url,
+                })
+                .collect(),
             queries,
         })
     }
@@ -220,27 +244,54 @@ impl Researcher {
             // План не получился — ищем по самому вопросу; ошибка модели всплывёт на синтезе, если она серьёзная.
             Err(_) => vec![],
         };
-        Ok(finalize_queries(planned, question, self.opts.min_queries, self.opts.max_queries))
+        Ok(finalize_queries(
+            planned,
+            question,
+            self.opts.min_queries,
+            self.opts.max_queries,
+        ))
     }
 }
 
 fn llm_err(e: LlmError) -> ResearchError {
-    if e == LlmError::Cancelled { ResearchError::Cancelled } else { ResearchError::Llm(e) }
+    if e == LlmError::Cancelled {
+        ResearchError::Cancelled
+    } else {
+        ResearchError::Llm(e)
+    }
 }
 
 fn to_source(hit: &SearchHit, page: &Page, max_chars: usize) -> Source {
     let (text, _) = truncate_markdown(&page.markdown, max_chars);
-    let title = if page.title.trim().is_empty() { hit.title.clone() } else { page.title.trim().to_string() };
-    Source { title, url: page.final_url.clone(), text }
+    let title = if page.title.trim().is_empty() {
+        hit.title.clone()
+    } else {
+        page.title.trim().to_string()
+    };
+    Source {
+        title,
+        url: page.final_url.clone(),
+        text,
+    }
 }
 
 /// Сообщение для синтеза: вопрос пользователя (доверенный) + источники в `<untrusted>`.
 fn build_synthesis_prompt(question: &str, sources: &[Source]) -> String {
-    let mut s = format!("Вопрос пользователя: {question}\n\nИсточники ({}):\n", sources.len());
+    let mut s = format!(
+        "Вопрос пользователя: {question}\n\nИсточники ({}):\n",
+        sources.len()
+    );
     for (i, src) in sources.iter().enumerate() {
         let n = i + 1;
-        let body = format!("Заголовок: {}\nАдрес: {}\n\n{}", src.title, src.url, src.text);
-        s.push_str(&format!("\n[{n}] {}\n{}\n", src.url, wrap_untrusted(&format!("web:{}", src.url), &body)));
+        let body = format!(
+            "Заголовок: {}\nАдрес: {}\n\n{}",
+            src.title, src.url, src.text
+        );
+        s.push_str(&format!(
+            "\n[{n}] {}\n{}\n",
+            src.url,
+            wrap_untrusted(&format!("web:{}", src.url), &body)
+        ));
     }
     s.push_str(
         "\nОтветь на вопрос пользователя по правилам из системного сообщения, со ссылками [n]. \
@@ -254,18 +305,30 @@ pub fn parse_plan(text: &str) -> Vec<String> {
     let t = text.trim();
     let candidates = [
         Some(t),
-        t.find('{').zip(t.rfind('}')).filter(|(a, b)| a < b).map(|(a, b)| &t[a..=b]),
-        t.find('[').zip(t.rfind(']')).filter(|(a, b)| a < b).map(|(a, b)| &t[a..=b]),
+        t.find('{')
+            .zip(t.rfind('}'))
+            .filter(|(a, b)| a < b)
+            .map(|(a, b)| &t[a..=b]),
+        t.find('[')
+            .zip(t.rfind(']'))
+            .filter(|(a, b)| a < b)
+            .map(|(a, b)| &t[a..=b]),
     ];
     for c in candidates.into_iter().flatten() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(c) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(c) else {
+            continue;
+        };
         let arr = match &v {
             serde_json::Value::Array(a) => Some(a),
             serde_json::Value::Object(o) => o.get("queries").and_then(|q| q.as_array()),
             _ => None,
         };
         if let Some(arr) = arr {
-            return arr.iter().filter_map(|q| q.as_str()).map(str::to_string).collect();
+            return arr
+                .iter()
+                .filter_map(|q| q.as_str())
+                .map(str::to_string)
+                .collect();
         }
     }
     vec![]
@@ -294,7 +357,11 @@ fn finalize_queries(planned: Vec<String>, question: &str, min: usize, max: usize
 
 /// Отбор страниц: по очереди из выдачи каждого запроса (сначала лучшие), без дублей адресов,
 /// сначала по одной странице с домена; если разных доменов меньше `min_distinct` — добираем повторы.
-fn select_candidates(per_query: &[Vec<SearchHit>], max: usize, min_distinct: usize) -> Vec<SearchHit> {
+fn select_candidates(
+    per_query: &[Vec<SearchHit>],
+    max: usize,
+    min_distinct: usize,
+) -> Vec<SearchHit> {
     let depth = per_query.iter().map(Vec::len).max().unwrap_or(0);
     let mut ranked: Vec<&SearchHit> = Vec::new();
     let mut seen_urls = HashSet::new();
@@ -335,7 +402,11 @@ fn url_key(u: &str) -> String {
     match url::Url::parse(u) {
         Ok(mut url) => {
             url.set_fragment(None);
-            let host = url.host_str().unwrap_or_default().trim_start_matches("www.").to_ascii_lowercase();
+            let host = url
+                .host_str()
+                .unwrap_or_default()
+                .trim_start_matches("www.")
+                .to_ascii_lowercase();
             let q = url.query().map(|q| format!("?{q}")).unwrap_or_default();
             format!("{host}{}{q}", url.path().trim_end_matches('/'))
         }
@@ -355,8 +426,11 @@ fn domain_key(u: &str) -> String {
     }
     let n = labels.len();
     let sld = labels[n - 2];
-    let take = if labels[n - 1].len() == 2 && matches!(sld, "co" | "com" | "org" | "net" | "gov" | "edu" | "ac" | "msk" | "spb")
-    {
+    let take = if labels[n - 1].len() == 2
+        && matches!(
+            sld,
+            "co" | "com" | "org" | "net" | "gov" | "edu" | "ac" | "msk" | "spb"
+        ) {
         3
     } else {
         2
@@ -369,20 +443,32 @@ mod tests {
     use super::*;
 
     fn hit(url: &str) -> SearchHit {
-        SearchHit { title: url.into(), url: url.into(), snippet: String::new() }
+        SearchHit {
+            title: url.into(),
+            url: url.into(),
+            snippet: String::new(),
+        }
     }
 
     #[test]
     fn plan_parsing() {
         assert_eq!(parse_plan(r#"{"queries": ["a", "b"]}"#), ["a", "b"]);
         assert_eq!(parse_plan("```json\n{\"queries\": [\"x\"]}\n```"), ["x"]);
-        assert_eq!(parse_plan(r#"Вот план: ["q1","q2","q3"]"#), ["q1", "q2", "q3"]);
+        assert_eq!(
+            parse_plan(r#"Вот план: ["q1","q2","q3"]"#),
+            ["q1", "q2", "q3"]
+        );
         assert!(parse_plan("не JSON").is_empty());
     }
 
     #[test]
     fn query_finalization() {
-        let q = finalize_queries(vec!["a".into(), "A".into(), " b  c ".into()], "вопрос", 2, 4);
+        let q = finalize_queries(
+            vec!["a".into(), "A".into(), " b  c ".into()],
+            "вопрос",
+            2,
+            4,
+        );
         assert_eq!(q, ["a", "b c"]);
         let q = finalize_queries(vec!["one".into()], "вопрос", 2, 4);
         assert_eq!(q, ["one", "вопрос"]);
@@ -394,7 +480,10 @@ mod tests {
 
     #[test]
     fn domains() {
-        assert_eq!(domain_key("https://doc.rust-lang.org/book/"), "rust-lang.org");
+        assert_eq!(
+            domain_key("https://doc.rust-lang.org/book/"),
+            "rust-lang.org"
+        );
         assert_eq!(domain_key("https://www.bbc.co.uk/news"), "bbc.co.uk");
         assert_eq!(domain_key("https://habr.com/ru/"), "habr.com");
         assert_eq!(url_key("https://www.a.com/x/#y"), url_key("http://a.com/x"));
@@ -402,14 +491,38 @@ mod tests {
 
     #[test]
     fn candidates_prefer_distinct_domains() {
-        let q1 = vec![hit("https://a.com/1"), hit("https://a.com/2"), hit("https://b.com/1")];
-        let q2 = vec![hit("https://www.a.com/1/"), hit("https://c.org/x"), hit("https://d.net/y")];
-        let picked: Vec<_> = select_candidates(&[q1, q2], 5, 3).into_iter().map(|h| h.url).collect();
+        let q1 = vec![
+            hit("https://a.com/1"),
+            hit("https://a.com/2"),
+            hit("https://b.com/1"),
+        ];
+        let q2 = vec![
+            hit("https://www.a.com/1/"),
+            hit("https://c.org/x"),
+            hit("https://d.net/y"),
+        ];
+        let picked: Vec<_> = select_candidates(&[q1, q2], 5, 3)
+            .into_iter()
+            .map(|h| h.url)
+            .collect();
         // Ранжирование: a/1 (q1#1), [дубль www.a.com/1/], a/2, c.org (#2), b.com, d.net (#3); a/2 — повтор домена.
-        assert_eq!(picked, ["https://a.com/1", "https://c.org/x", "https://b.com/1", "https://d.net/y"]);
+        assert_eq!(
+            picked,
+            [
+                "https://a.com/1",
+                "https://c.org/x",
+                "https://b.com/1",
+                "https://d.net/y"
+            ]
+        );
 
         // Всего один домен — добираем страницы того же сайта до min_pages.
-        let one = vec![hit("https://a.com/1"), hit("https://a.com/2"), hit("https://a.com/3"), hit("https://a.com/4")];
+        let one = vec![
+            hit("https://a.com/1"),
+            hit("https://a.com/2"),
+            hit("https://a.com/3"),
+            hit("https://a.com/4"),
+        ];
         assert_eq!(select_candidates(&[one], 5, 3).len(), 3);
     }
 }

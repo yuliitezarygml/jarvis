@@ -102,7 +102,9 @@ impl FetchOptions {
         let jina = cfg.web_search.iter().find(|s| s.id == "jina" && s.enabled);
         Self {
             jina_reader: jina.is_some(),
-            jina_key: jina.map(|j| j.api_key.trim().to_string()).filter(|k| !k.is_empty()),
+            jina_key: jina
+                .map(|j| j.api_key.trim().to_string())
+                .filter(|k| !k.is_empty()),
             ..Self::default()
         }
     }
@@ -122,7 +124,10 @@ pub struct Fetcher {
 /// Прочитать страницу с настройками по умолчанию.
 pub async fn fetch(url: &str) -> Result<Page, FetchError> {
     static DEFAULT: OnceLock<Arc<Fetcher>> = OnceLock::new();
-    DEFAULT.get_or_init(|| Arc::new(Fetcher::new(FetchOptions::default()))).fetch(url).await
+    DEFAULT
+        .get_or_init(|| Arc::new(Fetcher::new(FetchOptions::default())))
+        .fetch(url)
+        .await
 }
 
 enum Kind {
@@ -178,13 +183,22 @@ impl Fetcher {
             .and_then(|c| c.split(';').next())
             .map(|m| m.trim().to_ascii_lowercase())
             .unwrap_or_default();
-        let limit = if mime == "application/pdf" { self.opts.max_pdf_bytes } else { self.opts.max_bytes };
-        let (body, body_truncated) = read_limited(&mut resp, limit).await.map_err(FetchError::from_reqwest)?;
+        let limit = if mime == "application/pdf" {
+            self.opts.max_pdf_bytes
+        } else {
+            self.opts.max_bytes
+        };
+        let (body, body_truncated) = read_limited(&mut resp, limit)
+            .await
+            .map_err(FetchError::from_reqwest)?;
 
         let (title, markdown, page_type) = match classify(&mime, &body) {
             Kind::Pdf => {
                 if body_truncated {
-                    return Err(FetchError::Unsupported(format!("PDF больше {}", human_size(limit))));
+                    return Err(FetchError::Unsupported(format!(
+                        "PDF больше {}",
+                        human_size(limit)
+                    )));
                 }
                 let text = tokio::task::spawn_blocking(move || extract::pdf_to_text(&body))
                     .await
@@ -213,15 +227,33 @@ impl Fetcher {
                     && let Ok((title, md)) = self.jina_read(&final_url).await
                     && md.chars().count() > out.1.chars().count()
                 {
-                    out = (if title.is_empty() { out.0 } else { title }, md, "text/markdown".into());
+                    out = (
+                        if title.is_empty() { out.0 } else { title },
+                        md,
+                        "text/markdown".into(),
+                    );
                 }
                 out
             }
             Kind::Text => {
                 let text = tidy(&extract::decode_text(&body, content_type.as_deref(), false));
-                (file_name(&final_url), text, if mime.is_empty() { "text/plain".into() } else { mime.clone() })
+                (
+                    file_name(&final_url),
+                    text,
+                    if mime.is_empty() {
+                        "text/plain".into()
+                    } else {
+                        mime.clone()
+                    },
+                )
             }
-            Kind::Other => return Err(FetchError::Unsupported(if mime.is_empty() { "двоичные данные".into() } else { mime })),
+            Kind::Other => {
+                return Err(FetchError::Unsupported(if mime.is_empty() {
+                    "двоичные данные".into()
+                } else {
+                    mime
+                }));
+            }
         };
 
         if markdown.trim().is_empty() {
@@ -229,12 +261,19 @@ impl Fetcher {
         }
         let (mut markdown, text_truncated) = truncate_markdown(&markdown, self.opts.max_chars);
         if body_truncated && !text_truncated {
-            markdown.push_str(&format!("\n\n[…страница больше {}, прочитано только начало]", human_size(limit)));
+            markdown.push_str(&format!(
+                "\n\n[…страница больше {}, прочитано только начало]",
+                human_size(limit)
+            ));
         }
         Ok(Page {
             url: url.to_string(),
             final_url,
-            title: if title.is_empty() { file_name(url.as_str()) } else { title },
+            title: if title.is_empty() {
+                file_name(url.as_str())
+            } else {
+                title
+            },
             markdown,
             truncated: body_truncated || text_truncated,
             content_type: page_type,
@@ -243,8 +282,15 @@ impl Fetcher {
 
     /// Jina Reader: `GET https://r.jina.ai/<url>` с `Accept: application/json` → `{data: {title, content}}`.
     async fn jina_read(&self, url: &str) -> Result<(String, String), FetchError> {
-        let endpoint = format!("{}/{}", self.opts.jina_reader_base.trim_end_matches('/'), url);
-        let mut req = self.client.get(endpoint).header(reqwest::header::ACCEPT, "application/json");
+        let endpoint = format!(
+            "{}/{}",
+            self.opts.jina_reader_base.trim_end_matches('/'),
+            url
+        );
+        let mut req = self
+            .client
+            .get(endpoint)
+            .header(reqwest::header::ACCEPT, "application/json");
         if let Some(k) = &self.opts.jina_key {
             req = req.bearer_auth(k);
         }
@@ -252,10 +298,18 @@ impl Fetcher {
         if !resp.status().is_success() {
             return Err(FetchError::Http(resp.status().as_u16()));
         }
-        let (body, _) = read_limited(&mut resp, self.opts.max_bytes).await.map_err(FetchError::from_reqwest)?;
-        let v: serde_json::Value =
-            serde_json::from_slice(&body).map_err(|e| FetchError::Unsupported(format!("ответ Jina Reader: {e}")))?;
-        let s = |p: &str| v.pointer(p).and_then(|x| x.as_str()).unwrap_or_default().trim().to_string();
+        let (body, _) = read_limited(&mut resp, self.opts.max_bytes)
+            .await
+            .map_err(FetchError::from_reqwest)?;
+        let v: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|e| FetchError::Unsupported(format!("ответ Jina Reader: {e}")))?;
+        let s = |p: &str| {
+            v.pointer(p)
+                .and_then(|x| x.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
         Ok((s("/data/title"), tidy(&s("/data/content"))))
     }
 }
@@ -267,20 +321,26 @@ impl PageFetcher for Fetcher {
     }
 }
 
-/// `example.com/x` → `https://example.com/x`; фрагмент `#…` отбрасывается.
+/// `example.com/x` → `https://example.com/x`; фрагмент `#…` отбрасывается (серверу он не нужен).
 pub(crate) fn normalize_url(raw: &str) -> Result<url::Url, FetchError> {
+    let mut url = parse_user_url(raw)?;
+    url.set_fragment(None);
+    Ok(url)
+}
+
+/// Адрес от пользователя/модели: без схемы считаем https. Фрагмент сохраняется (для `web_open`).
+pub(crate) fn parse_user_url(raw: &str) -> Result<url::Url, FetchError> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err(FetchError::InvalidUrl("пустой адрес".into()));
     }
-    let with_scheme = if raw.contains("://") || raw.starts_with("mailto:") || raw.starts_with("file:") {
-        raw.to_string()
-    } else {
-        format!("https://{raw}")
-    };
-    let mut url = url::Url::parse(&with_scheme).map_err(|e| FetchError::InvalidUrl(format!("{raw}: {e}")))?;
-    url.set_fragment(None);
-    Ok(url)
+    let with_scheme =
+        if raw.contains("://") || raw.starts_with("mailto:") || raw.starts_with("file:") {
+            raw.to_string()
+        } else {
+            format!("https://{raw}")
+        };
+    url::Url::parse(&with_scheme).map_err(|e| FetchError::InvalidUrl(format!("{raw}: {e}")))
 }
 
 fn classify(mime: &str, body: &[u8]) -> Kind {
@@ -301,8 +361,13 @@ fn classify(mime: &str, body: &[u8]) -> Kind {
         _ => return Kind::Other,
     }
     // Тип не указан — смотрим на содержимое.
-    let head = String::from_utf8_lossy(&body[..body.len().min(512)]).trim_start().to_ascii_lowercase();
-    if ["<!doctype html", "<html", "<head", "<body", "<!--"].iter().any(|p| head.starts_with(p)) {
+    let head = String::from_utf8_lossy(&body[..body.len().min(512)])
+        .trim_start()
+        .to_ascii_lowercase();
+    if ["<!doctype html", "<html", "<head", "<body", "<!--"]
+        .iter()
+        .any(|p| head.starts_with(p))
+    {
         Kind::Html
     } else if std::str::from_utf8(&body[..body.len().min(4096)]).is_ok() {
         Kind::Text
@@ -316,10 +381,18 @@ fn file_name(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .and_then(|u| {
-            let seg = u.path_segments()?.rev().find(|s| !s.is_empty())?.to_string();
+            let seg = u
+                .path_segments()?
+                .rev()
+                .find(|s| !s.is_empty())?
+                .to_string();
             Some(percent_decode(&seg))
         })
-        .or_else(|| url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)))
+        .or_else(|| {
+            url::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+        })
         .unwrap_or_else(|| url.to_string())
 }
 
@@ -339,7 +412,10 @@ fn percent_decode(s: &str) -> String {
     while i < b.len() {
         let hex = |c: u8| (c as char).to_digit(16);
         if b[i] == b'%'
-            && let (Some(h), Some(l)) = (b.get(i + 1).copied().and_then(hex), b.get(i + 2).copied().and_then(hex))
+            && let (Some(h), Some(l)) = (
+                b.get(i + 1).copied().and_then(hex),
+                b.get(i + 2).copied().and_then(hex),
+            )
         {
             out.push((h * 16 + l) as u8);
             i += 3;
@@ -357,24 +433,39 @@ mod tests {
 
     #[test]
     fn url_normalization() {
-        assert_eq!(normalize_url("rust-lang.org").unwrap().as_str(), "https://rust-lang.org/");
-        assert_eq!(normalize_url(" https://a.b/x#frag ").unwrap().as_str(), "https://a.b/x");
+        assert_eq!(
+            normalize_url("rust-lang.org").unwrap().as_str(),
+            "https://rust-lang.org/"
+        );
+        assert_eq!(
+            normalize_url(" https://a.b/x#frag ").unwrap().as_str(),
+            "https://a.b/x"
+        );
         assert!(normalize_url("").is_err());
         assert!(normalize_url("http://").is_err());
     }
 
     #[test]
     fn names() {
-        assert_eq!(file_name("https://a.b/docs/%D0%BE%D1%82%D1%87%D1%91%D1%82.pdf"), "отчёт.pdf");
+        assert_eq!(
+            file_name("https://a.b/docs/%D0%BE%D1%82%D1%87%D1%91%D1%82.pdf"),
+            "отчёт.pdf"
+        );
         assert_eq!(file_name("https://a.b/"), "a.b");
     }
 
     #[test]
     fn classification() {
         assert!(matches!(classify("", b"%PDF-1.4 ..."), Kind::Pdf));
-        assert!(matches!(classify("", b"  <!DOCTYPE html><html>"), Kind::Html));
+        assert!(matches!(
+            classify("", b"  <!DOCTYPE html><html>"),
+            Kind::Html
+        ));
         assert!(matches!(classify("application/json", b"{}"), Kind::Text));
         assert!(matches!(classify("image/png", b"\x89PNG"), Kind::Other));
-        assert!(matches!(classify("", &[0xff, 0xfe, 0x00, 0x81]), Kind::Other));
+        assert!(matches!(
+            classify("", &[0xff, 0xfe, 0x00, 0x81]),
+            Kind::Other
+        ));
     }
 }

@@ -16,6 +16,8 @@ pub const PROMPT_TOOL: &str = "Который сейчас час? Обязат�
 pub const PROMPT_VISION: &str = "Какая цифра изображена на картинке? Ответь одной цифрой.";
 /// Цифра на тестовой картинке.
 pub const VISION_DIGIT: u8 = 7;
+/// С запасом для reasoning-моделей, которые тратят токены на рассуждения до ответа.
+const PROBE_MAX_TOKENS: u32 = 1024;
 
 #[derive(Debug, Clone)]
 pub struct ProbeOptions {

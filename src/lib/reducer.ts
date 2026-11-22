@@ -264,8 +264,8 @@ export function reduceAll(state: JarvisState, events: unknown[], now: number = D
 }
 
 /** Действия для ленты: новые сверху. */
-export function actionsNewestFirst(state: JarvisState): ActionItem[] {
-  return state.actions.slice().reverse();
+export function newestFirst(actions: ActionItem[]): ActionItem[] {
+  return actions.slice().reverse();
 }
 
 /** Остаток времени на подтверждение, мс (не меньше 0). */

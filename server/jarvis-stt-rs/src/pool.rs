@@ -13,7 +13,11 @@ pub struct BlockingPool<T> {
 impl<T> BlockingPool<T> {
     pub fn new(items: Vec<T>) -> Self {
         let size = items.len();
-        Self { items: Mutex::new(items), cv: Condvar::new(), size }
+        Self {
+            items: Mutex::new(items),
+            cv: Condvar::new(),
+            size,
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -30,13 +34,20 @@ impl<T> BlockingPool<T> {
         let mut items = self.items.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if let Some(item) = items.pop() {
-                return Some(PoolGuard { pool: self, item: Some(item) });
+                return Some(PoolGuard {
+                    pool: self,
+                    item: Some(item),
+                });
             }
             let now = Instant::now();
             if now >= deadline {
                 return None;
             }
-            items = self.cv.wait_timeout(items, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
+            items = self
+                .cv
+                .wait_timeout(items, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
         }
     }
 }
@@ -62,7 +73,11 @@ impl<T> DerefMut for PoolGuard<'_, T> {
 impl<T> Drop for PoolGuard<'_, T> {
     fn drop(&mut self) {
         if let Some(item) = self.item.take() {
-            self.pool.items.lock().unwrap_or_else(|e| e.into_inner()).push(item);
+            self.pool
+                .items
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(item);
             self.pool.cv.notify_one();
         }
     }

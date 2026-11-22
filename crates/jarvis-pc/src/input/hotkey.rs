@@ -330,7 +330,7 @@ pub fn key_label(code: u16) -> String {
         OEM_PLUS => "+".into(),
         OEM_MINUS => "-".into(),
         c if (F1..F1 + 24).contains(&c) => format!("F{}", c - F1 + 1),
-        c if c.is_ascii() && (c as u8).is_ascii_alphanumeric() => (c as u8 as char).to_string(),
+        c if c < 128 && (c as u8).is_ascii_alphanumeric() => (c as u8 as char).to_string(),
         c => format!("VK{c:#04X}"),
     }
 }

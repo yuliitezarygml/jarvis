@@ -42,7 +42,10 @@ pub(crate) fn truncate_markdown(s: &str, max: usize) -> (String, bool) {
         .unwrap_or(head.len());
     let kept = head[..cut].trim_end();
     let shown = kept.chars().count();
-    (format!("{kept}\n\n[…текст обрезан: показано {shown} из {total} символов]"), true)
+    (
+        format!("{kept}\n\n[…текст обрезан: показано {shown} из {total} символов]"),
+        true,
+    )
 }
 
 /// Привести Markdown/текст в порядок: без хвостовых пробелов, не больше одной пустой строки подряд.
@@ -111,7 +114,10 @@ mod tests {
 
     #[test]
     fn fragment_text() {
-        assert_eq!(html_fragment_text("<b>Rust</b>  is &amp; was\n fast"), "Rust is & was fast");
+        assert_eq!(
+            html_fragment_text("<b>Rust</b>  is &amp; was\n fast"),
+            "Rust is & was fast"
+        );
         assert_eq!(html_fragment_text("plain   text"), "plain text");
     }
 
@@ -130,16 +136,34 @@ mod tests {
 
     #[test]
     fn tidy_collapses_blank_lines() {
-        assert_eq!(tidy("\n\na  \n\n\n\nb\n```\n\n\ncode\n```\n"), "a\n\nb\n```\n\n\ncode\n```");
+        assert_eq!(
+            tidy("\n\na  \n\n\n\nb\n```\n\n\ncode\n```\n"),
+            "a\n\nb\n```\n\n\ncode\n```"
+        );
     }
 
     #[test]
     fn plurals() {
-        assert_eq!(plural_ru(1, "результат", "результата", "результатов"), "результат");
-        assert_eq!(plural_ru(3, "результат", "результата", "результатов"), "результата");
-        assert_eq!(plural_ru(8, "результат", "результата", "результатов"), "результатов");
-        assert_eq!(plural_ru(11, "результат", "результата", "результатов"), "результатов");
-        assert_eq!(plural_ru(22, "результат", "результата", "результатов"), "результата");
+        assert_eq!(
+            plural_ru(1, "результат", "результата", "результатов"),
+            "результат"
+        );
+        assert_eq!(
+            plural_ru(3, "результат", "результата", "результатов"),
+            "результата"
+        );
+        assert_eq!(
+            plural_ru(8, "результат", "результата", "результатов"),
+            "результатов"
+        );
+        assert_eq!(
+            plural_ru(11, "результат", "результата", "результатов"),
+            "результатов"
+        );
+        assert_eq!(
+            plural_ru(22, "результат", "результата", "результатов"),
+            "результата"
+        );
     }
 
     #[test]

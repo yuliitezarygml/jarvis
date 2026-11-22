@@ -11,8 +11,9 @@ const MIN_READABLE_CHARS: usize = 200;
 
 /// Теги, которые в Markdown для модели не нужны (картинки, формы, медиа, скрипты).
 const SKIP_TAGS: &[&str] = &[
-    "head", "script", "style", "noscript", "template", "img", "picture", "svg", "canvas", "video", "audio",
-    "iframe", "object", "embed", "form", "button", "input", "select", "textarea", "dialog",
+    "head", "script", "style", "noscript", "template", "img", "picture", "svg", "canvas", "video",
+    "audio", "iframe", "object", "embed", "form", "button", "input", "select", "textarea",
+    "dialog",
 ];
 
 /// Мусор вокруг основного содержимого — вырезается в запасном пути (когда readability не справилась).
@@ -32,7 +33,10 @@ pub fn html_to_markdown(html: &str, url: Option<&str>) -> Extracted {
     let doc_url = url.filter(|u| url::Url::parse(u).is_ok());
     let fallback_title = page_title(html);
 
-    let cfg = dom_smoothie::Config { max_elements_to_parse: 0, ..Default::default() };
+    let cfg = dom_smoothie::Config {
+        max_elements_to_parse: 0,
+        ..Default::default()
+    };
     if let Ok(mut r) = dom_smoothie::Readability::new(html, doc_url, Some(cfg))
         && let Ok(article) = r.parse()
     {
@@ -40,7 +44,11 @@ pub fn html_to_markdown(html: &str, url: Option<&str>) -> Extracted {
         if md.chars().count() >= MIN_READABLE_CHARS {
             let title = collapse_ws(&article.title);
             return Extracted {
-                title: if title.is_empty() { fallback_title } else { title },
+                title: if title.is_empty() {
+                    fallback_title
+                } else {
+                    title
+                },
                 markdown: md,
                 readable: true,
             };
@@ -57,7 +65,11 @@ pub fn html_to_markdown(html: &str, url: Option<&str>) -> Extracted {
         Some(m) => m.html().to_string(),
         None => doc.html().to_string(),
     };
-    Extracted { title: fallback_title, markdown: to_markdown(&inner), readable: false }
+    Extracted {
+        title: fallback_title,
+        markdown: to_markdown(&inner),
+        readable: false,
+    }
 }
 
 /// HTML → Markdown без картинок/форм/скриптов.
@@ -69,7 +81,10 @@ pub fn to_markdown(html: &str) -> String {
         ol_number_spacing: 1,
         ..Default::default()
     };
-    let conv = htmd::HtmlToMarkdown::builder().options(options).skip_tags(SKIP_TAGS.to_vec()).build();
+    let conv = htmd::HtmlToMarkdown::builder()
+        .options(options)
+        .skip_tags(SKIP_TAGS.to_vec())
+        .build();
     tidy(&strip_anchor_links(&conv.convert(html).unwrap_or_default()))
 }
 
@@ -77,7 +92,11 @@ pub fn to_markdown(html: &str) -> String {
 fn strip_anchor_links(md: &str) -> String {
     let mut out = String::with_capacity(md.len());
     let mut rest = md;
-    while let Some(pos) = ["[§](", "[¶](", "[#]("].iter().filter_map(|p| rest.find(p)).min() {
+    while let Some(pos) = ["[§](", "[¶](", "[#]("]
+        .iter()
+        .filter_map(|p| rest.find(p))
+        .min()
+    {
         out.push_str(&rest[..pos]);
         let after = &rest[pos..];
         match after.find(')') {
@@ -99,7 +118,11 @@ pub fn page_title(html: &str) -> String {
     if !title.is_empty() {
         return title;
     }
-    if let Some(og) = doc.select(r#"meta[property="og:title"]"#).first().attr("content") {
+    if let Some(og) = doc
+        .select(r#"meta[property="og:title"]"#)
+        .first()
+        .attr("content")
+    {
         let og = collapse_ws(&og);
         if !og.is_empty() {
             return og;
@@ -121,15 +144,26 @@ pub fn pdf_to_text(bytes: &[u8]) -> Result<String, String> {
 /// а если UTF-8 явно не подходит — windows-1251 (умолчание WHATWG для русской локали).
 pub fn decode_text(bytes: &[u8], content_type: Option<&str>, is_html: bool) -> String {
     if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
-        return enc.decode_without_bom_handling(&bytes[bom_len..]).0.into_owned();
+        return enc
+            .decode_without_bom_handling(&bytes[bom_len..])
+            .0
+            .into_owned();
     }
     let header = content_type.and_then(charset_param);
-    let meta = if is_html && header.is_none() { meta_charset(bytes) } else { None };
-    if let Some(label) = header.or(meta) {
-        if let Some(enc) = Encoding::for_label(label.trim().as_bytes()) {
-            // `utf-16`/`replacement` без BOM у ASCII-совместимого документа означает UTF-8 (WHATWG).
-            return enc.output_encoding().decode_without_bom_handling(bytes).0.into_owned();
-        }
+    let meta = if is_html && header.is_none() {
+        meta_charset(bytes)
+    } else {
+        None
+    };
+    if let Some(label) = header.or(meta)
+        && let Some(enc) = Encoding::for_label(label.trim().as_bytes())
+    {
+        // `utf-16`/`replacement` без BOM у ASCII-совместимого документа означает UTF-8 (WHATWG).
+        return enc
+            .output_encoding()
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned();
     }
     let (s, had_errors) = UTF_8.decode_without_bom_handling(bytes);
     if !had_errors {
@@ -137,7 +171,10 @@ pub fn decode_text(bytes: &[u8], content_type: Option<&str>, is_html: bool) -> S
     }
     let bad = s.chars().filter(|&c| c == '\u{FFFD}').count();
     if bad * 100 > s.chars().count().max(1) {
-        WINDOWS_1251.decode_without_bom_handling(bytes).0.into_owned()
+        WINDOWS_1251
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned()
     } else {
         s.into_owned()
     }
@@ -147,7 +184,9 @@ pub fn decode_text(bytes: &[u8], content_type: Option<&str>, is_html: bool) -> S
 fn charset_param(ct: &str) -> Option<String> {
     ct.split(';').skip(1).find_map(|p| {
         let (k, v) = p.split_once('=')?;
-        k.trim().eq_ignore_ascii_case("charset").then(|| v.trim().trim_matches(['"', '\'']).to_string())
+        k.trim()
+            .eq_ignore_ascii_case("charset")
+            .then(|| v.trim().trim_matches(['"', '\'']).to_string())
     })
 }
 
@@ -167,13 +206,17 @@ fn meta_charset(bytes: &[u8]) -> Option<String> {
             }
             if j < tag.len() && tag[j] == b'=' {
                 j += 1;
-                while j < tag.len() && (tag[j].is_ascii_whitespace() || tag[j] == b'"' || tag[j] == b'\'') {
+                while j < tag.len()
+                    && (tag[j].is_ascii_whitespace() || tag[j] == b'"' || tag[j] == b'\'')
+                {
                     j += 1;
                 }
                 let val: Vec<u8> = tag[j..]
                     .iter()
                     .copied()
-                    .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.'))
+                    .take_while(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.')
+                    })
                     .collect();
                 if !val.is_empty() {
                     return String::from_utf8(val).ok();
@@ -191,14 +234,26 @@ mod tests {
 
     #[test]
     fn charset_sources() {
-        assert_eq!(charset_param("text/html; Charset=\"windows-1251\"").as_deref(), Some("windows-1251"));
-        assert_eq!(charset_param("text/html").as_deref(), None);
-        assert_eq!(meta_charset(b"<html><head><META CHARSET='koi8-r'>").as_deref(), Some("koi8-r"));
         assert_eq!(
-            meta_charset(br#"<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">"#).as_deref(),
+            charset_param("text/html; Charset=\"windows-1251\"").as_deref(),
             Some("windows-1251")
         );
-        assert_eq!(meta_charset(b"<meta name=viewport content=x>").as_deref(), None);
+        assert_eq!(charset_param("text/html").as_deref(), None);
+        assert_eq!(
+            meta_charset(b"<html><head><META CHARSET='koi8-r'>").as_deref(),
+            Some("koi8-r")
+        );
+        assert_eq!(
+            meta_charset(
+                br#"<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">"#
+            )
+            .as_deref(),
+            Some("windows-1251")
+        );
+        assert_eq!(
+            meta_charset(b"<meta name=viewport content=x>").as_deref(),
+            None
+        );
     }
 
     #[test]
@@ -207,22 +262,33 @@ mod tests {
         // Без указания кодировки: UTF-8 не подходит → windows-1251.
         assert_eq!(decode_text(&bytes, None, true), "<p>Привет, сэр</p>");
         // Из заголовка.
-        assert_eq!(decode_text(&bytes, Some("text/html; charset=windows-1251"), true), "<p>Привет, сэр</p>");
+        assert_eq!(
+            decode_text(&bytes, Some("text/html; charset=windows-1251"), true),
+            "<p>Привет, сэр</p>"
+        );
         // UTF-8 с BOM.
         let mut bom = vec![0xEF, 0xBB, 0xBF];
         bom.extend_from_slice("Джарвис".as_bytes());
-        assert_eq!(decode_text(&bom, Some("text/plain; charset=windows-1251"), false), "Джарвис");
+        assert_eq!(
+            decode_text(&bom, Some("text/plain; charset=windows-1251"), false),
+            "Джарвис"
+        );
     }
 
     #[test]
     fn anchors_removed() {
-        assert_eq!(strip_anchor_links("## [§](#examples)Examples\n[¶](#a) x [real](https://a.b/)"), "## Examples\n x [real](https://a.b/)");
+        assert_eq!(
+            strip_anchor_links("## [§](#examples)Examples\n[¶](#a) x [real](https://a.b/)"),
+            "## Examples\n x [real](https://a.b/)"
+        );
         assert_eq!(strip_anchor_links("[§](broken\nline)"), "[§](broken\nline)");
     }
 
     #[test]
     fn markdown_skips_images_and_scripts() {
-        let md = to_markdown("<h2>Заголовок</h2><p>Текст <a href='https://a.b/'>ссылка</a></p><img src=x.png><script>evil()</script><ul><li>раз</li></ul>");
+        let md = to_markdown(
+            "<h2>Заголовок</h2><p>Текст <a href='https://a.b/'>ссылка</a></p><img src=x.png><script>evil()</script><ul><li>раз</li></ul>",
+        );
         assert!(md.contains("## Заголовок"));
         assert!(md.contains("[ссылка](https://a.b/)"));
         assert!(md.contains("- раз"));

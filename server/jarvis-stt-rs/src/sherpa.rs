@@ -15,8 +15,8 @@ use crate::engine::{Engine, Recognition};
 use crate::pool::BlockingPool;
 use anyhow::{Context, Result, bail, ensure};
 use sherpa_onnx::{
-    OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig, OnlineRecognizer, OnlineRecognizerConfig,
-    OnlineStream,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig, OnlineRecognizer,
+    OnlineRecognizerConfig, OnlineStream,
 };
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -32,12 +32,18 @@ fn find_onnx(dir: &Path, prefix: &str) -> Result<String> {
         .with_context(|| format!("каталог модели {}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
-            let n = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let n = p
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             n.starts_with(prefix) && n.ends_with(".onnx")
         })
         .collect();
     found.sort_by_key(|p| !p.to_string_lossy().contains("int8"));
-    let p = found.into_iter().next().with_context(|| format!("нет {prefix}*.onnx в {}", dir.display()))?;
+    let p = found
+        .into_iter()
+        .next()
+        .with_context(|| format!("нет {prefix}*.onnx в {}", dir.display()))?;
     Ok(p.to_string_lossy().into_owned())
 }
 
@@ -48,7 +54,11 @@ fn file(dir: &Path, name: &str) -> Result<String> {
 }
 
 fn transducer(dir: &Path) -> Result<(String, String, String)> {
-    Ok((find_onnx(dir, "encoder")?, find_onnx(dir, "decoder")?, find_onnx(dir, "joiner")?))
+    Ok((
+        find_onnx(dir, "encoder")?,
+        find_onnx(dir, "decoder")?,
+        find_onnx(dir, "joiner")?,
+    ))
 }
 
 struct OnlineSlot {
@@ -87,7 +97,10 @@ pub struct EngineOptions {
     pub queue_timeout: Duration,
 }
 
-fn online_config(spec: &ModelSpec, threads: usize) -> Result<(OnlineRecognizerConfig, usize, usize)> {
+fn online_config(
+    spec: &ModelSpec,
+    threads: usize,
+) -> Result<(OnlineRecognizerConfig, usize, usize)> {
     let mut c = OnlineRecognizerConfig::default();
     c.model_config.num_threads = threads as i32;
     c.model_config.provider = Some("cpu".into());
@@ -125,20 +138,36 @@ fn offline_config(spec: &ModelSpec, threads: usize) -> Result<OfflineRecognizerC
         }
         "gigaam-rnnt" | "nemo-transducer" | "zipformer" => {
             let (encoder, decoder, joiner) = transducer(dir)?;
-            c.model_config.transducer =
-                OfflineTransducerModelConfig { encoder: Some(encoder), decoder: Some(decoder), joiner: Some(joiner) };
-            let t = if spec.kind == "zipformer" { "transducer" } else { "nemo_transducer" };
+            c.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(encoder),
+                decoder: Some(decoder),
+                joiner: Some(joiner),
+            };
+            let t = if spec.kind == "zipformer" {
+                "transducer"
+            } else {
+                "nemo_transducer"
+            };
             c.model_config.model_type = Some(t.into());
         }
-        other => bail!("неизвестный тип офлайн-модели {other:?} (gigaam-rnnt | gigaam-ctc | zipformer)"),
+        other => {
+            bail!("неизвестный тип офлайн-модели {other:?} (gigaam-rnnt | gigaam-ctc | zipformer)")
+        }
     }
     c.model_config.tokens = Some(file(dir, "tokens.txt")?);
     Ok(c)
 }
 
 impl SherpaEngine {
-    pub fn load(streaming_spec: Option<&ModelSpec>, offline_spec: Option<&ModelSpec>, opt: &EngineOptions) -> Result<Self> {
-        ensure!(streaming_spec.is_some() || offline_spec.is_some(), "нужна хотя бы одна модель");
+    pub fn load(
+        streaming_spec: Option<&ModelSpec>,
+        offline_spec: Option<&ModelSpec>,
+        opt: &EngineOptions,
+    ) -> Result<Self> {
+        ensure!(
+            streaming_spec.is_some() || offline_spec.is_some(),
+            "нужна хотя бы одна модель"
+        );
         let online = match streaming_spec {
             None => None,
             Some(spec) => {
@@ -146,11 +175,19 @@ impl SherpaEngine {
                 let slots = (0..opt.pool)
                     .map(|_| {
                         OnlineRecognizer::create(&cfg)
-                            .map(|rec| OnlineSlot { rec, lock: Mutex::new(()) })
+                            .map(|rec| OnlineSlot {
+                                rec,
+                                lock: Mutex::new(()),
+                            })
                             .with_context(|| format!("не удалось загрузить {}", spec.dir.display()))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Some(Online { slots, next: AtomicUsize::new(0), left_pad, tail_pad })
+                Some(Online {
+                    slots,
+                    next: AtomicUsize::new(0),
+                    left_pad,
+                    tail_pad,
+                })
             }
         };
         let offline = match offline_spec {
@@ -159,10 +196,14 @@ impl SherpaEngine {
                 let cfg = offline_config(spec, opt.threads)?;
                 let recs = (0..opt.pool)
                     .map(|_| {
-                        OfflineRecognizer::create(&cfg).with_context(|| format!("не удалось загрузить {}", spec.dir.display()))
+                        OfflineRecognizer::create(&cfg)
+                            .with_context(|| format!("не удалось загрузить {}", spec.dir.display()))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Some(Offline { pool: BlockingPool::new(recs), wait: opt.queue_timeout })
+                Some(Offline {
+                    pool: BlockingPool::new(recs),
+                    wait: opt.queue_timeout,
+                })
             }
         };
         // Имя из каталогов моделей: `streaming-t-one-…+nemo-transducer-punct-giga-am-v3-…`.
@@ -172,7 +213,13 @@ impl SherpaEngine {
             .map(ModelSpec::short_name)
             .collect::<Vec<_>>()
             .join("+");
-        Ok(Self { inner: Arc::new(Inner { name, online, offline }) })
+        Ok(Self {
+            inner: Arc::new(Inner {
+                name,
+                online,
+                offline,
+            }),
+        })
     }
 
     /// Прогрев: первый запуск ONNX Runtime медленный, делаем его до открытия сокета.
@@ -183,13 +230,18 @@ impl SherpaEngine {
         if let Some(on) = &self.inner.online {
             for slot in 0..on.slots.len() {
                 let s = new_stream(on, slot);
-                let _g = on.slots[slot].lock.lock().unwrap_or_else(|e| e.into_inner());
+                let _g = on.slots[slot]
+                    .lock
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 s.accept_waveform(SR, &tone);
                 drain(&on.slots[slot].rec, &s);
             }
         }
         if let Some(off) = &self.inner.offline {
-            let guards: Vec<_> = (0..off.pool.size()).filter_map(|_| off.pool.get(Duration::from_secs(1))).collect();
+            let guards: Vec<_> = (0..off.pool.size())
+                .filter_map(|_| off.pool.get(Duration::from_secs(1)))
+                .collect();
             for rec in &guards {
                 decode_offline_with(rec, &tone);
             }
@@ -213,13 +265,18 @@ fn drain(rec: &OnlineRecognizer, s: &OnlineStream) {
 }
 
 fn online_text(rec: &OnlineRecognizer, s: &OnlineStream) -> String {
-    rec.get_result(s).map(|r| r.text.trim().to_string()).unwrap_or_default()
+    rec.get_result(s)
+        .map(|r| r.text.trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Досчитать потоковую фразу до конца (хвост тишины + input_finished) и вернуть текст.
 fn finish_online(on: &Online, slot: usize, s: &OnlineStream) -> String {
     let rec = &on.slots[slot].rec;
-    let _g = on.slots[slot].lock.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = on.slots[slot]
+        .lock
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     s.accept_waveform(SR, &vec![0.0; on.tail_pad]);
     s.input_finished();
     drain(rec, s);
@@ -230,7 +287,9 @@ fn decode_offline_with(rec: &OfflineRecognizer, samples: &[f32]) -> String {
     let s = rec.create_stream();
     s.accept_waveform(SR, samples);
     rec.decode(&s);
-    s.get_result().map(|r| r.text.trim().to_string()).unwrap_or_default()
+    s.get_result()
+        .map(|r| r.text.trim().to_string())
+        .unwrap_or_default()
 }
 
 impl Offline {
@@ -239,7 +298,10 @@ impl Offline {
         if samples.len() < SAMPLE_RATE as usize / 10 {
             return Ok(String::new());
         }
-        let rec = self.pool.get(self.wait).context("все офлайн-распознаватели заняты")?;
+        let rec = self
+            .pool
+            .get(self.wait)
+            .context("все офлайн-распознаватели заняты")?;
         Ok(decode_offline_with(&rec, samples))
     }
 }
@@ -257,18 +319,30 @@ impl Engine for SherpaEngine {
             }
             None => (0, None),
         };
-        Ok(Box::new(SherpaRecognition { stream, slot, audio: Vec::new(), inner: self.inner.clone() }))
+        Ok(Box::new(SherpaRecognition {
+            stream,
+            slot,
+            audio: Vec::new(),
+            inner: self.inner.clone(),
+        }))
     }
 
     fn transcribe(&self, samples: &[f32]) -> Result<String> {
         if let Some(off) = &self.inner.offline {
             return off.decode(samples);
         }
-        let on = self.inner.online.as_ref().expect("есть хотя бы одна модель");
+        let on = self
+            .inner
+            .online
+            .as_ref()
+            .expect("есть хотя бы одна модель");
         let slot = on.next.fetch_add(1, Ordering::Relaxed) % on.slots.len();
         let s = new_stream(on, slot);
         {
-            let _g = on.slots[slot].lock.lock().unwrap_or_else(|e| e.into_inner());
+            let _g = on.slots[slot]
+                .lock
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             for chunk in samples.chunks(SAMPLE_RATE as usize) {
                 s.accept_waveform(SR, chunk);
                 drain(&on.slots[slot].rec, &s);

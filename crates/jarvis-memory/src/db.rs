@@ -124,8 +124,11 @@ impl Memory {
 
     /// Выполнить синхронную операцию с памятью в пуле блокирующих задач tokio.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # async fn demo(mem: jarvis_memory::Memory) -> jarvis_memory::Result<()> {
+    /// use jarvis_memory::NewFact;
     /// let saved = mem.run(|m| m.upsert_fact(NewFact::explicit("пьёт чёрный кофе"))).await?;
+    /// # let _ = saved; Ok(()) }
     /// ```
     pub async fn run<R, F>(&self, f: F) -> Result<R>
     where

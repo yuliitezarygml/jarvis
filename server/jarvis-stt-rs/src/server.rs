@@ -47,7 +47,10 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/metrics", get(|State(s): State<AppState>| async move { s.metrics.render() }))
+        .route(
+            "/metrics",
+            get(|State(s): State<AppState>| async move { s.metrics.render() }),
+        )
         .route("/stt", post(transcribe))
         .route(STREAM_PATH, get(stream))
         .fallback(|| async { err(StatusCode::NOT_FOUND, "not_found") })
@@ -59,7 +62,11 @@ fn err(code: StatusCode, msg: &str) -> Response {
 }
 
 async fn health(State(s): State<AppState>) -> Json<Health> {
-    Json(Health { ok: true, model: s.engine.model().to_string(), sample_rate: SAMPLE_RATE })
+    Json(Health {
+        ok: true,
+        model: s.engine.model().to_string(),
+        sample_rate: SAMPLE_RATE,
+    })
 }
 
 fn samples_ms(n: usize) -> u64 {
@@ -82,12 +89,19 @@ pub fn decode_upload(content_type: Option<&str>, body: &[u8]) -> Result<Vec<f32>
     let mut parts = ct.split(';').map(str::trim);
     let mime = parts.next().unwrap_or("");
     let param = |name: &str| -> Option<String> {
-        ct.split(';').skip(1).filter_map(|p| p.trim().split_once('=')).find(|(k, _)| k.trim() == name).map(|(_, v)| {
-            v.trim().trim_matches('"').to_string()
-        })
+        ct.split(';')
+            .skip(1)
+            .filter_map(|p| p.trim().split_once('='))
+            .find(|(k, _)| k.trim() == name)
+            .map(|(_, v)| v.trim().trim_matches('"').to_string())
     };
     let is_riff = body.len() >= 12 && &body[0..4] == b"RIFF" && &body[8..12] == b"WAVE";
-    if is_riff || matches!(mime, "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave") {
+    if is_riff
+        || matches!(
+            mime,
+            "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave"
+        )
+    {
         let w = audio::parse_wav(body).map_err(UploadError::Audio)?;
         return Ok(audio::resample(&w.samples, w.sample_rate, SAMPLE_RATE));
     }
@@ -95,39 +109,58 @@ pub fn decode_upload(content_type: Option<&str>, body: &[u8]) -> Result<Vec<f32>
         "audio/l16" => {
             let rate: u32 = match param("rate") {
                 None => SAMPLE_RATE,
-                Some(v) => v.parse().map_err(|_| UploadError::Audio(AudioError::BadParameter(format!("rate={v}"))))?,
+                Some(v) => v.parse().map_err(|_| {
+                    UploadError::Audio(AudioError::BadParameter(format!("rate={v}")))
+                })?,
             };
             let channels: u16 = match param("channels") {
                 None => 1,
-                Some(v) => v.parse().map_err(|_| UploadError::Audio(AudioError::BadParameter(format!("channels={v}"))))?,
+                Some(v) => v.parse().map_err(|_| {
+                    UploadError::Audio(AudioError::BadParameter(format!("channels={v}")))
+                })?,
             };
             if !(8000..=48000).contains(&rate) || !(1..=8).contains(&channels) {
-                return Err(UploadError::Audio(AudioError::BadParameter(format!("rate={rate}, channels={channels}"))));
+                return Err(UploadError::Audio(AudioError::BadParameter(format!(
+                    "rate={rate}, channels={channels}"
+                ))));
             }
             (rate, channels)
         }
         "" | "application/octet-stream" => (SAMPLE_RATE, 1),
         other => return Err(UploadError::UnsupportedType(other.to_string())),
     };
-    if body.len() % (2 * channels as usize) != 0 {
+    if !body.len().is_multiple_of(2 * channels as usize) {
         return Err(UploadError::Audio(AudioError::OddPcmLength));
     }
     let pcm = audio::s16le_to_f32(body).map_err(UploadError::Audio)?;
-    Ok(audio::resample(&audio::downmix(&pcm, channels), rate, SAMPLE_RATE))
+    Ok(audio::resample(
+        &audio::downmix(&pcm, channels),
+        rate,
+        SAMPLE_RATE,
+    ))
 }
 
 async fn transcribe(State(s): State<AppState>, headers: HeaderMap, body: Body) -> Response {
     s.metrics.requests_total.fetch_add(1, Relaxed);
-    let Ok(Ok(_permit)) = tokio::time::timeout(s.limits.queue_timeout, s.requests.clone().acquire_owned()).await else {
+    let Ok(Ok(_permit)) =
+        tokio::time::timeout(s.limits.queue_timeout, s.requests.clone().acquire_owned()).await
+    else {
         s.metrics.requests_rejected.fetch_add(1, Relaxed);
         return err(StatusCode::SERVICE_UNAVAILABLE, "busy");
     };
-    let bytes = match tokio::time::timeout(s.limits.body_timeout, to_bytes(body, s.limits.max_body_bytes)).await {
+    let bytes = match tokio::time::timeout(
+        s.limits.body_timeout,
+        to_bytes(body, s.limits.max_body_bytes),
+    )
+    .await
+    {
         Err(_) => return err(StatusCode::REQUEST_TIMEOUT, "body_timeout"),
         Ok(Err(_)) => return err(StatusCode::PAYLOAD_TOO_LARGE, "body_too_large"),
         Ok(Ok(b)) => b,
     };
-    let ct = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
     let samples = match decode_upload(ct, &bytes) {
         Ok(s) => s,
         Err(UploadError::UnsupportedType(t)) => {
@@ -153,7 +186,12 @@ async fn transcribe(State(s): State<AppState>, headers: HeaderMap, body: Body) -
         Ok(Ok(Ok(text))) => {
             let latency = started.elapsed();
             s.metrics.final_done(latency, duration_ms);
-            tracing::info!(audio_ms = duration_ms, decode_ms = latency.as_millis() as u64, chars = text.chars().count(), "POST /stt");
+            tracing::info!(
+                audio_ms = duration_ms,
+                decode_ms = latency.as_millis() as u64,
+                chars = text.chars().count(),
+                "POST /stt"
+            );
             tracing::debug!(%text, "POST /stt text");
             Json(SttResult { text, duration_ms }).into_response()
         }
@@ -203,7 +241,10 @@ impl Drop for ActiveGuard {
 
 async fn send(socket: &mut WebSocket, msg: &ServerMsg) -> Result<(), Fatal> {
     let text = serde_json::to_string(msg).expect("ServerMsg serializes");
-    socket.send(Message::Text(text.into())).await.map_err(|_| Fatal::Closed)
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| Fatal::Closed)
 }
 
 struct Session {
@@ -223,7 +264,10 @@ impl Session {
         &mut self,
         f: impl FnOnce(&mut dyn Recognition) -> anyhow::Result<R> + Send + 'static,
     ) -> Result<R, Fatal> {
-        let mut rec = self.rec.take().ok_or_else(|| Fatal::Engine("распознаватель недоступен".into()))?;
+        let mut rec = self
+            .rec
+            .take()
+            .ok_or_else(|| Fatal::Engine("распознаватель недоступен".into()))?;
         let job = tokio::task::spawn_blocking(move || {
             let out = f(rec.as_mut());
             (rec, out)
@@ -254,12 +298,21 @@ impl Session {
             self.samples += chunk.len();
             let partial = self.blocking(move |r| r.accept(&chunk)).await?;
             if !partial.is_empty() && partial != self.last_partial {
-                send(socket, &ServerMsg::Partial { text: partial.clone() }).await?;
+                send(
+                    socket,
+                    &ServerMsg::Partial {
+                        text: partial.clone(),
+                    },
+                )
+                .await?;
                 self.s.metrics.partials_total.fetch_add(1, Relaxed);
                 self.last_partial = partial;
             }
             if self.samples >= self.max_samples() {
-                tracing::info!(session = self.id, "фраза достигла предела длины: final без end");
+                tracing::info!(
+                    session = self.id,
+                    "фраза достигла предела длины: final без end"
+                );
                 self.end(socket).await?;
             }
         }
@@ -270,7 +323,14 @@ impl Session {
         let started = Instant::now();
         let text = self.blocking(|r| r.finish()).await?;
         let duration_ms = samples_ms(self.samples);
-        send(socket, &ServerMsg::Final { text: text.clone(), duration_ms }).await?;
+        send(
+            socket,
+            &ServerMsg::Final {
+                text: text.clone(),
+                duration_ms,
+            },
+        )
+        .await?;
         let latency = started.elapsed();
         self.s.metrics.final_done(latency, duration_ms);
         self.phrases += 1;
@@ -309,8 +369,15 @@ impl Session {
                 Ok(ClientMsg::End) => self.end(socket).await?,
                 Ok(ClientMsg::Reset) => self.reset().await?,
                 Err(_) => {
-                    send(socket, &ServerMsg::Error { message: "неизвестное сообщение; ожидается {\"type\":\"end\"|\"reset\"}".into() })
-                        .await?
+                    send(
+                        socket,
+                        &ServerMsg::Error {
+                            message:
+                                "неизвестное сообщение; ожидается {\"type\":\"end\"|\"reset\"}"
+                                    .into(),
+                        },
+                    )
+                    .await?
                 }
             },
             Message::Close(_) => return Ok(false),
@@ -321,7 +388,12 @@ impl Session {
 }
 
 async fn close(socket: &mut WebSocket, code: u16, reason: &str) {
-    let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+    let _ = socket
+        .send(Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.into(),
+        })))
+        .await;
 }
 
 async fn run_session(mut socket: WebSocket, s: AppState, _permit: OwnedSemaphorePermit) {
@@ -346,7 +418,15 @@ async fn run_session(mut socket: WebSocket, s: AppState, _permit: OwnedSemaphore
             return;
         }
     };
-    if send(&mut socket, &ServerMsg::Ready { model: s.engine.model().to_string() }).await.is_err() {
+    if send(
+        &mut socket,
+        &ServerMsg::Ready {
+            model: s.engine.model().to_string(),
+        },
+    )
+    .await
+    .is_err()
+    {
         return;
     }
     let mut session = Session {
@@ -358,7 +438,10 @@ async fn run_session(mut socket: WebSocket, s: AppState, _permit: OwnedSemaphore
         last_partial: String::new(),
         phrases: 0,
     };
-    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + s.limits.ping_interval, s.limits.ping_interval);
+    let mut ping = tokio::time::interval_at(
+        tokio::time::Instant::now() + s.limits.ping_interval,
+        s.limits.ping_interval,
+    );
     let mut deadline = tokio::time::Instant::now() + s.limits.idle_timeout;
     let reason = loop {
         tokio::select! {
@@ -389,7 +472,13 @@ async fn run_session(mut socket: WebSocket, s: AppState, _permit: OwnedSemaphore
             }
         }
     };
-    tracing::info!(session = id, phrases = session.phrases, secs = opened.elapsed().as_secs(), reason, "WS: закрыто");
+    tracing::info!(
+        session = id,
+        phrases = session.phrases,
+        secs = opened.elapsed().as_secs(),
+        reason,
+        "WS: закрыто"
+    );
 }
 
 // ---------------------------------------------------------------- запуск
@@ -397,7 +486,8 @@ async fn run_session(mut socket: WebSocket, s: AppState, _permit: OwnedSemaphore
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler");
         tokio::select! {
             _ = term.recv() => {}
             _ = tokio::signal::ctrl_c() => {}
@@ -415,7 +505,9 @@ fn notify_systemd_ready() {
     {
         use std::os::linux::net::SocketAddrExt;
         use std::os::unix::net::{SocketAddr, UnixDatagram};
-        let Some(path) = std::env::var_os("NOTIFY_SOCKET") else { return };
+        let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
+            return;
+        };
         let path = path.to_string_lossy().into_owned();
         let addr = match path.strip_prefix('@') {
             Some(name) => SocketAddr::from_abstract_name(name.as_bytes()),
@@ -449,10 +541,15 @@ pub async fn serve(
         }
     });
     if let Some((cert, key)) = tls {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
         tracing::info!(%bind, "HTTPS готов");
-        axum_server::bind_rustls(bind, cfg).handle(handle).serve(app).await?;
+        axum_server::bind_rustls(bind, cfg)
+            .handle(handle)
+            .serve(app)
+            .await?;
     } else {
         tracing::info!(%bind, "HTTP готов (без TLS, только loopback)");
         axum_server::bind(bind).handle(handle).serve(app).await?;
@@ -467,19 +564,59 @@ mod tests {
     #[test]
     fn upload_types() {
         let pcm = audio::f32_to_s16le(&vec![0.25; 1600]);
-        assert_eq!(decode_upload(Some("audio/L16; rate=16000"), &pcm).unwrap().len(), 1600);
-        assert_eq!(decode_upload(Some("audio/l16;rate=8000;channels=1"), &pcm).unwrap().len(), 3200);
-        assert_eq!(decode_upload(Some("audio/L16; rate=16000; channels=2"), &pcm).unwrap().len(), 800);
+        assert_eq!(
+            decode_upload(Some("audio/L16; rate=16000"), &pcm)
+                .unwrap()
+                .len(),
+            1600
+        );
+        assert_eq!(
+            decode_upload(Some("audio/l16;rate=8000;channels=1"), &pcm)
+                .unwrap()
+                .len(),
+            3200
+        );
+        assert_eq!(
+            decode_upload(Some("audio/L16; rate=16000; channels=2"), &pcm)
+                .unwrap()
+                .len(),
+            800
+        );
         assert_eq!(decode_upload(None, &pcm).unwrap().len(), 1600);
-        assert_eq!(decode_upload(Some("application/octet-stream"), &pcm).unwrap().len(), 1600);
+        assert_eq!(
+            decode_upload(Some("application/octet-stream"), &pcm)
+                .unwrap()
+                .len(),
+            1600
+        );
         let wav = audio::write_wav_pcm16(&vec![0.1; 4800], 48000);
         assert_eq!(decode_upload(Some("audio/wav"), &wav).unwrap().len(), 1600);
         // WAV по сигнатуре даже с общим типом
-        assert_eq!(decode_upload(Some("application/octet-stream"), &wav).unwrap().len(), 1600);
-        assert!(matches!(decode_upload(Some("text/plain"), &pcm), Err(UploadError::UnsupportedType(_))));
-        assert_eq!(decode_upload(Some("audio/L16"), &[1, 2, 3]), Err(UploadError::Audio(AudioError::OddPcmLength)));
-        assert!(matches!(decode_upload(Some("audio/L16; rate=abc"), &pcm), Err(UploadError::Audio(_))));
-        assert!(matches!(decode_upload(Some("audio/L16; rate=100"), &pcm), Err(UploadError::Audio(_))));
-        assert!(matches!(decode_upload(Some("audio/wav"), b"not a wav at all"), Err(UploadError::Audio(_))));
+        assert_eq!(
+            decode_upload(Some("application/octet-stream"), &wav)
+                .unwrap()
+                .len(),
+            1600
+        );
+        assert!(matches!(
+            decode_upload(Some("text/plain"), &pcm),
+            Err(UploadError::UnsupportedType(_))
+        ));
+        assert_eq!(
+            decode_upload(Some("audio/L16"), &[1, 2, 3]),
+            Err(UploadError::Audio(AudioError::OddPcmLength))
+        );
+        assert!(matches!(
+            decode_upload(Some("audio/L16; rate=abc"), &pcm),
+            Err(UploadError::Audio(_))
+        ));
+        assert!(matches!(
+            decode_upload(Some("audio/L16; rate=100"), &pcm),
+            Err(UploadError::Audio(_))
+        ));
+        assert!(matches!(
+            decode_upload(Some("audio/wav"), b"not a wav at all"),
+            Err(UploadError::Audio(_))
+        ));
     }
 }

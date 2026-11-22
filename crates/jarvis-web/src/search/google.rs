@@ -18,7 +18,12 @@ pub struct GoogleCse {
 
 impl GoogleCse {
     pub fn new(client: reqwest::Client, key: String, cx: String) -> Self {
-        Self { client, key, cx, base_url: DEFAULT_BASE.into() }
+        Self {
+            client,
+            key,
+            cx,
+            base_url: DEFAULT_BASE.into(),
+        }
     }
     pub fn with_base_url(mut self, base: impl Into<String>) -> Self {
         self.base_url = base.into();
@@ -51,9 +56,22 @@ impl SearchProvider for GoogleCse {
         let num = n.clamp(1, 10).to_string();
         let req = self
             .client
-            .get(format!("{}/customsearch/v1", self.base_url.trim_end_matches('/')))
-            .query(&[("key", self.key.as_str()), ("cx", self.cx.as_str()), ("q", query), ("num", num.as_str())]);
+            .get(format!(
+                "{}/customsearch/v1",
+                self.base_url.trim_end_matches('/')
+            ))
+            .query(&[
+                ("key", self.key.as_str()),
+                ("cx", self.cx.as_str()),
+                ("q", query),
+                ("num", num.as_str()),
+            ]);
         let resp: Resp = send_json(req).await?;
-        Ok(resp.items.iter().filter_map(|i| SearchHit::cleaned(&i.title, &i.link, &i.snippet)).take(n).collect())
+        Ok(resp
+            .items
+            .iter()
+            .filter_map(|i| SearchHit::cleaned(&i.title, &i.link, &i.snippet))
+            .take(n)
+            .collect())
     }
 }

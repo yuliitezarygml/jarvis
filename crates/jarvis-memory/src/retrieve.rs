@@ -196,49 +196,91 @@ impl MemoryContext {
 
     /// Русский блок «Память:» не длиннее `budget_tokens` (по [`estimate_tokens`]).
     ///
-    /// Приоритет при нехватке места: важные факты → уроки → остальные факты → плейбуки.
-    /// Длинные строки обрезаются по символам с «…», не влезающие — пропускаются.
-    /// Пустая память → пустая строка.
+    /// Группы по приоритету: важные факты → уроки → остальные факты → плейбуки. Сначала каждая группа
+    /// получает свою долю бюджета (35/40/10/15 %) — так длинные факты не вытесняют уроки; затем
+    /// остаток заполняется по приоритету. Не влезающая строка обрезается по символам с «…»
+    /// (если остаётся ≥12 токенов), иначе пропускается. Пустая память → пустая строка.
     pub fn render(&self, budget_tokens: usize) -> String {
-        let mut candidates: Vec<(usize, String)> = Vec::new();
-        candidates.extend(self.facts.iter().filter(|f| is_important(f)).map(|f| (0, fact_line(f))));
-        candidates.extend(self.lessons.iter().map(|l| (1, lesson_line(l))));
-        candidates.extend(self.facts.iter().filter(|f| !is_important(f)).map(|f| (0, fact_line(f))));
-        candidates.extend(self.playbooks.iter().map(|p| (2, playbook_line(p))));
+        // (секция, группа, строка)
+        let mut cands: Vec<(usize, usize, String)> = Vec::new();
+        cands.extend(self.facts.iter().filter(|f| is_important(f)).map(|f| (0, 0, fact_line(f))));
+        cands.extend(self.lessons.iter().map(|l| (1, 1, lesson_line(l))));
+        cands.extend(self.facts.iter().filter(|f| !is_important(f)).map(|f| (0, 2, fact_line(f))));
+        cands.extend(self.playbooks.iter().map(|p| (2, 3, playbook_line(p))));
+        for c in &mut cands {
+            c.2 = truncate_chars(&c.2, MAX_LINE_CHARS);
+        }
 
-        let mut used = estimate_tokens(HEADER);
-        let mut picked: [Vec<String>; 3] = Default::default();
-        for (sec, line) in candidates {
-            let line = truncate_chars(&line, MAX_LINE_CHARS);
-            let sec_cost = if picked[sec].is_empty() { estimate_tokens(SECTIONS[sec]) + 1 } else { 0 };
-            let cost = sec_cost + estimate_tokens(&line) + 1;
-            if used + cost <= budget_tokens {
-                picked[sec].push(line);
-                used += cost;
-                continue;
-            }
-            let avail = budget_tokens.saturating_sub(used + sec_cost + 1);
-            if avail >= MIN_TRUNCATED_TOKENS {
-                let cut = truncate_chars(&line, avail * 3);
-                used += sec_cost + estimate_tokens(&cut) + 1;
-                picked[sec].push(cut);
+        let mut st = RenderState { used: estimate_tokens(HEADER), open: [false; 3], picked: vec![None; cands.len()] };
+        // проход 1: доли групп; обрезать строку можно только чтобы группа не осталась пустой
+        for (group, share) in GROUP_SHARES.iter().enumerate() {
+            let limit = (st.used + (budget_tokens as f64 * share) as usize).min(budget_tokens);
+            let mut group_has = false;
+            for (i, (sec, g, line)) in cands.iter().enumerate() {
+                if *g == group && st.try_add(i, *sec, line, limit, !group_has) {
+                    group_has = true;
+                }
             }
         }
-        if picked.iter().all(Vec::is_empty) {
+        // проход 2: остаток бюджета по приоритету
+        for (i, (sec, _, line)) in cands.iter().enumerate() {
+            if st.picked[i].is_none() {
+                st.try_add(i, *sec, line, budget_tokens, true);
+            }
+        }
+
+        if st.picked.iter().all(Option::is_none) {
             return String::new();
         }
         let mut out = String::from(HEADER);
-        for (i, lines) in picked.iter().enumerate() {
+        for (sec, title) in SECTIONS.iter().enumerate() {
+            let lines: Vec<&String> =
+                cands.iter().zip(&st.picked).filter(|((s, _, _), p)| *s == sec && p.is_some()).filter_map(|(_, p)| p.as_ref()).collect();
             if lines.is_empty() {
                 continue;
             }
             out.push('\n');
-            out.push_str(SECTIONS[i]);
+            out.push_str(title);
             for l in lines {
                 out.push('\n');
                 out.push_str(l);
             }
         }
         out
+    }
+}
+
+/// Доли бюджета групп в первом проходе: важные факты, уроки, остальные факты, плейбуки.
+const GROUP_SHARES: [f64; 4] = [0.35, 0.40, 0.10, 0.15];
+
+struct RenderState {
+    used: usize,
+    open: [bool; 3],
+    picked: Vec<Option<String>>,
+}
+
+impl RenderState {
+    /// Добавить строку `i`, не выходя за `limit`. Стоимость: строка + перевод строки
+    /// (+ заголовок секции, если она ещё не открыта). Сумма оценок по частям ≥ оценки целого,
+    /// поэтому итоговый текст гарантированно укладывается в бюджет.
+    fn try_add(&mut self, i: usize, sec: usize, line: &str, limit: usize, allow_cut: bool) -> bool {
+        if self.picked[i].is_some() {
+            return false;
+        }
+        let sec_cost = if self.open[sec] { 0 } else { estimate_tokens(SECTIONS[sec]) + 1 };
+        let cost = sec_cost + estimate_tokens(line) + 1;
+        let chosen = if self.used + cost <= limit {
+            line.to_string()
+        } else {
+            let avail = limit.saturating_sub(self.used + sec_cost + 1);
+            if !allow_cut || avail < MIN_TRUNCATED_TOKENS {
+                return false;
+            }
+            truncate_chars(line, avail * 3)
+        };
+        self.used += sec_cost + estimate_tokens(&chosen) + 1;
+        self.open[sec] = true;
+        self.picked[i] = Some(chosen);
+        true
     }
 }

@@ -7,7 +7,8 @@ use std::time::Duration;
 
 /// Модели по умолчанию (выбраны замером, см. README): потоковая для partial и офлайн для final.
 pub const DEFAULT_STREAMING: &str = "t-one:sherpa-onnx-streaming-t-one-russian-2025-09-08";
-pub const DEFAULT_OFFLINE: &str = "gigaam-rnnt:sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16";
+pub const DEFAULT_OFFLINE: &str =
+    "gigaam-rnnt:sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16";
 
 /// Модель: семейство и каталог с файлами.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,17 +24,35 @@ impl ModelSpec {
         if spec.is_empty() || spec.eq_ignore_ascii_case("none") {
             return Ok(None);
         }
-        let (kind, dir) = spec.split_once(':').with_context(|| format!("ожидается kind:каталог, получено {spec:?}"))?;
-        ensure!(!kind.is_empty() && !dir.is_empty(), "пустой kind или каталог в {spec:?}");
+        let (kind, dir) = spec
+            .split_once(':')
+            .with_context(|| format!("ожидается kind:каталог, получено {spec:?}"))?;
+        ensure!(
+            !kind.is_empty() && !dir.is_empty(),
+            "пустой kind или каталог в {spec:?}"
+        );
         let dir = PathBuf::from(dir);
-        let dir = if dir.is_absolute() { dir } else { root.join(dir) };
-        Ok(Some(Self { kind: kind.to_ascii_lowercase(), dir }))
+        let dir = if dir.is_absolute() {
+            dir
+        } else {
+            root.join(dir)
+        };
+        Ok(Some(Self {
+            kind: kind.to_ascii_lowercase(),
+            dir,
+        }))
     }
 
     /// Короткое имя для `ready`/`health`: каталог без префикса `sherpa-onnx-`.
     pub fn short_name(&self) -> String {
-        let name = self.dir.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        name.strip_prefix("sherpa-onnx-").unwrap_or(&name).to_string()
+        let name = self
+            .dir
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        name.strip_prefix("sherpa-onnx-")
+            .unwrap_or(&name)
+            .to_string()
     }
 }
 
@@ -88,13 +107,20 @@ pub struct Config {
     pub limits: Limits,
 }
 
-fn num<T: std::str::FromStr>(get: &impl Fn(&str) -> Option<String>, key: &str, default: T) -> Result<T>
+fn num<T: std::str::FromStr>(
+    get: &impl Fn(&str) -> Option<String>,
+    key: &str,
+    default: T,
+) -> Result<T>
 where
     T::Err: std::fmt::Display,
 {
     match get(key) {
         None => Ok(default),
-        Some(v) => v.trim().parse().map_err(|e| anyhow::anyhow!("{key}={v:?}: {e}")),
+        Some(v) => v
+            .trim()
+            .parse()
+            .map_err(|e| anyhow::anyhow!("{key}={v:?}: {e}")),
     }
 }
 
@@ -113,12 +139,25 @@ impl Config {
             (None, None) => None,
             _ => bail!("задайте оба файла TLS: JARVIS_TLS_CERT и JARVIS_TLS_KEY"),
         };
-        ensure!(bind.ip().is_loopback() || tls.is_some(), "адрес не loopback требует TLS");
-        let model_dir = PathBuf::from(get("JARVIS_STT_MODEL_DIR").unwrap_or_else(|| "/opt/jarvis-stt-rs/models".into()));
-        let streaming =
-            ModelSpec::parse(&get("JARVIS_STT_STREAMING").unwrap_or_else(|| DEFAULT_STREAMING.into()), &model_dir)?;
-        let offline = ModelSpec::parse(&get("JARVIS_STT_OFFLINE").unwrap_or_else(|| DEFAULT_OFFLINE.into()), &model_dir)?;
-        ensure!(streaming.is_some() || offline.is_some(), "нужна хотя бы одна модель (JARVIS_STT_STREAMING/OFFLINE)");
+        ensure!(
+            bind.ip().is_loopback() || tls.is_some(),
+            "адрес не loopback требует TLS"
+        );
+        let model_dir = PathBuf::from(
+            get("JARVIS_STT_MODEL_DIR").unwrap_or_else(|| "/opt/jarvis-stt-rs/models".into()),
+        );
+        let streaming = ModelSpec::parse(
+            &get("JARVIS_STT_STREAMING").unwrap_or_else(|| DEFAULT_STREAMING.into()),
+            &model_dir,
+        )?;
+        let offline = ModelSpec::parse(
+            &get("JARVIS_STT_OFFLINE").unwrap_or_else(|| DEFAULT_OFFLINE.into()),
+            &model_dir,
+        )?;
+        ensure!(
+            streaming.is_some() || offline.is_some(),
+            "нужна хотя бы одна модель (JARVIS_STT_STREAMING/OFFLINE)"
+        );
         let threads: usize = num(&get, "JARVIS_STT_THREADS", 2)?;
         ensure!((1..=16).contains(&threads), "JARVIS_STT_THREADS: 1..16");
         let pool: usize = num(&get, "JARVIS_STT_POOL", 2)?;
@@ -139,10 +178,28 @@ impl Config {
             decode_timeout: secs("JARVIS_STT_DECODE_TIMEOUT_S", d.decode_timeout)?,
             ..d
         };
-        ensure!((1..=64).contains(&limits.max_sessions), "JARVIS_STT_MAX_SESSIONS: 1..64");
-        ensure!((1..=32).contains(&limits.max_requests), "JARVIS_STT_MAX_REQUESTS: 1..32");
-        ensure!(limits.max_utterance <= Duration::from_secs(120), "JARVIS_STT_MAX_UTTERANCE_S ≤ 120");
-        Ok(Self { bind, tls, model_dir, streaming, offline, threads, pool, limits })
+        ensure!(
+            (1..=64).contains(&limits.max_sessions),
+            "JARVIS_STT_MAX_SESSIONS: 1..64"
+        );
+        ensure!(
+            (1..=32).contains(&limits.max_requests),
+            "JARVIS_STT_MAX_REQUESTS: 1..32"
+        );
+        ensure!(
+            limits.max_utterance <= Duration::from_secs(120),
+            "JARVIS_STT_MAX_UTTERANCE_S ≤ 120"
+        );
+        Ok(Self {
+            bind,
+            tls,
+            model_dir,
+            streaming,
+            offline,
+            threads,
+            pool,
+            limits,
+        })
     }
 }
 
@@ -152,7 +209,10 @@ mod tests {
     use std::collections::HashMap;
 
     fn cfg(pairs: &[(&str, &str)]) -> Result<Config> {
-        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let m: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         Config::from_lookup(move |k| m.get(k).cloned())
     }
 
@@ -171,13 +231,30 @@ mod tests {
 
     #[test]
     fn validation() {
-        assert!(cfg(&[("JARVIS_STT_BIND", "0.0.0.0:8182")]).is_err(), "LAN без TLS");
-        assert!(cfg(&[("JARVIS_TLS_CERT", "/c")]).is_err(), "только один файл TLS");
-        let c = cfg(&[("JARVIS_STT_BIND", "0.0.0.0:1"), ("JARVIS_TLS_CERT", "/c"), ("JARVIS_TLS_KEY", "/k")]).unwrap();
+        assert!(
+            cfg(&[("JARVIS_STT_BIND", "0.0.0.0:8182")]).is_err(),
+            "LAN без TLS"
+        );
+        assert!(
+            cfg(&[("JARVIS_TLS_CERT", "/c")]).is_err(),
+            "только один файл TLS"
+        );
+        let c = cfg(&[
+            ("JARVIS_STT_BIND", "0.0.0.0:1"),
+            ("JARVIS_TLS_CERT", "/c"),
+            ("JARVIS_TLS_KEY", "/k"),
+        ])
+        .unwrap();
         assert!(c.tls.is_some());
         assert!(cfg(&[("JARVIS_STT_THREADS", "0")]).is_err());
         assert!(cfg(&[("JARVIS_STT_THREADS", "x")]).is_err());
-        assert!(cfg(&[("JARVIS_STT_STREAMING", "none"), ("JARVIS_STT_OFFLINE", "none")]).is_err());
+        assert!(
+            cfg(&[
+                ("JARVIS_STT_STREAMING", "none"),
+                ("JARVIS_STT_OFFLINE", "none")
+            ])
+            .is_err()
+        );
         assert!(cfg(&[("JARVIS_STT_STREAMING", "no-colon")]).is_err());
     }
 
@@ -186,15 +263,26 @@ mod tests {
         let abs = std::env::temp_dir().join("zip");
         let c = cfg(&[
             ("JARVIS_STT_MODEL_DIR", "/m"),
-            ("JARVIS_STT_STREAMING", &format!("Zipformer:{}", abs.display())),
+            (
+                "JARVIS_STT_STREAMING",
+                &format!("Zipformer:{}", abs.display()),
+            ),
             ("JARVIS_STT_OFFLINE", "none"),
             ("JARVIS_STT_MAX_UTTERANCE_S", "12.5"),
         ])
         .unwrap();
-        assert_eq!(c.streaming, Some(ModelSpec { kind: "zipformer".into(), dir: abs }));
+        assert_eq!(
+            c.streaming,
+            Some(ModelSpec {
+                kind: "zipformer".into(),
+                dir: abs
+            })
+        );
         assert_eq!(c.offline, None);
         assert_eq!(c.limits.max_utterance, Duration::from_millis(12500));
-        let s = ModelSpec::parse("gigaam-ctc:giga", std::path::Path::new("/m")).unwrap().unwrap();
+        let s = ModelSpec::parse("gigaam-ctc:giga", std::path::Path::new("/m"))
+            .unwrap()
+            .unwrap();
         assert_eq!(s.dir, PathBuf::from("/m").join("giga"));
     }
 }

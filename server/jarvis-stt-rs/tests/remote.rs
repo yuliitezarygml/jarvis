@@ -8,7 +8,9 @@
 //! Звук для проверки синтезирует наш TTS (PCM 24 кГц), ресемплинг в 16 кГц — `audio::resample`.
 
 use futures_util::{SinkExt, StreamExt};
-use jarvis_core::stt_protocol::{ClientMsg, DEFAULT_URL, Health, STREAM_PATH, ServerMsg, SttResult};
+use jarvis_core::stt_protocol::{
+    ClientMsg, DEFAULT_URL, Health, STREAM_PATH, ServerMsg, SttResult,
+};
 use jarvis_stt_rs::{audio, text};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use std::sync::Arc;
@@ -22,8 +24,13 @@ fn tts_url() -> String {
     std::env::var("JARVIS_TTS_URL").unwrap_or_else(|_| "https://192.168.50.38:8443".into())
 }
 fn ca_pem() -> Vec<u8> {
-    let path = std::env::var("JARVIS_STT_CA")
-        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri/config/xeon-tts-ca.pem").into());
+    let path = std::env::var("JARVIS_STT_CA").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../src-tauri/config/xeon-tts-ca.pem"
+        )
+        .into()
+    });
     std::fs::read(&path).unwrap_or_else(|e| panic!("CA {path}: {e}"))
 }
 
@@ -42,11 +49,13 @@ fn tls_connector() -> Connector {
     for c in CertificateDer::pem_slice_iter(&ca_pem()) {
         roots.add(c.unwrap()).unwrap();
     }
-    let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
     Connector::Rustls(Arc::new(cfg))
 }
 
@@ -75,13 +84,24 @@ fn pad(speech: &[f32], pre_ms: usize, post_ms: usize) -> Vec<f32> {
 #[ignore = "нужен развёрнутый сервис на Xeon"]
 async fn remote_health_and_post() {
     let c = http();
-    let h: Health = c.get(format!("{}/health", stt_url())).send().await.unwrap().json().await.unwrap();
+    let h: Health = c
+        .get(format!("{}/health", stt_url()))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     println!("health: {h:?}");
     assert!(h.ok);
     assert_eq!(h.sample_rate, 16000);
     assert!(!h.model.is_empty());
 
-    for phrase in ["Джарвис, открой блокнот.", "Сколько будет семь плюс пять?", "Включи вай-фай."] {
+    for phrase in [
+        "Джарвис, открой блокнот.",
+        "Сколько будет семь плюс пять?",
+        "Включи вай-фай.",
+    ] {
         let speech = tts(&c, phrase).await;
         let body = audio::f32_to_s16le(&pad(&speech, 200, 300));
         let t = Instant::now();
@@ -96,17 +116,42 @@ async fn remote_health_and_post() {
             .await
             .unwrap();
         let s = text::score(phrase, &r.text);
-        println!("POST /stt {:>4} мс  CER {:>5.1} %  {phrase:?} → {:?}", t.elapsed().as_millis(), s.cer() * 100.0, r.text);
-        assert!(s.cer() <= 0.15, "слишком далеко от исходного: {:?} vs {phrase:?}", r.text);
+        println!(
+            "POST /stt {:>4} мс  CER {:>5.1} %  {phrase:?} → {:?}",
+            t.elapsed().as_millis(),
+            s.cer() * 100.0,
+            r.text
+        );
+        assert!(
+            s.cer() <= 0.15,
+            "слишком далеко от исходного: {:?} vs {phrase:?}",
+            r.text
+        );
         assert!(r.duration_ms > 500);
     }
 
     // WAV 24 кГц напрямую (ресемплинг на сервере)
-    let raw = c.post(format!("{}/tts/stream", tts_url())).json(&serde_json::json!({"text": "Да, сэр."})).send().await.unwrap();
+    let raw = c
+        .post(format!("{}/tts/stream", tts_url()))
+        .json(&serde_json::json!({"text": "Да, сэр."}))
+        .send()
+        .await
+        .unwrap();
     let pcm = raw.bytes().await.unwrap();
-    let wav = audio::write_wav_pcm16(&audio::s16le_to_f32(&pcm[..pcm.len() & !1]).unwrap(), 24_000);
-    let r: SttResult =
-        c.post(format!("{}/stt", stt_url())).header("content-type", "audio/wav").body(wav).send().await.unwrap().json().await.unwrap();
+    let wav = audio::write_wav_pcm16(
+        &audio::s16le_to_f32(&pcm[..pcm.len() & !1]).unwrap(),
+        24_000,
+    );
+    let r: SttResult = c
+        .post(format!("{}/stt", stt_url()))
+        .header("content-type", "audio/wav")
+        .body(wav)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     println!("POST /stt WAV 24 кГц → {:?}", r.text);
     assert!(text::score("да сэр", &r.text).cer() <= 0.2);
 }
@@ -135,7 +180,9 @@ where
     let (mut t_onset, mut t_offset) = (None, None);
     for (i, c) in samples.chunks(chunk).enumerate() {
         tokio::time::sleep_until(start + Duration::from_millis(40 * i as u64)).await;
-        sink.send(Message::Binary(audio::f32_to_s16le(c).into())).await.unwrap();
+        sink.send(Message::Binary(audio::f32_to_s16le(c).into()))
+            .await
+            .unwrap();
         let end = (i + 1) * chunk;
         if t_onset.is_none() && end >= onset_s {
             t_onset = Some(Instant::now());
@@ -145,17 +192,26 @@ where
         }
     }
     let t_end = Instant::now();
-    sink.send(Message::Text(serde_json::to_string(&ClientMsg::End).unwrap().into())).await.unwrap();
+    sink.send(Message::Text(
+        serde_json::to_string(&ClientMsg::End).unwrap().into(),
+    ))
+    .await
+    .unwrap();
     let mut partial_times = Vec::new();
     // partial, пришедшие во время отправки, уже лежат в канале; дочитываем до final
     loop {
-        let (t, m) = tokio::time::timeout(Duration::from_secs(10), rx.next()).await.expect("final вовремя").unwrap();
+        let (t, m) = tokio::time::timeout(Duration::from_secs(10), rx.next())
+            .await
+            .expect("final вовремя")
+            .unwrap();
         match m {
             ServerMsg::Partial { .. } => partial_times.push(t),
             ServerMsg::Final { text, .. } => {
                 // a − b в мс со знаком
                 let ms = |a: Instant, b: Instant| {
-                    (a.saturating_duration_since(b).as_secs_f64() - b.saturating_duration_since(a).as_secs_f64()) * 1000.0
+                    (a.saturating_duration_since(b).as_secs_f64()
+                        - b.saturating_duration_since(a).as_secs_f64())
+                        * 1000.0
                 };
                 return StreamStats {
                     final_text: text,
@@ -176,7 +232,10 @@ async fn ws_connect() -> (
     String,
 ) {
     let url = stt_url().replacen("https://", "wss://", 1) + STREAM_PATH;
-    let (ws, _) = tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(tls_connector())).await.expect("WS");
+    let (ws, _) =
+        tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(tls_connector()))
+            .await
+            .expect("WS");
     let (sink, mut stream) = ws.split();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
@@ -190,7 +249,12 @@ async fn ws_connect() -> (
         }
     });
     let mut rx = tokio_stream_like::Rx(rx);
-    let model = match tokio::time::timeout(Duration::from_secs(5), rx.next()).await.unwrap().unwrap().1 {
+    let model = match tokio::time::timeout(Duration::from_secs(5), rx.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .1
+    {
         ServerMsg::Ready { model } => model,
         other => panic!("ожидался ready: {other:?}"),
     };
@@ -218,7 +282,10 @@ async fn remote_websocket_stream() {
     let (mut sink, mut rx, model) = ws_connect().await;
     println!("ready: {model}");
     // две фразы в одном соединении + reset между ними
-    for phrase in ["Посмотри ошибку в терминале.", "Джарвис, открой диспетчер задач."] {
+    for phrase in [
+        "Посмотри ошибку в терминале.",
+        "Джарвис, открой диспетчер задач.",
+    ] {
         let speech = tts(&c, phrase).await;
         let st = stream_phrase(&mut sink, &mut rx, &speech).await;
         let s = text::score(phrase, &st.final_text);
@@ -233,8 +300,16 @@ async fn remote_websocket_stream() {
         );
         assert!(st.partials >= 1, "нет partial");
         assert!(s.cer() <= 0.15, "final далеко от исходного");
-        assert!(st.final_ms < 1500.0, "final слишком долго: {} мс", st.final_ms);
-        sink.send(Message::Text(serde_json::to_string(&ClientMsg::Reset).unwrap().into())).await.unwrap();
+        assert!(
+            st.final_ms < 1500.0,
+            "final слишком долго: {} мс",
+            st.final_ms
+        );
+        sink.send(Message::Text(
+            serde_json::to_string(&ClientMsg::Reset).unwrap().into(),
+        ))
+        .await
+        .unwrap();
     }
     sink.send(Message::Close(None)).await.ok();
 }

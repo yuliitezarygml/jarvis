@@ -32,16 +32,30 @@ impl Metrics {
         let rows = [
             ("jarvis_stt_sessions_active", &self.sessions_active),
             ("jarvis_stt_sessions_total", &self.sessions_total),
-            ("jarvis_stt_sessions_rejected_total", &self.sessions_rejected),
+            (
+                "jarvis_stt_sessions_rejected_total",
+                &self.sessions_rejected,
+            ),
             ("jarvis_stt_requests_total", &self.requests_total),
-            ("jarvis_stt_requests_rejected_total", &self.requests_rejected),
+            (
+                "jarvis_stt_requests_rejected_total",
+                &self.requests_rejected,
+            ),
             ("jarvis_stt_partials_total", &self.partials_total),
             ("jarvis_stt_finals_total", &self.finals_total),
             ("jarvis_stt_errors_total", &self.errors_total),
             ("jarvis_stt_audio_milliseconds_total", &self.audio_ms_total),
-            ("jarvis_stt_final_latency_microseconds_total", &self.final_latency_us_total),
-            ("jarvis_stt_final_latency_microseconds_max", &self.final_latency_us_max),
+            (
+                "jarvis_stt_final_latency_microseconds_total",
+                &self.final_latency_us_total,
+            ),
+            (
+                "jarvis_stt_final_latency_microseconds_max",
+                &self.final_latency_us_max,
+            ),
         ];
-        rows.iter().map(|(k, v)| format!("{k} {}\n", v.load(Relaxed))).collect()
+        rows.iter()
+            .map(|(k, v)| format!("{k} {}\n", v.load(Relaxed)))
+            .collect()
     }
 }

@@ -18,16 +18,23 @@ async fn start(limits: Limits) -> String {
     format!("127.0.0.1:{}", addr.port())
 }
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn connect(addr: &str) -> Ws {
-    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}{STREAM_PATH}")).await.unwrap();
+    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}{STREAM_PATH}"))
+        .await
+        .unwrap();
     ws
 }
 
 async fn next_msg(ws: &mut Ws) -> ServerMsg {
     loop {
-        let m = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("ответ сервера").unwrap().unwrap();
+        let m = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .expect("ответ сервера")
+            .unwrap()
+            .unwrap();
         match m {
             Message::Text(t) => return serde_json::from_str(t.as_str()).unwrap(),
             Message::Ping(_) | Message::Pong(_) => continue,
@@ -37,7 +44,9 @@ async fn next_msg(ws: &mut Ws) -> ServerMsg {
 }
 
 async fn send_ctrl(ws: &mut Ws, m: &ClientMsg) {
-    ws.send(Message::Text(serde_json::to_string(m).unwrap().into())).await.unwrap();
+    ws.send(Message::Text(serde_json::to_string(m).unwrap().into()))
+        .await
+        .unwrap();
 }
 
 fn pcm(ms: usize) -> Vec<u8> {
@@ -48,8 +57,22 @@ fn pcm(ms: usize) -> Vec<u8> {
 async fn health_and_post() {
     let addr = start(Limits::default()).await;
     let http = reqwest::Client::new();
-    let h: Health = http.get(format!("http://{addr}/health")).send().await.unwrap().json().await.unwrap();
-    assert_eq!(h, Health { ok: true, model: "mock".into(), sample_rate: 16000 });
+    let h: Health = http
+        .get(format!("http://{addr}/health"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        h,
+        Health {
+            ok: true,
+            model: "mock".into(),
+            sample_rate: 16000
+        }
+    );
 
     let r: SttResult = http
         .post(format!("http://{addr}/stt"))
@@ -61,7 +84,13 @@ async fn health_and_post() {
         .json()
         .await
         .unwrap();
-    assert_eq!(r, SttResult { text: MockEngine::text_for(16000), duration_ms: 1000 });
+    assert_eq!(
+        r,
+        SttResult {
+            text: MockEngine::text_for(16000),
+            duration_ms: 1000
+        }
+    );
 
     // WAV 48 кГц стерео → 16 кГц mono
     let stereo: Vec<f32> = vec![0.1; 48000 * 2];
@@ -82,13 +111,44 @@ async fn health_and_post() {
     assert_eq!(r.duration_ms, 1000);
 
     let st = |r: reqwest::Response| r.status().as_u16();
-    let post = |ct: &'static str, body: Vec<u8>| http.post(format!("http://{addr}/stt")).header("content-type", ct).body(body).send();
-    assert_eq!(st(post("text/plain", b"hello".to_vec()).await.unwrap()), 415);
-    assert_eq!(st(post("audio/L16; rate=16000", vec![]).await.unwrap()), 400);
-    assert_eq!(st(post("audio/L16; rate=16000", vec![1, 2, 3]).await.unwrap()), 422);
-    assert_eq!(st(post("audio/L16; rate=16000", pcm(31_000)).await.unwrap()), 413);
-    assert_eq!(st(http.get(format!("http://{addr}/nope")).send().await.unwrap()), 404);
-    let m = http.get(format!("http://{addr}/metrics")).send().await.unwrap().text().await.unwrap();
+    let post = |ct: &'static str, body: Vec<u8>| {
+        http.post(format!("http://{addr}/stt"))
+            .header("content-type", ct)
+            .body(body)
+            .send()
+    };
+    assert_eq!(
+        st(post("text/plain", b"hello".to_vec()).await.unwrap()),
+        415
+    );
+    assert_eq!(
+        st(post("audio/L16; rate=16000", vec![]).await.unwrap()),
+        400
+    );
+    assert_eq!(
+        st(post("audio/L16; rate=16000", vec![1, 2, 3]).await.unwrap()),
+        422
+    );
+    assert_eq!(
+        st(post("audio/L16; rate=16000", pcm(31_000)).await.unwrap()),
+        413
+    );
+    assert_eq!(
+        st(http
+            .get(format!("http://{addr}/nope"))
+            .send()
+            .await
+            .unwrap()),
+        404
+    );
+    let m = http
+        .get(format!("http://{addr}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(m.contains("jarvis_stt_finals_total 2"), "{m}");
 }
 
@@ -96,7 +156,12 @@ async fn health_and_post() {
 async fn websocket_flow() {
     let addr = start(Limits::default()).await;
     let mut ws = connect(&addr).await;
-    assert_eq!(next_msg(&mut ws).await, ServerMsg::Ready { model: "mock".into() });
+    assert_eq!(
+        next_msg(&mut ws).await,
+        ServerMsg::Ready {
+            model: "mock".into()
+        }
+    );
 
     // 800 мс кусками нечётной длины → partial растут, затем final
     let bytes = pcm(800);
@@ -112,21 +177,41 @@ async fn websocket_flow() {
     }
     assert_eq!(partials.last().unwrap(), &MockEngine::text_for(12800));
     send_ctrl(&mut ws, &ClientMsg::End).await;
-    assert_eq!(next_msg(&mut ws).await, ServerMsg::Final { text: MockEngine::text_for(12800), duration_ms: 800 });
+    assert_eq!(
+        next_msg(&mut ws).await,
+        ServerMsg::Final {
+            text: MockEngine::text_for(12800),
+            duration_ms: 800
+        }
+    );
 
     // reset: без ответа и без остатка в следующей фразе
     ws.send(Message::Binary(pcm(150).into())).await.unwrap();
     send_ctrl(&mut ws, &ClientMsg::Reset).await;
     send_ctrl(&mut ws, &ClientMsg::End).await;
-    assert_eq!(next_msg(&mut ws).await, ServerMsg::Final { text: String::new(), duration_ms: 0 });
+    assert_eq!(
+        next_msg(&mut ws).await,
+        ServerMsg::Final {
+            text: String::new(),
+            duration_ms: 0
+        }
+    );
 
     // мусорный текст → error, соединение живо
-    ws.send(Message::Text("{\"type\":\"bogus\"}".into())).await.unwrap();
+    ws.send(Message::Text("{\"type\":\"bogus\"}".into()))
+        .await
+        .unwrap();
     assert!(matches!(next_msg(&mut ws).await, ServerMsg::Error { .. }));
     ws.send(Message::Binary(pcm(400).into())).await.unwrap();
     assert!(matches!(next_msg(&mut ws).await, ServerMsg::Partial { .. }));
     send_ctrl(&mut ws, &ClientMsg::End).await;
-    assert_eq!(next_msg(&mut ws).await, ServerMsg::Final { text: MockEngine::text_for(6400), duration_ms: 400 });
+    assert_eq!(
+        next_msg(&mut ws).await,
+        ServerMsg::Final {
+            text: MockEngine::text_for(6400),
+            duration_ms: 400
+        }
+    );
     ws.close(None).await.unwrap();
 }
 
@@ -145,7 +230,9 @@ async fn limits_sessions_utterance_idle() {
     // вторая сессия сверх лимита → HTTP 503 до апгрейда
     let second = tokio_tungstenite::connect_async(format!("ws://{addr}{STREAM_PATH}")).await;
     match second {
-        Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => assert_eq!(resp.status().as_u16(), 503),
+        Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+            assert_eq!(resp.status().as_u16(), 503)
+        }
         other => panic!("ожидался отказ 503, получено {other:?}"),
     }
 

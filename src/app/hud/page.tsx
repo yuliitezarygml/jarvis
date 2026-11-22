@@ -1,0 +1,105 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
+import DevPanel from '@/components/DevPanel';
+import ActionFeed from '@/components/hud/ActionFeed';
+import ConfirmDialog from '@/components/hud/ConfirmDialog';
+import ErrorToast from '@/components/hud/ErrorToast';
+import HudBackground from '@/components/hud/HudBackground';
+import SourcesPanel from '@/components/hud/SourcesPanel';
+import Subtitles from '@/components/hud/Subtitles';
+import Telemetry from '@/components/hud/Telemetry';
+import Waveform from '@/components/hud/Waveform';
+import Reactor from '@/components/reactor/Reactor';
+import { call, listenTo } from '@/lib/bridge';
+import { fmtClock } from '@/lib/format';
+import { STATE_LABEL, TIER_LABEL } from '@/lib/glow';
+import { useJarvis, useNow } from '@/lib/store';
+import { EMERGENCY_EVENT } from '@/lib/types';
+
+function Clock() {
+  const now = useNow(1000);
+  return <span className="hud-clock">{now ? fmtClock(new Date(now)) : '--:--:--'}</span>;
+}
+
+export default function HudPage() {
+  const assistant = useJarvis((s) => s.assistant);
+  const control = useJarvis((s) => s.control);
+  const [stopped, setStopped] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('.confirm')) void call('set_hud_mode', { mode: 'corner' });
+    };
+    window.addEventListener('keydown', onKey);
+    let unlisten: (() => void) | undefined;
+    void listenTo(EMERGENCY_EVENT, () => setStopped(Date.now())).then((u) => (unlisten = u));
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (stopped === null) return;
+    const t = setTimeout(() => setStopped(null), 4000);
+    return () => clearTimeout(t);
+  }, [stopped]);
+
+  return (
+    <main className="hud" data-state={assistant}>
+      <HudBackground />
+
+      <header className="hud-top">
+        <div className="hud-brand">
+          <span className="wordmark">J.A.R.V.I.S.</span>
+          <span className="hud-state" data-state={assistant}>
+            <span className="state-dot" aria-hidden="true" />
+            {STATE_LABEL[assistant]}
+            {control.active && control.tier && <span className="hud-tier"> · {TIER_LABEL[control.tier]}</span>}
+          </span>
+        </div>
+        <Clock />
+        <nav className="hud-actions" aria-label="Управление окном">
+          <button type="button" className="btn btn-ghost" onClick={() => void call('set_hud_mode', { mode: 'corner' })} title="Esc или Ctrl+Alt+J">
+            В угол
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => void call('open_settings', {})}>
+            Настройки
+          </button>
+          <button type="button" className="btn btn-stop" onClick={() => void call('emergency_stop')} title="Ctrl+Alt+K">
+            Стоп
+          </button>
+        </nav>
+      </header>
+
+      <aside className="hud-left">
+        <Telemetry />
+      </aside>
+
+      <section className="hud-center" aria-label="Реактор">
+        <Reactor variant="hud" className="reactor reactor-hud" />
+        <ConfirmDialog />
+      </section>
+
+      <aside className="hud-right">
+        <ActionFeed />
+        <SourcesPanel />
+      </aside>
+
+      <footer className="hud-bottom">
+        <Subtitles />
+        <Waveform />
+      </footer>
+
+      <ErrorToast />
+      {stopped !== null && (
+        <div className="toast toast-stop" role="status">
+          Остановлено. Все действия отменены.
+        </div>
+      )}
+      <DevPanel />
+    </main>
+  );
+}

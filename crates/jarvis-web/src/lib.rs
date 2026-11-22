@@ -20,7 +20,7 @@ mod text;
 pub use fetch::{FetchError, FetchOptions, Fetcher, Page, PageFetcher, fetch};
 pub use research::{ResearchError, ResearchOptions, ResearchResult, Researcher};
 pub use search::{
-    SearchChain, SearchError, SearchHit, SearchProvider, ValidateReport, provider_from_config, validate,
-    validate_config,
+    SearchChain, SearchError, SearchHit, SearchProvider, ValidateReport, provider_from_config,
+    validate, validate_config,
 };
-pub use tools::{Opener, SystemOpener, WebState, WebStack, web_tools};
+pub use tools::{Opener, SystemOpener, WebStack, WebState, web_tools};

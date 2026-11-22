@@ -10,13 +10,18 @@ use jarvis_web::search::{SearchError, SearchHit, SearchProvider};
 use jarvis_web::{FetchError, FetchOptions, Fetcher, Opener, Page, PageFetcher};
 
 pub fn fixture(name: &str) -> String {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
 /// Fetcher для мок-сервера на 127.0.0.1 (внутренняя сеть разрешена только в тестах).
 pub fn test_fetcher(opts: FetchOptions) -> Fetcher {
-    Fetcher::new(FetchOptions { allow_private_hosts: true, ..opts })
+    Fetcher::new(FetchOptions {
+        allow_private_hosts: true,
+        ..opts
+    })
 }
 
 /// Крошечный валидный PDF с одной строкой текста (Helvetica, правильная таблица xref).
@@ -42,7 +47,11 @@ pub fn tiny_pdf(text: &str) -> Vec<u8> {
         out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objs.len() + 1
+        )
+        .as_bytes(),
     );
     out
 }
@@ -56,13 +65,24 @@ pub struct RecordingModel {
 }
 
 impl RecordingModel {
-    pub fn new(f: impl Fn(&ChatRequest, usize) -> Result<ChatMessage, LlmError> + Send + Sync + 'static) -> Self {
-        Self { requests: Mutex::new(vec![]), responder: Box::new(f) }
+    pub fn new(
+        f: impl Fn(&ChatRequest, usize) -> Result<ChatMessage, LlmError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            requests: Mutex::new(vec![]),
+            responder: Box::new(f),
+        }
     }
     /// Первый вызов — план (JSON), второй и далее — синтез.
     pub fn planner_then(plan: &str, answer: ChatMessage) -> Self {
         let plan = plan.to_string();
-        Self::new(move |_, i| Ok(if i == 0 { ChatMessage::assistant(plan.clone()) } else { answer.clone() }))
+        Self::new(move |_, i| {
+            Ok(if i == 0 {
+                ChatMessage::assistant(plan.clone())
+            } else {
+                answer.clone()
+            })
+        })
     }
     pub fn requests(&self) -> Vec<ChatRequest> {
         self.requests.lock().unwrap().clone()
@@ -74,7 +94,11 @@ impl ChatModel for RecordingModel {
     fn id(&self) -> String {
         "mock/recorder".into()
     }
-    async fn chat(&self, req: ChatRequest, cancel: CancellationToken) -> Result<ChatResponse, LlmError> {
+    async fn chat(
+        &self,
+        req: ChatRequest,
+        cancel: CancellationToken,
+    ) -> Result<ChatResponse, LlmError> {
         if cancel.is_cancelled() {
             return Err(LlmError::Cancelled);
         }
@@ -84,7 +108,11 @@ impl ChatModel for RecordingModel {
             r.len() - 1
         };
         let message = (self.responder)(&req, i)?;
-        Ok(ChatResponse { message, model: self.id(), usage: None })
+        Ok(ChatResponse {
+            message,
+            model: self.id(),
+            usage: None,
+        })
     }
 }
 
@@ -100,10 +128,18 @@ pub struct StaticSearch {
 
 impl StaticSearch {
     pub fn with_default(hits: Vec<SearchHit>) -> Self {
-        Self { id: "static".into(), default: hits, ..Default::default() }
+        Self {
+            id: "static".into(),
+            default: hits,
+            ..Default::default()
+        }
     }
     pub fn failing(id: &str, e: SearchError) -> Self {
-        Self { id: id.into(), fail: Some(e), ..Default::default() }
+        Self {
+            id: id.into(),
+            fail: Some(e),
+            ..Default::default()
+        }
     }
 }
 
@@ -123,7 +159,11 @@ impl SearchProvider for StaticSearch {
 }
 
 pub fn hit(title: &str, url: &str, snippet: &str) -> SearchHit {
-    SearchHit { title: title.into(), url: url.into(), snippet: snippet.into() }
+    SearchHit {
+        title: title.into(),
+        url: url.into(),
+        snippet: snippet.into(),
+    }
 }
 
 /// Мок-страницы: адрес → HTML (проходит через настоящее извлечение) или ошибка.

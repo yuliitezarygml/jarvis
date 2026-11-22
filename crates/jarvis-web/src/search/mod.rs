@@ -40,7 +40,11 @@ impl SearchHit {
         }
         let title = html_fragment_text(title);
         Some(Self {
-            title: if title.is_empty() { url.to_string() } else { title },
+            title: if title.is_empty() {
+                url.to_string()
+            } else {
+                title
+            },
             url: url.to_string(),
             snippet: truncate_plain(&html_fragment_text(snippet), 400),
         })
@@ -74,7 +78,10 @@ pub enum SearchError {
 }
 
 fn describe_failures(f: &[(String, SearchError)]) -> String {
-    f.iter().map(|(id, e)| format!("{id}: {e}")).collect::<Vec<_>>().join("; ")
+    f.iter()
+        .map(|(id, e)| format!("{id}: {e}"))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 impl SearchError {
@@ -109,10 +116,14 @@ pub trait SearchProvider: Send + Sync {
 }
 
 /// Отправить запрос и разобрать JSON-ответ; не-2xx → [`SearchError`] с текстом ошибки API.
-pub(crate) async fn send_json<T: serde::de::DeserializeOwned>(req: reqwest::RequestBuilder) -> Result<T, SearchError> {
+pub(crate) async fn send_json<T: serde::de::DeserializeOwned>(
+    req: reqwest::RequestBuilder,
+) -> Result<T, SearchError> {
     let mut resp = req.send().await.map_err(SearchError::from_reqwest)?;
     let status = resp.status();
-    let (body, _) = crate::http::read_limited(&mut resp, 4 * 1024 * 1024).await.map_err(SearchError::from_reqwest)?;
+    let (body, _) = crate::http::read_limited(&mut resp, 4 * 1024 * 1024)
+        .await
+        .map_err(SearchError::from_reqwest)?;
     let body = String::from_utf8_lossy(&body);
     if !status.is_success() {
         return Err(SearchError::from_status(status.as_u16(), &body));
@@ -138,7 +149,10 @@ pub struct SearchChain {
 
 impl SearchChain {
     pub fn new(providers: Vec<Arc<dyn SearchProvider>>) -> Self {
-        Self { providers, skipped: vec![] }
+        Self {
+            providers,
+            skipped: vec![],
+        }
     }
 
     /// Собрать из конфига: выключенные и без обязательного ключа пропускаются (см. [`Self::skipped`]).
@@ -156,7 +170,9 @@ impl SearchChain {
             }
         }
         if chain.providers.is_empty() {
-            chain.providers.push(Arc::new(DuckDuckGo::new(client.clone())));
+            chain
+                .providers
+                .push(Arc::new(DuckDuckGo::new(client.clone())));
         }
         chain
     }
@@ -179,7 +195,11 @@ impl SearchChain {
         for p in &self.providers {
             match p.search(query, n).await {
                 Ok(hits) if !hits.is_empty() => {
-                    return Ok(ChainResult { provider: p.id().to_string(), hits, failures });
+                    return Ok(ChainResult {
+                        provider: p.id().to_string(),
+                        hits,
+                        failures,
+                    });
                 }
                 Ok(_) => {
                     empty_from.get_or_insert_with(|| p.id().to_string());
@@ -189,7 +209,11 @@ impl SearchChain {
         }
         match empty_from {
             // Кто-то честно ответил «ничего не найдено» — это не ошибка.
-            Some(provider) => Ok(ChainResult { provider, hits: vec![], failures }),
+            Some(provider) => Ok(ChainResult {
+                provider,
+                hits: vec![],
+                failures,
+            }),
             None => Err(SearchError::AllFailed(failures)),
         }
     }
@@ -212,7 +236,11 @@ pub fn provider_from_config(
 ) -> Result<Arc<dyn SearchProvider>, SearchError> {
     let key = c.api_key.trim();
     let need_key = |id: &str| {
-        if key.is_empty() { Err(SearchError::MissingKey(id.to_string())) } else { Ok(key.to_string()) }
+        if key.is_empty() {
+            Err(SearchError::MissingKey(id.to_string()))
+        } else {
+            Ok(key.to_string())
+        }
     };
     let client = client.clone();
     Ok(match c.id.trim() {
@@ -224,12 +252,17 @@ pub fn provider_from_config(
             let key = need_key("google_cse")?;
             let cx = c.extra.trim();
             if cx.is_empty() {
-                return Err(SearchError::MissingKey("google_cse (cx в поле extra)".into()));
+                return Err(SearchError::MissingKey(
+                    "google_cse (cx в поле extra)".into(),
+                ));
             }
             Arc::new(GoogleCse::new(client, key, cx.to_string()))
         }
         // У Jina ключ необязателен (без ключа — меньше лимиты).
-        "jina" => Arc::new(JinaSearch::new(client, (!key.is_empty()).then(|| key.to_string()))),
+        "jina" => Arc::new(JinaSearch::new(
+            client,
+            (!key.is_empty()).then(|| key.to_string()),
+        )),
         other => return Err(SearchError::UnknownProvider(other.to_string())),
     })
 }
@@ -254,7 +287,10 @@ impl ValidateReport {
             let word = plural_ru(self.results, "результат", "результата", "результатов");
             format!("работает ✓ ({} {word}, {secs} с)", self.results)
         } else {
-            format!("не работает ✗: {}", self.error.as_deref().unwrap_or("неизвестная ошибка"))
+            format!(
+                "не работает ✗: {}",
+                self.error.as_deref().unwrap_or("неизвестная ошибка")
+            )
         }
     }
 }
@@ -265,14 +301,24 @@ pub async fn validate(provider: &dyn SearchProvider) -> ValidateReport {
     let res = provider.search(VALIDATE_QUERY, 8).await;
     let latency_ms = start.elapsed().as_millis() as u64;
     match res {
-        Ok(hits) if !hits.is_empty() => ValidateReport { ok: true, results: hits.len(), latency_ms, error: None },
+        Ok(hits) if !hits.is_empty() => ValidateReport {
+            ok: true,
+            results: hits.len(),
+            latency_ms,
+            error: None,
+        },
         Ok(_) => ValidateReport {
             ok: false,
             results: 0,
             latency_ms,
             error: Some("поиск вернул 0 результатов".into()),
         },
-        Err(e) => ValidateReport { ok: false, results: 0, latency_ms, error: Some(e.to_string()) },
+        Err(e) => ValidateReport {
+            ok: false,
+            results: 0,
+            latency_ms,
+            error: Some(e.to_string()),
+        },
     }
 }
 
@@ -280,7 +326,12 @@ pub async fn validate(provider: &dyn SearchProvider) -> ValidateReport {
 pub async fn validate_config(c: &SearchProviderConfig, client: &reqwest::Client) -> ValidateReport {
     match provider_from_config(c, client) {
         Ok(p) => validate(p.as_ref()).await,
-        Err(e) => ValidateReport { ok: false, results: 0, latency_ms: 0, error: Some(e.to_string()) },
+        Err(e) => ValidateReport {
+            ok: false,
+            results: 0,
+            latency_ms: 0,
+            error: Some(e.to_string()),
+        },
     }
 }
 
@@ -290,30 +341,60 @@ mod tests {
 
     #[test]
     fn hit_cleanup() {
-        let h = SearchHit::cleaned("<b>Rust</b> &amp; Cargo", " https://rust-lang.org/ ", "a <strong>fast</strong>\n lang").unwrap();
+        let h = SearchHit::cleaned(
+            "<b>Rust</b> &amp; Cargo",
+            " https://rust-lang.org/ ",
+            "a <strong>fast</strong>\n lang",
+        )
+        .unwrap();
         assert_eq!(h.title, "Rust & Cargo");
         assert_eq!(h.url, "https://rust-lang.org/");
         assert_eq!(h.snippet, "a fast lang");
         assert!(SearchHit::cleaned("x", "javascript:alert(1)", "").is_none());
-        assert_eq!(SearchHit::cleaned("", "https://a.b/", "").unwrap().title, "https://a.b/");
+        assert_eq!(
+            SearchHit::cleaned("", "https://a.b/", "").unwrap().title,
+            "https://a.b/"
+        );
     }
 
     #[test]
     fn status_mapping() {
-        assert!(matches!(SearchError::from_status(401, "{}"), SearchError::Auth(_)));
-        assert!(matches!(SearchError::from_status(432, "{}"), SearchError::RateLimited(_)));
         assert!(matches!(
-            SearchError::from_status(400, r#"{"error":{"message":"API key not valid. Please pass a valid API key."}}"#),
+            SearchError::from_status(401, "{}"),
             SearchError::Auth(_)
         ));
-        assert!(matches!(SearchError::from_status(500, "oops"), SearchError::Http { status: 500, .. }));
+        assert!(matches!(
+            SearchError::from_status(432, "{}"),
+            SearchError::RateLimited(_)
+        ));
+        assert!(matches!(
+            SearchError::from_status(
+                400,
+                r#"{"error":{"message":"API key not valid. Please pass a valid API key."}}"#
+            ),
+            SearchError::Auth(_)
+        ));
+        assert!(matches!(
+            SearchError::from_status(500, "oops"),
+            SearchError::Http { status: 500, .. }
+        ));
     }
 
     #[test]
     fn report_summary() {
-        let r = ValidateReport { ok: true, results: 8, latency_ms: 612, error: None };
+        let r = ValidateReport {
+            ok: true,
+            results: 8,
+            latency_ms: 612,
+            error: None,
+        };
         assert_eq!(r.summary_ru(), "работает ✓ (8 результатов, 0,6 с)");
-        let r = ValidateReport { ok: false, results: 0, latency_ms: 10, error: Some("ключ не принят: x".into()) };
+        let r = ValidateReport {
+            ok: false,
+            results: 0,
+            latency_ms: 10,
+            error: Some("ключ не принят: x".into()),
+        };
         assert_eq!(r.summary_ru(), "не работает ✗: ключ не принят: x");
     }
 

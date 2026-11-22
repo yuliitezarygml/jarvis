@@ -29,7 +29,10 @@ pub struct MockEngine {
 
 impl Default for MockEngine {
     fn default() -> Self {
-        Self { model: "mock".into(), finish_delay: Duration::ZERO }
+        Self {
+            model: "mock".into(),
+            finish_delay: Duration::ZERO,
+        }
     }
 }
 
@@ -49,7 +52,10 @@ impl Engine for MockEngine {
         &self.model
     }
     fn open(&self) -> anyhow::Result<Box<dyn Recognition>> {
-        Ok(Box::new(MockRecognition { samples: 0, delay: self.finish_delay }))
+        Ok(Box::new(MockRecognition {
+            samples: 0,
+            delay: self.finish_delay,
+        }))
     }
     fn transcribe(&self, samples: &[f32]) -> anyhow::Result<String> {
         Ok(Self::text_for(samples.len()))

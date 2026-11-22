@@ -18,7 +18,11 @@ pub struct DuckDuckGo {
 
 impl DuckDuckGo {
     pub fn new(client: reqwest::Client) -> Self {
-        Self { client, base_url: DEFAULT_BASE.into(), region: String::new() }
+        Self {
+            client,
+            base_url: DEFAULT_BASE.into(),
+            region: String::new(),
+        }
     }
     pub fn with_base_url(mut self, base: impl Into<String>) -> Self {
         self.base_url = base.into();
@@ -44,13 +48,18 @@ impl SearchProvider for DuckDuckGo {
             .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT)
             .header(reqwest::header::REFERER, "https://html.duckduckgo.com/")
             .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
-            .header(reqwest::header::ACCEPT_LANGUAGE, "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header(
+                reqwest::header::ACCEPT_LANGUAGE,
+                "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            )
             .form(&[("q", query), ("b", ""), ("kl", self.region.as_str())])
             .send()
             .await
             .map_err(SearchError::from_reqwest)?;
         let status = resp.status();
-        let (body, _) = crate::http::read_limited(&mut resp, 2 * 1024 * 1024).await.map_err(SearchError::from_reqwest)?;
+        let (body, _) = crate::http::read_limited(&mut resp, 2 * 1024 * 1024)
+            .await
+            .map_err(SearchError::from_reqwest)?;
         let html = String::from_utf8_lossy(&body);
         if !status.is_success() && status.as_u16() != 202 {
             return Err(SearchError::from_status(status.as_u16(), &html));
@@ -62,7 +71,10 @@ impl SearchProvider for DuckDuckGo {
 /// Разобрать страницу выдачи. Капча (`anomaly-modal`, HTTP 202) → [`SearchError::Blocked`].
 pub fn parse_results(html: &str, n: usize) -> Result<Vec<SearchHit>, SearchError> {
     let doc = Document::from(html);
-    if doc.select(".anomaly-modal__modal, #challenge-form").exists() {
+    if doc
+        .select(".anomaly-modal__modal, #challenge-form")
+        .exists()
+    {
         return Err(SearchError::Blocked);
     }
     let mut hits: Vec<SearchHit> = Vec::new();
@@ -71,8 +83,12 @@ pub fn parse_results(html: &str, n: usize) -> Result<Vec<SearchHit>, SearchError
             continue;
         }
         let link = res.select("a.result__a").first();
-        let Some(href) = link.attr("href") else { continue };
-        let Some(url) = decode_href(&href) else { continue };
+        let Some(href) = link.attr("href") else {
+            continue;
+        };
+        let Some(url) = decode_href(&href) else {
+            continue;
+        };
         if is_ad_url(&url) {
             continue;
         }
@@ -92,7 +108,9 @@ pub fn parse_results(html: &str, n: usize) -> Result<Vec<SearchHit>, SearchError
         && !doc.select("#links, .serp__results").exists()
     {
         // Не страница выдачи вообще — DuckDuckGo поменял разметку или вернул что-то другое.
-        return Err(SearchError::BadResponse("не похоже на страницу выдачи DuckDuckGo".into()));
+        return Err(SearchError::BadResponse(
+            "не похоже на страницу выдачи DuckDuckGo".into(),
+        ));
     }
     Ok(hits)
 }
@@ -110,7 +128,10 @@ pub fn decode_href(href: &str) -> Option<String> {
     let url = url::Url::parse(&absolute).ok()?;
     let host = url.host_str().unwrap_or_default();
     if host.ends_with("duckduckgo.com") && url.path().starts_with("/l/") {
-        let target = url.query_pairs().find(|(k, _)| k == "uddg").map(|(_, v)| v.into_owned())?;
+        let target = url
+            .query_pairs()
+            .find(|(k, _)| k == "uddg")
+            .map(|(_, v)| v.into_owned())?;
         return url::Url::parse(&target).ok().map(String::from);
     }
     Some(url.into())
@@ -136,7 +157,10 @@ mod tests {
             decode_href("/l/?kh=-1&uddg=https%3A%2F%2Fru.wikipedia.org%2Fwiki%2FRust").as_deref(),
             Some("https://ru.wikipedia.org/wiki/Rust")
         );
-        assert_eq!(decode_href("https://rust-lang.org/").as_deref(), Some("https://rust-lang.org/"));
+        assert_eq!(
+            decode_href("https://rust-lang.org/").as_deref(),
+            Some("https://rust-lang.org/")
+        );
         assert!(decode_href("//duckduckgo.com/l/?rut=only").is_none());
     }
 }

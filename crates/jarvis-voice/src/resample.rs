@@ -2,7 +2,7 @@
 //! Принимает куски произвольной длины, сам копит до размера чанка, обрезает стартовую задержку фильтра
 //! и на `flush()` выдаёт ровно `ceil(in * to / from)` сэмплов от начала потока.
 
-use audioadapter_buffers::direct::InterleavedSlice;
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Indexing, Resampler};
 
 use crate::error::{Result, VoiceError};
@@ -18,9 +18,6 @@ pub struct StreamResampler {
     total_in: u64,
     total_out: u64,
 }
-
-// Свой путь к адаптерам — rubato реэкспортирует audioadapter_buffers.
-use rubato::audioadapter_buffers;
 
 impl StreamResampler {
     pub fn new(from: u32, to: u32) -> Result<Self> {

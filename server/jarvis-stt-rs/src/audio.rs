@@ -39,10 +39,11 @@ fn s16(lo: u8, hi: u8) -> f32 {
 
 /// Целый буфер PCM s16le → f32 [-1, 1).
 pub fn s16le_to_f32(bytes: &[u8]) -> Result<Vec<f32>, AudioError> {
-    if bytes.len() % 2 != 0 {
+    let (pairs, rest) = bytes.as_chunks::<2>();
+    if !rest.is_empty() {
         return Err(AudioError::OddPcmLength);
     }
-    Ok(bytes.chunks_exact(2).map(|c| s16(c[0], c[1])).collect())
+    Ok(pairs.iter().map(|c| s16(c[0], c[1])).collect())
 }
 
 /// f32 → PCM s16le (для тестов и примеров).
@@ -71,9 +72,9 @@ impl PcmDecoder {
             out.push(s16(lo, bytes[0]));
             bytes = &bytes[1..];
         }
-        let mut chunks = bytes.chunks_exact(2);
-        out.extend(chunks.by_ref().map(|c| s16(c[0], c[1])));
-        if let [last] = chunks.remainder() {
+        let (pairs, rest) = bytes.as_chunks::<2>();
+        out.extend(pairs.iter().map(|c| s16(c[0], c[1])));
+        if let [last] = rest {
             self.carry = Some(*last);
         }
     }
@@ -155,7 +156,11 @@ pub fn parse_wav(data: &[u8]) -> Result<Wav, AudioError> {
             b"data" => {
                 let f = fmt.ok_or(AudioError::NoFormat)?;
                 let avail = data.len() - body;
-                let len = if size == 0 || size > avail { avail } else { size };
+                let len = if size == 0 || size > avail {
+                    avail
+                } else {
+                    size
+                };
                 return decode_wav_data(&data[body..body + len], f);
             }
             _ => {}
@@ -163,7 +168,11 @@ pub fn parse_wav(data: &[u8]) -> Result<Wav, AudioError> {
         // блоки выравниваются на чётную границу
         pos = body.saturating_add(size).saturating_add(size & 1);
     }
-    if fmt.is_none() { Err(AudioError::NoFormat) } else { Err(AudioError::NoData) }
+    if fmt.is_none() {
+        Err(AudioError::NoFormat)
+    } else {
+        Err(AudioError::NoData)
+    }
 }
 
 fn decode_wav_data(raw: &[u8], f: Fmt) -> Result<Wav, AudioError> {
@@ -184,28 +193,48 @@ fn decode_wav_data(raw: &[u8], f: Fmt) -> Result<Wav, AudioError> {
     let raw = &raw[..frames * f.block_align as usize];
     let interleaved: Vec<f32> = match (f.format, bytes) {
         (1, 1) => raw.iter().map(|&b| (b as f32 - 128.0) / 128.0).collect(),
-        (1, 2) => raw.chunks_exact(2).map(|c| s16(c[0], c[1])).collect(),
+        (1, 2) => raw
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| s16(c[0], c[1]))
+            .collect(),
         (1, 3) => raw
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / 8_388_608.0)
             .collect(),
         (1, 4) => raw
-            .chunks_exact(4)
-            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f32 / 2_147_483_648.0)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| i32::from_le_bytes(*c) as f32 / 2_147_483_648.0)
             .collect(),
         (3, 4) => raw
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect(),
         (3, 8) => raw
-            .chunks_exact(8)
-            .map(|c| f64::from_le_bytes(c.try_into().unwrap()) as f32)
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| f64::from_le_bytes(*c) as f32)
             .collect(),
         (fmt, _) => {
-            return Err(AudioError::Unsupported(format!("format_tag {fmt}, {} бит", f.bits)));
+            return Err(AudioError::Unsupported(format!(
+                "format_tag {fmt}, {} бит",
+                f.bits
+            )));
         }
     };
-    Ok(Wav { sample_rate: f.rate, channels: f.channels, samples: downmix(&interleaved, f.channels) })
+    Ok(Wav {
+        sample_rate: f.rate,
+        channels: f.channels,
+        samples: downmix(&interleaved, f.channels),
+    })
 }
 
 /// Простой WAV PCM16 mono (для тестов, примеров и отладки).
@@ -282,7 +311,11 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
                 continue;
             }
             let arg = std::f64::consts::PI * cutoff * d;
-            let sinc = if arg.abs() < 1e-12 { 1.0 } else { arg.sin() / arg };
+            let sinc = if arg.abs() < 1e-12 {
+                1.0
+            } else {
+                arg.sin() / arg
+            };
             let win = bessel_i0(BETA * (1.0 - x * x).sqrt()) / i0b;
             *w = cutoff * sinc * win;
             sum += *w;
@@ -363,7 +396,9 @@ mod tests {
 
     fn sine(freq: f64, rate: u32, secs: f64) -> Vec<f32> {
         (0..(rate as f64 * secs) as usize)
-            .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / rate as f64).sin() as f32 * 0.5)
+            .map(|i| {
+                (2.0 * std::f64::consts::PI * freq * i as f64 / rate as f64).sin() as f32 * 0.5
+            })
             .collect()
     }
 
@@ -411,11 +446,21 @@ mod tests {
         let s = sine(440.0, 16000, 0.1);
         let wav = write_wav_pcm16(&s, 16000);
         let w = parse_wav(&wav).unwrap();
-        assert_eq!((w.sample_rate, w.channels, w.samples.len()), (16000, 1, s.len()));
+        assert_eq!(
+            (w.sample_rate, w.channels, w.samples.len()),
+            (16000, 1, s.len())
+        );
         assert!(w.samples.iter().zip(&s).all(|(a, b)| (a - b).abs() < 1e-3));
     }
 
-    fn wav_with(format: u16, channels: u16, rate: u32, bits: u16, data: &[u8], extensible: bool) -> Vec<u8> {
+    fn wav_with(
+        format: u16,
+        channels: u16,
+        rate: u32,
+        bits: u16,
+        data: &[u8],
+        extensible: bool,
+    ) -> Vec<u8> {
         let mut fmt = Vec::new();
         fmt.extend_from_slice(&(if extensible { 0xFFFE } else { format }).to_le_bytes());
         fmt.extend_from_slice(&channels.to_le_bytes());
@@ -458,7 +503,10 @@ mod tests {
         assert!((w.samples[0] - 0.125).abs() < 1e-4);
 
         // float32 extensible
-        let d: Vec<u8> = [0.25f32, -0.75].iter().flat_map(|v| v.to_le_bytes()).collect();
+        let d: Vec<u8> = [0.25f32, -0.75]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
         let w = parse_wav(&wav_with(3, 1, 22050, 32, &d, true)).unwrap();
         assert_eq!(w.samples, vec![0.25, -0.75]);
 
@@ -474,7 +522,10 @@ mod tests {
 
     #[test]
     fn wav_errors_and_streamed_size() {
-        assert_eq!(parse_wav(b"hello world, not a wav"), Err(AudioError::NotWav));
+        assert_eq!(
+            parse_wav(b"hello world, not a wav"),
+            Err(AudioError::NotWav)
+        );
         let mut w = write_wav_pcm16(&[0.1; 100], 16000);
         // размер data = 0xFFFFFFFF (потоковая запись) → берём остаток
         w[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
@@ -494,19 +545,29 @@ mod tests {
         assert_eq!(resample(&vec![0.0; 4800], 48000, 16000).len(), 1600);
         assert_eq!(resample(&vec![0.0; 441], 44100, 16000).len(), 160);
         assert_eq!(resample(&vec![0.0; 800], 8000, 16000).len(), 1600);
-        assert_eq!(resample(&vec![0.0; 10], 24000, 16000).len(), 7); // ceil(10*2/3)
+        assert_eq!(resample(&[0.0; 10], 24000, 16000).len(), 7); // ceil(10*2/3)
     }
 
     #[test]
     fn resample_keeps_passband_and_rejects_alias() {
-        for (from, f) in [(24000, 1000.0), (24000, 5000.0), (48000, 5000.0), (44100, 3000.0), (8000, 1000.0)] {
+        for (from, f) in [
+            (24000, 1000.0),
+            (24000, 5000.0),
+            (48000, 5000.0),
+            (44100, 3000.0),
+            (8000, 1000.0),
+        ] {
             let y = resample(&sine(f, from, 0.5), from, 16000);
             let a = amplitude(&y, f, 16000);
             assert!((a - 0.5).abs() < 0.01, "{from}->16k {f} Гц: амплитуда {a}");
         }
         // 11 кГц при 48 кГц выше Найквиста 16 кГц: без ФНЧ отразилось бы в 5 кГц
         let y = resample(&sine(11000.0, 48000, 0.5), 48000, 16000);
-        assert!(rms(&y[2000..6000]) < 0.002, "alias rms {}", rms(&y[2000..6000]));
+        assert!(
+            rms(&y[2000..6000]) < 0.002,
+            "alias rms {}",
+            rms(&y[2000..6000])
+        );
         // постоянная составляющая сохраняется
         let y = resample(&vec![0.3; 3000], 24000, 16000);
         assert!(y[200..1800].iter().all(|v| (v - 0.3).abs() < 1e-4));
