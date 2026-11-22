@@ -44,7 +44,7 @@ Rust + Tauri 2 + Next.js · всё внутри `d:\jarvis` · v1: голос, �
 
 ## 2. Провайдеры LLM и подбор моделей
 **Адаптеры:** `OpenAiCompat` (закрывает ~90%: Groq, OpenCode Zen, OpenRouter, OpenAI, Gemini (compat), Mistral, DeepSeek, Together, Fireworks, Cerebras, xAI, Z.AI, Ollama, LM Studio, любой свой URL) и `AnthropicMessages` (Claude напрямую; для Zen — если модель требует `/messages`). Потоковый SSE + tool-calling в обоих.
-**Пресеты** в `providers.json` в репозитории (id, название, `base_url`, тип, как получить ключ): адреса не зашиты в код, правятся без перекомпиляции; сверить актуальность при реализации (Groq `https://api.groq.com/openai/v1`, OpenCode Zen `https://opencode.ai/zen/v1`, OpenRouter `https://openrouter.ai/api/v1` и т.д.).
+**Пресеты** в `providers.json` в репозитории (id, название, `base_url`, тип, как получить ключ): адреса не зашиты в код, правятся без перекомпиляции; сверить актуальность при реализации (Groq `https://api.groq.com/openai/v1`, OpenCode Zen `https://opencode.ai/inference/openai/v1`, OpenRouter `https://openrouter.ai/api/v1` и т.д.).
 
 **Добавление ключа (Настройки → Провайдеры → «Проверить»):**
 1. Проверка ключа: `GET {base}/models` → 200 ключ рабочий / 401·403 неверный / сеть недоступна. Ошибка показывается человеческим текстом.

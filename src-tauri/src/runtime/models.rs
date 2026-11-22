@@ -178,14 +178,16 @@ mod tests {
 
     #[test]
     fn with_key_builds_chain_without_network() {
-        let mut cfg = Config::default();
-        cfg.providers = vec![ProviderConfig {
-            id: "groq".into(),
-            base_url: "https://api.groq.com/openai/v1".into(),
-            api_key: format!("{}{}", "gsk_", "test0000000000000000"),
-            enabled: true,
-            ..Default::default()
-        }];
+        let mut cfg = Config {
+            providers: vec![ProviderConfig {
+                id: "groq".into(),
+                base_url: "https://api.groq.com/openai/v1".into(),
+                api_key: format!("{}{}", "gsk_", "test0000000000000000"),
+                enabled: true,
+                ..Default::default()
+            }],
+            ..Config::default()
+        };
         let m = Models::from_config(&cfg, &std::env::temp_dir());
         assert!(m.brain.problem().is_none(), "{:?}", m.brain.problem());
         assert_eq!(m.brain.id(), "groq/openai/gpt-oss-120b");
@@ -198,8 +200,10 @@ mod tests {
 
     #[test]
     fn local_provider_is_not_no_key() {
-        let mut cfg = Config::default();
-        cfg.providers = vec![ProviderConfig { id: "ollama".into(), base_url: "http://127.0.0.1:11434/v1".into(), enabled: true, ..Default::default() }];
+        let cfg = Config {
+            providers: vec![ProviderConfig { id: "ollama".into(), base_url: "http://127.0.0.1:11434/v1".into(), enabled: true, ..Default::default() }],
+            ..Config::default()
+        };
         assert!(!no_key(&cfg, &["ollama/qwen3".to_string()]));
         assert!(no_key(&Config::default(), &Config::default().roles.brain));
     }
