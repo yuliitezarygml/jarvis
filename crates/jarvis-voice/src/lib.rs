@@ -4,6 +4,7 @@ pub mod error;
 pub mod normalizer;
 pub mod pcm;
 pub mod resample;
+pub mod stt;
 pub mod tls;
 pub mod tts;
 pub mod vad;

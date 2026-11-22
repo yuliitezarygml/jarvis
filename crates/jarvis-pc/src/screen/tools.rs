@@ -139,7 +139,7 @@ impl Tool for ScreenMarks {
             let scale = (MAX_SIDE as f64 / long as f64).min(1.0);
             // Рисуем в полном размере, но с толщиной, которая останется видимой после уменьшения.
             let stroke = (2.0 / scale).round().max(2.0) as i32;
-            let digit = (2.0 / scale).round().max(2.0) as u32;
+            let digit = (2.5 / scale).round().max(2.0) as u32;
             let mut marks = Vec::new();
             let mut legend = Vec::new();
             for e in &s2.elements {
@@ -155,9 +155,9 @@ impl Tool for ScreenMarks {
         })
         .await
         .map_err(join_err)??;
+        let title = if snap.window.title.trim().is_empty() { format!("[{}]", snap.window.class) } else { clip(&snap.window.title, 80) };
         let mut content = format!(
-            "Окно «{}» с метками: {} элементов, снимок {w}x{h}. Действие по номеру: ui_invoke {{id}} или mouse_click {{id}}.\n",
-            clip(&snap.window.title, 80),
+            "Окно «{title}» с метками: {} элементов, снимок {w}x{h}. Действие по номеру: ui_invoke {{id}} или mouse_click {{id}}.\n",
             legend.len()
         );
         for l in &legend {

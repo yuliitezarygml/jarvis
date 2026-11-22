@@ -219,7 +219,7 @@ pub fn run_command(
     drop(pair.slave);
     let job = Job::new();
     if let (Some(job), Some(h)) = (&job, child.as_raw_handle()) {
-        job.assign(h as *mut c_void);
+        job.assign(h);
     }
     let mut reader = conv(pair.master.try_clone_reader(), "reader")?;
     let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(conv(pair.master.take_writer(), "writer")?));
@@ -342,7 +342,7 @@ mod tests {
         use base64::Engine;
         let enc = encode_powershell("echo 'привет'");
         let bytes = base64::engine::general_purpose::STANDARD.decode(enc).unwrap();
-        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         assert_eq!(String::from_utf16(&units).unwrap(), "echo 'привет'");
         let w = wrap_powershell("git status");
         assert!(w.contains("\ngit status\n"));

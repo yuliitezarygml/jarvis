@@ -101,18 +101,38 @@ pub(crate) struct UiaState {
 }
 
 impl UiaState {
-    pub(crate) fn new() -> windows::core::Result<Self> {
+    /// Создать клиента UIA. Одновременное создание из нескольких потоков процесса иногда даёт E_FAIL,
+    /// поэтому создание сериализовано и повторяется.
+    pub(crate) fn new() -> Result<Self, String> {
+        static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = INIT.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = String::new();
+        for attempt in 0..5 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(100 * attempt));
+            }
+            match Self::try_new() {
+                Ok(s) => return Ok(s),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    }
+
+    fn try_new() -> Result<Self, String> {
+        let ctx = |step: &'static str| move |e: windows::core::Error| format!("{step}: {}", e.message());
         // SAFETY: COM уже инициализирован в этом потоке (MTA).
         unsafe {
             let auto: IUIAutomation = CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)
-                .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))?;
+                .or_else(|_| CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER))
+                .map_err(ctx("CoCreateInstance(CUIAutomation)"))?;
             if let Ok(a2) = auto.cast::<IUIAutomation2>() {
                 let _ = a2.SetConnectionTimeout(5_000);
                 let _ = a2.SetTransactionTimeout(10_000);
             }
-            let cache = auto.CreateCacheRequest()?;
+            let cache = auto.CreateCacheRequest().map_err(ctx("CreateCacheRequest"))?;
             for &p in PROPS {
-                cache.AddProperty(p)?;
+                cache.AddProperty(p).map_err(ctx("AddProperty"))?;
             }
             Ok(Self { auto, cache, elements: Vec::new(), infos: Vec::new(), window: None, generation: 0 })
         }
@@ -266,11 +286,10 @@ impl UiaState {
             if info.rect.w <= 0 && !offscreen {
                 continue;
             }
-            if let Some(r) = &role {
-                if &info.role != r {
+            if let Some(r) = &role
+                && &info.role != r {
                     continue;
                 }
-            }
             let name = fold(&info.name);
             let exact = !q.is_empty() && (name == q || fold(&info.automation_id) == q);
             if !q.is_empty() && !exact && !name.contains(&q) {
@@ -348,11 +367,10 @@ impl UiaState {
                 let collapsed = p.CurrentExpandCollapseState().map(|s| s == ExpandCollapseState_Collapsed).unwrap_or(true);
                 return if collapsed { p.Expand().map(|_| "expand") } else { p.Collapse().map(|_| "collapse") }.map_err(uia_err);
             }
-            if let Some(p) = Self::pattern::<IUIAutomationLegacyIAccessiblePattern>(el, UIA_LegacyIAccessiblePatternId) {
-                if p.DoDefaultAction().is_ok() {
+            if let Some(p) = Self::pattern::<IUIAutomationLegacyIAccessiblePattern>(el, UIA_LegacyIAccessiblePatternId)
+                && p.DoDefaultAction().is_ok() {
                     return Ok("default_action");
                 }
-            }
         }
         Err(ToolError::Unsupported(format!("элемент [{id}] не поддерживает Invoke — используйте mouse_click с id={id}")))
     }
@@ -531,11 +549,10 @@ impl UiaState {
                 Ok(arr) if arr.Length().unwrap_or(0) > 0 => {
                     let n = arr.Length().unwrap_or(1);
                     let first = arr.GetElement(0).map_err(uia_err)?.Clone().map_err(uia_err)?;
-                    if n > 1 {
-                        if let Ok(last) = arr.GetElement(n - 1) {
+                    if n > 1
+                        && let Ok(last) = arr.GetElement(n - 1) {
                             let _ = first.MoveEndpointByRange(TextPatternRangeEndpoint_End, &last, TextPatternRangeEndpoint_End);
                         }
-                    }
                     first
                 }
                 _ => {

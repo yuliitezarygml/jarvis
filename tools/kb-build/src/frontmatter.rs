@@ -31,9 +31,12 @@ impl FrontMatter {
 /// Разделить текст на front matter и тело. Без front matter — пустая структура и весь текст.
 pub fn split(text: &str) -> (FrontMatter, &str) {
     let t = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let Some(rest) = t.strip_prefix("---").filter(|r| r.starts_with('\n') || r.starts_with("\r\n")) else {
+    // первая строка — ровно `---` (допускаем хвостовые пробелы: в Sysinternals встречается `--- \r\n`)
+    let first_end = t.find('\n').unwrap_or(t.len());
+    if t[..first_end].trim_end() != "---" || first_end == t.len() {
         return (FrontMatter::default(), t);
-    };
+    }
+    let rest = &t[first_end..];
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
         let l = line.trim_end();
@@ -148,6 +151,14 @@ mod tests {
         assert_eq!(fm.get("ms.custom"), Some("a, b"));
         assert!(fm.is_redirect_or_noindex());
         assert_eq!(body, "text");
+    }
+
+    #[test]
+    fn opening_fence_with_trailing_space() {
+        let (fm, body) = split("--- \r\nTOCTitle: Process Monitor\r\ntitle: Process Monitor\r\nms.date: 11/05/2026\r\n---\r\n# Process Monitor v4.13\r\n");
+        assert_eq!(fm.title(), Some("Process Monitor"));
+        assert_eq!(fm.get("toctitle"), Some("Process Monitor"));
+        assert_eq!(body, "# Process Monitor v4.13\r\n");
     }
 
     #[test]

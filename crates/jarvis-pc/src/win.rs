@@ -232,11 +232,10 @@ pub fn list_windows() -> Vec<WindowInfo> {
 /// Активное окно пользователя. Если в фокусе окно Джарвиса — верхнее окно приложения под ним.
 pub fn foreground_app_window() -> Option<WindowInfo> {
     let fg = foreground_hwnd();
-    if fg != 0 && window_pid(fg) != own_pid() {
-        if let Some(w) = window_info(fg) {
+    if fg != 0 && window_pid(fg) != own_pid()
+        && let Some(w) = window_info(fg) {
             return Some(w);
         }
-    }
     list_windows().into_iter().find(|w| !w.minimized)
 }
 

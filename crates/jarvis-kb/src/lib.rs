@@ -57,6 +57,19 @@ pub struct KbHit {
     pub path: String,
 }
 
+/// Фрагмент целиком (для экрана «База знаний» и отладки).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KbChunk {
+    pub id: i64,
+    pub source: String,
+    pub path: String,
+    pub url: String,
+    pub title: String,
+    pub heading_path: String,
+    pub commands: Vec<String>,
+    pub body: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceInfo {
     pub id: String,
@@ -201,6 +214,30 @@ impl Kb {
         })
     }
 
+    /// Фрагменты документов, чей URL содержит `url_part` (по порядку внутри документа) — для экрана KB и отладки.
+    pub fn chunks_like(&self, url_part: &str, limit: usize) -> Result<Vec<KbChunk>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT id, source, path, url, title, heading_path, commands, body FROM chunks
+             WHERE url LIKE '%' || ?1 || '%' ORDER BY url, ord LIMIT ?2",
+        )?;
+        let v = st
+            .query_map(rusqlite::params![url_part, limit as i64], |r| {
+                Ok(KbChunk {
+                    id: r.get(0)?,
+                    source: r.get(1)?,
+                    path: r.get(2)?,
+                    url: r.get(3)?,
+                    title: r.get(4)?,
+                    heading_path: r.get(5)?,
+                    commands: r.get::<_, String>(6)?.split_whitespace().map(str::to_string).collect(),
+                    body: r.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
     /// По `per_source` URL документов каждого источника, равномерно по алфавиту (для проверки ссылок в `kb-build`).
     pub fn sample_urls(&self, per_source: usize) -> Result<Vec<(String, String)>> {
         let conn = self.conn();
@@ -290,6 +327,10 @@ mod tests {
         let sample = kb.sample_urls(2).unwrap();
         assert_eq!(sample.iter().filter(|(s, _)| s == "windows-commands").count(), 2);
         assert_eq!(sample.iter().filter(|(s, _)| s == "seed").count(), 1);
+        let ch = kb.chunks_like("/robocopy", 10).unwrap();
+        assert_eq!(ch.len(), 3);
+        assert_eq!(ch[2].heading_path, "Examples");
+        assert_eq!(ch[0].commands, ["robocopy"]);
 
         // Пересборка, пока база открыта: на Windows rename поверх открытого файла падает → .new + reload().
         let tmp = dir.path().join("kb2.sqlite");

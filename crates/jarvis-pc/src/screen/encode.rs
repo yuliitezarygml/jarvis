@@ -54,7 +54,7 @@ pub fn encode(img: &RgbaImage, format: ImageFormat) -> Result<Vec<u8>, ToolError
     match format {
         ImageFormat::Png => PngEncoder::new(&mut out).write_image(img.as_raw(), w, h, ExtendedColorType::Rgba8).map_err(err)?,
         ImageFormat::Jpeg(q) => {
-            let rgb: Vec<u8> = img.as_raw().chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let rgb: Vec<u8> = img.as_raw().as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
             JpegEncoder::new_with_quality(&mut out, q.clamp(1, 100))
                 .write_image(&rgb, w, h, ExtendedColorType::Rgb8)
                 .map_err(err)?

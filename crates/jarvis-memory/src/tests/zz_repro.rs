@@ -18,7 +18,7 @@ fn run(two: bool, lessons: bool, reads: bool) -> String {
         }));
     }
     for h in hs { h.join().unwrap(); }
-    match a.check_integrity() { Ok(()) => "ok".into(), Err(e) => e.to_string() }
+    let r1 = a.check_integrity().is_ok(); let fresh = Memory::open(&p).unwrap().check_integrity().is_ok(); let rb = b.check_integrity().is_ok(); if r1 && fresh && rb { "ok".into() } else { println!("  a={r1} b={rb} fresh={fresh}"); "bad".into() }
 }
 #[test]
 fn zz_repro() {

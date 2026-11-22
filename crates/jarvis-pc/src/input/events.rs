@@ -178,11 +178,10 @@ pub fn chord_events(keys: &[u16]) -> [Vec<InputEvent>; 3] {
     let mut main: Vec<u16> = keys.iter().copied().filter(|k| !is_modifier(*k)).collect();
     // Сочетание только из модификаторов (например, «win») — последний модификатор и есть «клавиша».
     let mut mods = mods;
-    if main.is_empty() {
-        if let Some(last) = mods.pop() {
+    if main.is_empty()
+        && let Some(last) = mods.pop() {
             main.push(last);
         }
-    }
     let down: Vec<InputEvent> = mods.iter().map(|&k| InputEvent::Key { vk: k, up: false }).collect();
     let mut tap: Vec<InputEvent> = main.iter().map(|&k| InputEvent::Key { vk: k, up: false }).collect();
     tap.extend(main.iter().rev().map(|&k| InputEvent::Key { vk: k, up: true }));

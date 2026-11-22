@@ -3,7 +3,7 @@
 use jarvis_core::Rect;
 use serde::{Deserialize, Serialize};
 
-use crate::args::clip;
+use crate::args::{clip, one_line};
 use crate::win::WindowInfo;
 
 /// Предел элементов в снимке (план, раздел 3).
@@ -269,8 +269,9 @@ fn fmt_rect(r: Rect) -> String {
 
 /// Одна строка элемента: `[3] button «Сохранить» (120,40 80x24) focused`.
 pub fn format_element(e: &UiElement) -> String {
-    let mut s = format!("[{}] {} «{}»", e.id, e.role, clip(e.name.trim(), 80));
-    if e.name.trim().is_empty() && !e.automation_id.is_empty() {
+    let name = one_line(&e.name);
+    let mut s = format!("[{}] {} «{}»", e.id, e.role, clip(&name, 80));
+    if name.is_empty() && !e.automation_id.is_empty() {
         s.push_str(&format!(" #{}", clip(&e.automation_id, 40)));
     }
     s.push_str(&format!(" ({})", fmt_rect(e.rect)));
@@ -280,11 +281,10 @@ pub fn format_element(e: &UiElement) -> String {
     if e.focused {
         s.push_str(" focused");
     }
-    if let Some(v) = &e.value {
-        if !v.is_empty() {
-            s.push_str(&format!(" value=«{}»", clip(&v.replace(['\r', '\n'], " "), 80)));
+    if let Some(v) = &e.value
+        && !v.is_empty() {
+            s.push_str(&format!(" value=«{}»", clip(&one_line(v), 80)));
         }
-    }
     if let Some(t) = &e.toggle {
         s.push_str(&format!(" toggle={t}"));
     }
@@ -303,9 +303,10 @@ pub fn format_element(e: &UiElement) -> String {
 /// Компактный текст снимка для LLM.
 pub fn format_snapshot(s: &UiSnapshot) -> String {
     let w = &s.window;
+    let title = one_line(&w.title);
     let mut out = format!(
         "Окно «{}» ({}), {}. Элементов: {}",
-        clip(&w.title, 100),
+        if title.is_empty() { format!("[{}]", w.class) } else { clip(&title, 100) },
         if w.process.is_empty() { w.class.as_str() } else { w.process.as_str() },
         fmt_rect(w.rect),
         s.elements.len()
@@ -326,9 +327,9 @@ pub fn format_snapshot(s: &UiSnapshot) -> String {
 
 /// Строка легенды для set-of-marks: `[3] Кнопка «Сохранить»`.
 pub fn legend_line(e: &UiElement) -> String {
-    let name = e.name.trim();
-    let name = if name.is_empty() { e.automation_id.as_str() } else { name };
-    let mut s = format!("[{}] {} «{}»", e.id, role_ru(&e.role), clip(name, 60));
+    let name = one_line(&e.name);
+    let name = if name.is_empty() { one_line(&e.automation_id) } else { name };
+    let mut s = format!("[{}] {} «{}»", e.id, role_ru(&e.role), clip(&name, 60));
     if !e.enabled {
         s.push_str(" (недоступна)");
     }

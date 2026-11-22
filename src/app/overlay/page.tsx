@@ -118,7 +118,7 @@ export default function OverlayPage() {
           />
           <div className="overlay-badge" data-kind={glow.kind} style={{ ['--glow' as string]: glow.color }}>
             <span className="badge-dot" aria-hidden="true" />
-            ДЖАРВИС УПРАВЛЯЕТ ПК · Ctrl+Alt+K — стоп
+            {confirm ? 'ДЖАРВИС ЖДЁТ ПОДТВЕРЖДЕНИЯ' : 'ДЖАРВИС УПРАВЛЯЕТ ПК'} · Ctrl+Alt+K — стоп
           </div>
         </>
       )}

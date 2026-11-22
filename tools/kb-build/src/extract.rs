@@ -70,14 +70,35 @@ pub fn primary_commands(src: &SourceCfg, rel_path: &str, title: &str) -> Vec<Str
     out
 }
 
+/// Имена команд cmd/diskpart, совпадающие с обычными английскими словами: в начале строки вывода или прозы
+/// («label», «type», «start») они чаще не команда. Засчитываем, только если в строке есть ключ (`/x`, `-x`, `x=`).
+const AMBIGUOUS: &[&str] = &[
+    "active", "add", "append", "assign", "attach", "attributes", "break", "call", "cd", "change", "clean", "cls",
+    "compact", "convert", "copy", "create", "date", "del", "delete", "detach", "dir", "echo", "edit", "erase",
+    "exit", "expand", "export", "extend", "find", "format", "help", "import", "label", "list", "logoff", "manage",
+    "mode", "more", "move", "offline", "online", "open", "path", "pause", "print", "prompt", "query", "recover",
+    "remove", "rename", "replace", "reset", "select", "set", "shift", "shrink", "sort", "start", "time", "title",
+    "tree", "type", "ver", "verify", "vol", "where",
+];
+
 fn first_command_of_line(line: &str, known: &HashSet<String>) -> Option<String> {
     let l = PROMPT.replace(line.trim(), "");
     let l = l.trim_start_matches(['&', '.', ' ']).trim();
-    let tok = l.split_whitespace().next()?.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')'));
+    let mut words = l.split_whitespace();
+    let tok = words.next()?.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')'));
     let lower = tok.to_lowercase();
     let name = lower.strip_suffix(".exe").unwrap_or(&lower);
     let name = name.rsplit(['\\', '/']).next().unwrap_or(name);
-    (looks_like_exe(name) && known.contains(name)).then(|| name.to_string())
+    if !(looks_like_exe(name) && known.contains(name)) {
+        return None;
+    }
+    if AMBIGUOUS.contains(&name) && !lower.ends_with(".exe") {
+        let has_switch = words.any(|w| ((w.starts_with('/') || w.starts_with('-')) && w.len() > 1) || w.contains('='));
+        if !has_switch {
+            return None;
+        }
+    }
+    Some(name.to_string())
 }
 
 /// Команды фрагмента в порядке появления, без повторов (без учёта регистра).
@@ -88,6 +109,7 @@ pub fn chunk_commands(code: &[(String, String)], prose: &str, known_exes: &HashS
             out.push(c);
         }
     };
+    let builtin = builtin_exes();
     for (lang, c) in code {
         if !SHELL_LANGS.contains(&lang.as_str()) {
             continue;
@@ -95,8 +117,10 @@ pub fn chunk_commands(code: &[(String, String)], prose: &str, known_exes: &HashS
         for cm in find_cmdlets(c, false) {
             push(cm, &mut out);
         }
+        // Блок без языка часто — вывод команды: в нём верим только встроенному списку exe.
+        let known = if lang.is_empty() { &builtin } else { known_exes };
         for line in c.lines() {
-            if let Some(e) = first_command_of_line(line, known_exes) {
+            if let Some(e) = first_command_of_line(line, known) {
                 push(e, &mut out);
             }
         }
@@ -181,5 +205,17 @@ mod tests {
         let prose = "Run `sfc /scannow` or use Restart-Computer. A read-only set-up.";
         let c = chunk_commands(&code, prose, &known);
         assert_eq!(c, ["ipconfig", "netsh", "sc", "Get-Service", "where-object", "robocopy", "Restart-Computer", "sfc"]);
+    }
+
+    #[test]
+    fn ambiguous_words_need_switches_and_output_blocks_are_strict() {
+        let mut known = builtin_exes();
+        known.extend(["label", "type", "diskpart_x"].map(String::from));
+        let code = vec![
+            ("cmd".to_string(), "label D: Backup\ntype file.txt\nlabel /mp C:\\mnt Data".to_string()),
+            (String::new(), "Status   Name\nlabel    something\ndiskpart_x\nipconfig /all".to_string()),
+        ];
+        let c = chunk_commands(&code, "", &known);
+        assert_eq!(c, ["label", "ipconfig"]);
     }
 }

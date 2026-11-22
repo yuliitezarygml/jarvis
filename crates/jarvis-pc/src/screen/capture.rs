@@ -108,7 +108,7 @@ pub fn capture_rect(r: Rect) -> Result<RgbaImage, ToolError> {
         }
     }
     // BGRA → RGBA, непрозрачный.
-    for px in buf.chunks_exact_mut(4) {
+    for px in buf.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
         px[3] = 255;
     }

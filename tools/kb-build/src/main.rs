@@ -15,6 +15,8 @@ const HELP: &str = "kb-build — сборщик базы знаний Windows (d
                                                   оценить существующую базу: Recall@k и MRR@10
   kb-build --build --eval                         собрать и оценить
   kb-build --check-urls N                         проверить HEAD-запросами по N URL каждого источника
+  kb-build --search \"запрос\" [--search ...]       поиск по базе (как kb_search), для отладки
+  kb-build --show <часть URL>                     показать фрагменты документа
 
 Флаги:
   --update        обновить имеющиеся клоны (git fetch --depth 1 + reset)
@@ -40,6 +42,8 @@ struct Args {
     root: Option<PathBuf>,
     sources: Option<PathBuf>,
     target: Option<usize>,
+    show: Option<String>,
+    search: Vec<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -62,11 +66,13 @@ fn parse_args() -> Result<Args, String> {
             "--root" => a.root = Some(need(&mut it, "--root")?.into()),
             "--sources" => a.sources = Some(need(&mut it, "--sources")?.into()),
             "--target" => a.target = Some(need(&mut it, "--target")?.parse().map_err(|e| format!("--target: {e}"))?),
+            "--show" => a.show = Some(need(&mut it, "--show")?),
+            "--search" => a.search.push(need(&mut it, "--search")?),
             other => return Err(format!("неизвестный аргумент {other}")),
         }
     }
     // Без режимов — сборка; --update/--only подразумевают сборку.
-    if (!a.eval && a.check_urls.is_none()) || a.update || a.only.is_some() {
+    if (!a.eval && a.check_urls.is_none() && a.show.is_none() && a.search.is_empty()) || a.update || a.only.is_some() {
         a.build = true;
     }
     Ok(a)
@@ -151,6 +157,24 @@ fn run() -> Result<bool, String> {
         print_build(&rep);
         if rep.sources.iter().any(|s| s.status == "failed") {
             println!("(недоступные источники — предупреждение, сборка продолжена)");
+        }
+    }
+
+    if let Some(part) = &args.show {
+        let kb = Kb::open(&db).map_err(|e| e.to_string())?;
+        for c in kb.chunks_like(part, 40).map_err(|e| e.to_string())? {
+            println!("── #{} [{}] {} | {}\n   {}\n   команды: {}\n{}\n", c.id, c.source, c.title, c.heading_path, c.url, c.commands.join(" "), c.body);
+        }
+    }
+
+    if !args.search.is_empty() {
+        let kb = Kb::open(&db).map_err(|e| e.to_string())?;
+        let mut params = SearchParams::default();
+        for p in &args.params {
+            eval::apply_param(&mut params, p)?;
+        }
+        for (i, h) in kb.search_with(&args.search, args.k.max(6), &params).map_err(|e| e.to_string())?.iter().enumerate() {
+            println!("[{}] {:.4} {} — {}\n    {}\n    {}", i + 1, h.score, h.title, h.heading, h.url, h.snippet);
         }
     }
 

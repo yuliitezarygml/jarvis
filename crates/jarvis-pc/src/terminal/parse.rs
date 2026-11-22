@@ -70,8 +70,8 @@ pub fn find_prompts(lines: &[&str]) -> Vec<Prompt> {
     let mut i = 0;
     while i < lines.len() {
         let l = lines[i].trim_end();
-        if let Some(h) = MSYS_HEADER.captures(l) {
-            if let Some(d) = lines.get(i + 1).and_then(|n| DOLLAR.captures(n.trim_end())) {
+        if let Some(h) = MSYS_HEADER.captures(l)
+            && let Some(d) = lines.get(i + 1).and_then(|n| DOLLAR.captures(n.trim_end())) {
                 out.push(Prompt {
                     line: i + 1,
                     first_line: i,
@@ -82,7 +82,6 @@ pub fn find_prompts(lines: &[&str]) -> Vec<Prompt> {
                 i += 2;
                 continue;
             }
-        }
         if let Some((shell, cwd, command)) = parse_prompt_line(l) {
             out.push(Prompt { line: i, first_line: i, shell, cwd, command });
         }

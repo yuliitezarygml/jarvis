@@ -65,11 +65,10 @@ fn engine_for(lang: Option<&str>) -> Result<OcrEngine, ToolError> {
             _ => vec![tag.to_string()],
         };
         for t in &candidates {
-            if let Ok(l) = Language::CreateLanguage(&HSTRING::from(t.as_str())) {
-                if OcrEngine::IsLanguageSupported(&l).unwrap_or(false) {
+            if let Ok(l) = Language::CreateLanguage(&HSTRING::from(t.as_str()))
+                && OcrEngine::IsLanguageSupported(&l).unwrap_or(false) {
                     return OcrEngine::TryCreateFromLanguage(&l).map_err(err("язык"));
                 }
-            }
         }
         return Err(ToolError::Unsupported(format!(
             "язык OCR «{tag}» не установлен (доступны: {}). Параметры → Время и язык → Язык → добавить пакет.",
@@ -102,7 +101,7 @@ pub fn ocr_image(img: &RgbaImage, lang: Option<&str>) -> Result<OcrResult, ToolE
         img.clone()
     };
     let (ww, wh) = work.dimensions();
-    let bgra: Vec<u8> = work.as_raw().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], 255]).collect();
+    let bgra: Vec<u8> = work.as_raw().as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], 255]).collect();
 
     let writer = DataWriter::new().map_err(err("буфер"))?;
     writer.WriteBytes(&bgra).map_err(err("буфер"))?;

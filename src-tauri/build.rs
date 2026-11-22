@@ -43,6 +43,8 @@ fn main() {
         std::fs::write(&path, manifest(level)).expect("запись манифеста");
         println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", path.display());
+        // иначе линкер добавит свой фрагмент UAC (asInvoker) и в release он конфликтует с requireAdministrator
+        println!("cargo:rustc-link-arg=/MANIFESTUAC:NO");
         tauri_build::WindowsAttributes::new_without_app_manifest()
     } else {
         tauri_build::WindowsAttributes::new().app_manifest(manifest(level))

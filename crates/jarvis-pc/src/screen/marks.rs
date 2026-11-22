@@ -162,6 +162,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn digit_glyphs_differ() {
         for a in 0..10 {
             for b in (a + 1)..10 {

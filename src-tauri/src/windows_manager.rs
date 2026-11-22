@@ -248,8 +248,9 @@ pub fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: HudMode) -> tauri::Result<
     match mode {
         HudMode::Fullscreen => {
             if let Some(h) = &hud {
-                h.show()?;
+                // сначала полноэкранный размер, потом показ — без мелькания окна 800×600
                 h.set_fullscreen(true)?;
+                h.show()?;
                 h.set_focus()?;
             }
             if let Some(c) = &corner {

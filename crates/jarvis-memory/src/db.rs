@@ -117,6 +117,20 @@ impl Memory {
         schema::user_version(&self.conn())
     }
 
+    /// Чтение в явной транзакции (`BEGIN DEFERRED … COMMIT`).
+    ///
+    /// Нужна для FTS5: если базу пишет другое соединение (второй процесс/хэндл), а это соединение
+    /// читает FTS-индекс в autocommit-режиме, FTS5 может держать устаревший кэш структуры индекса
+    /// и читать не те блоки («fts5: corruption found», хотя файл цел). В явной транзакции кэш
+    /// сбрасывается на xBegin. Проверено тестом `concurrent_access_from_many_tasks_and_two_handles`.
+    pub(crate) fn read<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
+        let mut c = self.conn();
+        let tx = c.transaction()?;
+        let r = f(&tx)?;
+        tx.commit()?;
+        Ok(r)
+    }
+
     pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         // отравленный мьютекс не делает соединение невалидным: SQLite сам откатит незавершённое
         self.inner.conn.lock().unwrap_or_else(|e| e.into_inner())

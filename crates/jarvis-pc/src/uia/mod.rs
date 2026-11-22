@@ -39,8 +39,8 @@ impl Uia {
             .spawn(move || {
                 let _dpi = DpiScope::per_monitor();
                 let _com = ComInit::mta();
-                let mut state = UiaState::new()
-                    .map_err(|e| ToolError::Unsupported(format!("UI Automation недоступен: {}", e.message())));
+                let mut state =
+                    UiaState::new().map_err(|e| ToolError::Unsupported(format!("UI Automation недоступен: {e}")));
                 while let Ok(job) = rx.recv() {
                     let arg = state.as_mut().map_err(|e| e.clone());
                     // Паника в одной команде не должна убивать поток (ответ просто не придёт).

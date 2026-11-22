@@ -38,11 +38,10 @@ pub(crate) fn find_terminal_window(query: Option<&str>) -> Result<WindowInfo, To
     if let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) {
         return win::resolve_window(Some(q));
     }
-    if let Some(fg) = win::foreground_app_window() {
-        if is_terminal_window(&fg) {
+    if let Some(fg) = win::foreground_app_window()
+        && is_terminal_window(&fg) {
             return Ok(fg);
         }
-    }
     let list = win::list_windows();
     let real = |w: &&WindowInfo| TERMINAL_CLASSES.iter().any(|c| w.class.eq_ignore_ascii_case(c));
     list.iter()
@@ -76,11 +75,10 @@ async fn ocr_context(w: &WindowInfo) -> Result<TerminalContext, ToolError> {
 async fn screen_context(sh: &PcShared, window: Option<&str>) -> Result<TerminalContext, ToolError> {
     let w = find_terminal_window(window)?;
     let uia = uia_context(sh, &w).await;
-    if let Ok(c) = &uia {
-        if c.last_command.is_some() {
+    if let Ok(c) = &uia
+        && c.last_command.is_some() {
             return uia;
         }
-    }
     match ocr_context(&w).await {
         Ok(o) if o.last_command.is_some() || uia.is_err() => Ok(o),
         Ok(o) => Ok(uia.unwrap_or(o)),
@@ -211,7 +209,7 @@ impl Tool for TerminalRun {
         }
         let mut content = String::new();
         if run.timed_out {
-            content.push_str(&format!("Остановлено по таймауту {} с.\n", timeout / 1000));
+            content.push_str(&format!("Остановлено по таймауту {:.1} с.\n", timeout as f64 / 1000.0));
         } else {
             content.push_str(&format!("Код возврата: {}\n", run.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into())));
         }

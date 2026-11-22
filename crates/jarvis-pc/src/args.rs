@@ -81,6 +81,16 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
     if it.next().is_some() { format!("{head}…") } else { head }
 }
 
+/// В одну строку: переводы строк и пробелы схлопываются, невидимые символы форматирования (U+200E и т.п.) убираются.
+pub(crate) fn one_line(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Сравнение строк без учёта регистра и «ё/е».
 pub(crate) fn fold(s: &str) -> String {
     s.to_lowercase().replace('ё', "е")
@@ -108,5 +118,6 @@ mod tests {
         assert_eq!(clip("привет", 3), "при…");
         assert_eq!(clip("ok", 3), "ok");
         assert_eq!(fold("Ёлка СОХРАНИТЬ"), "елка сохранить");
+        assert_eq!(one_line("Clock 5:17 PM\n\u{200e}11/\u{200e}22/2026\r\n  x"), "Clock 5:17 PM 11/22/2026 x");
     }
 }

@@ -46,11 +46,25 @@ impl Memory {
     /// Топ фактов (+ всегда важные предпочтения), уроки k=5 по инструменту/приложению/словам,
     /// плейбуки k=3.
     pub fn retrieve_context(&self, query: &str, tool: Option<&str>, app: Option<&str>) -> Result<MemoryContext> {
-        let c = self.conn();
+        self.read(|c| retrieve_conn(c, query, tool, app))
+    }
 
+    /// Асинхронная обёртка (spawn_blocking).
+    pub async fn retrieve_context_async(
+        &self,
+        query: String,
+        tool: Option<String>,
+        app: Option<String>,
+    ) -> Result<MemoryContext> {
+        self.run(move |m| m.retrieve_context(&query, tool.as_deref(), app.as_deref())).await
+    }
+}
+
+fn retrieve_conn(c: &rusqlite::Connection, query: &str, tool: Option<&str>, app: Option<&str>) -> Result<MemoryContext> {
+    {
         // --- факты
-        let mut facts = important_facts_conn(&c, IMPORTANT_FACTS_K)?;
-        for (f, _) in search_facts_scored(&c, query, FACTS_K)? {
+        let mut facts = important_facts_conn(c, IMPORTANT_FACTS_K)?;
+        for (f, _) in search_facts_scored(c, query, FACTS_K)? {
             if f.confidence >= MIN_CONFIDENCE && !facts.iter().any(|x| x.id == f.id) {
                 facts.push(f);
             }
@@ -60,7 +74,7 @@ impl Memory {
         let mut lessons: HashMap<i64, (Lesson, f64)> = HashMap::new();
         let tool_key = tool.map(str::trim).filter(|t| !t.is_empty());
         let app_key = app.map(|a| fold(a.trim())).filter(|a| !a.is_empty());
-        for l in lessons_by_tool_or_app(&c, tool_key, app_key.as_deref(), 20)? {
+        for l in lessons_by_tool_or_app(c, tool_key, app_key.as_deref(), 20)? {
             let mut s = 0.0;
             if tool_key.is_some() && l.tool.as_deref() == tool_key {
                 s += 3.0;
@@ -70,7 +84,7 @@ impl Memory {
             }
             lessons.insert(l.id, (l, s));
         }
-        let hits = search_lessons_scored(&c, query, 15)?;
+        let hits = search_lessons_scored(c, query, 15)?;
         let max = normalize_scores(&hits);
         for (l, score) in hits {
             let add = 2.0 * score / max;
@@ -88,7 +102,7 @@ impl Memory {
         let lessons = lessons.into_iter().take(LESSONS_K).map(|(l, _)| l).collect();
 
         // --- плейбуки
-        let hits = search_playbooks_scored(&c, query, 10)?;
+        let hits = search_playbooks_scored(c, query, 10)?;
         let max = normalize_scores(&hits);
         let mut playbooks: Vec<(Playbook, f64)> = hits
             .into_iter()
@@ -102,16 +116,6 @@ impl Memory {
         let playbooks = playbooks.into_iter().take(PLAYBOOKS_K).map(|(p, _)| p).collect();
 
         Ok(MemoryContext { facts, lessons, playbooks })
-    }
-
-    /// Асинхронная обёртка (spawn_blocking).
-    pub async fn retrieve_context_async(
-        &self,
-        query: String,
-        tool: Option<String>,
-        app: Option<String>,
-    ) -> Result<MemoryContext> {
-        self.run(move |m| m.retrieve_context(&query, tool.as_deref(), app.as_deref())).await
     }
 }
 

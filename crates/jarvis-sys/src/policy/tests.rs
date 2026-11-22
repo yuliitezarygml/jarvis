@@ -198,7 +198,7 @@ const CASES: &[(Shell, &str, RiskTier, bool)] = &[
     (PS, "Get-Item (", T3, false),
     (PS, "cd C:\\Windows; Remove-Item x", T3, true),
     (PS, "Set-Location D:\\Games; New-Item a.txt", T3, false),
-    (PS, "$a = New-ScheduledTaskAction -Execute cmd.exe -Argument '/c del /s /q C:\\Users\\test'", T3, false),
+    (PS, "$a = New-ScheduledTaskAction -Execute cmd.exe -Argument '/c del /s /q C:\\Users\\test'", T3, true),
     (CMD, "del /s /q C:\\Users\\test\\proj\\*.obj", T3, false),
     (CMD, "rd /s /q C:\\Users\\test\\old", T3, false),
     (CMD, "for %f in (*.log) do del %f", T3, false),
@@ -276,4 +276,14 @@ fn path_ops() {
     let r = classify_path_op("E:\\a.txt", PathOp::Delete { recursive: false }, &c);
     assert_eq!(r.tier, T3);
     assert_eq!(classify_path_op("C:\\Windows\\a.txt", PathOp::Read, &c).tier, T0);
+}
+
+#[test]
+#[ignore = "диагностика: печатает причины для всей таблицы"]
+fn dump_reasons() {
+    let c = ctx();
+    for (shell, cmd, _, _) in CASES {
+        let r = classify_command_in(*shell, cmd, &c);
+        println!("{:?}{} | {cmd} | {}", r.tier, if r.protected_path { "+P" } else { "" }, r.summary());
+    }
 }

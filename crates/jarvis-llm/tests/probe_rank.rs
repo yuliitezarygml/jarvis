@@ -291,7 +291,7 @@ async fn check_provider_end_to_end() {
     assert!(llama.answered() && !llama.russian_ok && !llama.tools_ok);
 
     // «Выбрать лучшее автоматически».
-    apply_best(&mut cfg, &[rep.clone()], 3);
+    apply_best(&mut cfg, std::slice::from_ref(&rep), 3);
     assert_eq!(cfg.roles.brain[0], "groq/openai/gpt-oss-120b");
     assert_eq!(cfg.roles.vision, ["groq/qwen/qwen3.8-27b"]);
 

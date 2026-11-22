@@ -170,12 +170,14 @@ async fn build_role_model_from_config_with_zen_route_from_cache() {
     let base = serve(app).await;
     let zen_base = format!("{base}/zen/openai/v1");
 
-    let mut cfg = Config::default();
-    cfg.providers = vec![
-        provider("opencode-zen", &zen_base, "zen-key-0000000000"),
-        // Выключенный провайдер пропускается.
-        jarvis_core::ProviderConfig { enabled: false, ..provider("groq", &zen_base, "k") },
-    ];
+    let mut cfg = Config {
+        providers: vec![
+            provider("opencode-zen", &zen_base, "zen-key-0000000000"),
+            // Выключенный провайдер пропускается.
+            jarvis_core::ProviderConfig { enabled: false, ..provider("groq", &zen_base, "k") },
+        ],
+        ..Default::default()
+    };
     cfg.roles.brain = vec!["groq/openai/gpt-oss-120b".into(), "opencode-zen/my-claude-alias".into()];
 
     // Маршрут модели берётся из кэша списка моделей (как его отдаёт Zen в поле api).

@@ -77,6 +77,8 @@ struct Builder {
     list_stack: Vec<Option<u64>>,
     in_table_cell: bool,
     row_cells: Vec<String>,
+    /// Строки текущей таблицы (одна таблица — один блок).
+    table: String,
     image_depth: usize,
     started_content: bool,
 }
@@ -93,6 +95,7 @@ impl Builder {
             list_stack: Vec::new(),
             in_table_cell: false,
             row_cells: Vec::new(),
+            table: String::new(),
             image_depth: 0,
             started_content: false,
         }
@@ -226,8 +229,17 @@ impl Builder {
                 self.buf.push_str(&marker);
             }
             Event::End(TagEnd::Item) => {}
-            Event::Start(Tag::Table(_)) => self.flush_text(),
-            Event::End(TagEnd::Table) => self.flush_text(),
+            Event::Start(Tag::Table(_)) => {
+                self.flush_text();
+                self.table.clear();
+            }
+            Event::End(TagEnd::Table) => {
+                let t = std::mem::take(&mut self.table);
+                if !t.is_empty() {
+                    self.cur.blocks.push(Block::Text(t));
+                    self.started_content = true;
+                }
+            }
             Event::Start(Tag::TableCell) => {
                 self.in_table_cell = true;
             }
@@ -239,8 +251,10 @@ impl Builder {
             Event::End(TagEnd::TableHead) | Event::End(TagEnd::TableRow) => {
                 let row = std::mem::take(&mut self.row_cells).join(" | ");
                 if !row.replace('|', "").trim().is_empty() {
-                    self.cur.blocks.push(Block::Text(row));
-                    self.started_content = true;
+                    if !self.table.is_empty() {
+                        self.table.push('\n');
+                    }
+                    self.table.push_str(&row);
                 }
             }
             Event::Start(Tag::Image { .. }) => self.image_depth += 1,
@@ -257,12 +271,9 @@ impl Builder {
             }
             Event::SoftBreak => self.push_text(" "),
             Event::HardBreak => self.push_text("\n"),
-            Event::Html(h) | Event::InlineHtml(h) => {
-                let l = h.to_ascii_lowercase();
-                if l.starts_with("<br") {
-                    self.push_text(" ");
-                }
-            }
+            // HTML отбрасываем; встроенный тег (<br>, <li>, <kbd>) — граница слова
+            Event::Html(_) => {}
+            Event::InlineHtml(_) => self.push_text(" "),
             Event::TaskListMarker(done) => self.push_text(if done { "[x] " } else { "[ ] " }),
             _ => {}
         }
@@ -305,9 +316,11 @@ mod tests {
         let texts: Vec<_> = p.sections[0].blocks.iter().map(Block::text).collect();
         assert_eq!(texts[0], "Intro with `Get-Service`.");
         assert_eq!(texts[1], "1. Open Settings\n2. Go to\n  - Apps\n  - Startup");
-        assert_eq!(texts[2], "Parameter | Description");
-        assert_eq!(texts[3], "/s | Copies subdirectories.");
+        assert_eq!(texts[2], "Parameter | Description\n/s | Copies subdirectories.");
         assert!(!texts.iter().any(|t| t.contains("html")));
+        // <li> внутри ячейки — граница слова
+        let p = parse("| Opt | Values |\n|---|---|\n| /copy | <ul><li>D - Data</li><li>A - Attributes</li></ul> |");
+        assert_eq!(p.sections[0].blocks[0].text(), "Opt | Values\n/copy | D - Data A - Attributes");
         assert_eq!(*texts.last().unwrap(), "End line");
     }
 
