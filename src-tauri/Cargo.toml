@@ -22,7 +22,7 @@ tauri-build = { version = "2.7", features = [] }
 jarvis-core = { path = "../crates/jarvis-core" }
 jarvis-agent = { path = "../crates/jarvis-agent" }
 jarvis-llm = { path = "../crates/jarvis-llm" }
-jarvis-voice = { path = "../crates/jarvis-voice" }
+jarvis-voice = { path = "../crates/jarvis-voice", features = ["local-stt"] }
 jarvis-memory = { path = "../crates/jarvis-memory" }
 jarvis-pc = { path = "../crates/jarvis-pc" }
 jarvis-sys = { path = "../crates/jarvis-sys" }

@@ -26,6 +26,15 @@ rubato = "5"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream", "json", "multipart"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# Локальное распознавание (sherpa-onnx): при сборке скачиваются готовые DLL с GitHub-релиза k2-fsa
+# и копируются рядом с exe. `shared`, а не `static`: статическая сборка под Windows — /MT и конфликтует
+# с CRT остальных C-зависимостей (/MD).
+sherpa-onnx = { version = "=2.0.2", default-features = false, features = ["shared"], optional = true }
+
+[features]
+default = []
+# Распознавание речи на этом ПК (GigaAM v3 CTC). Включено в приложении (src-tauri).
+local-stt = ["dep:sherpa-onnx"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

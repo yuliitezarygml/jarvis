@@ -2,9 +2,13 @@
 //! и `GroqWhisperStt` (резерв, `POST {base}/audio/transcriptions`).
 
 mod groq;
+#[cfg(feature = "local-stt")]
+mod local;
 mod server;
 
 pub use groq::GroqWhisperStt;
+#[cfg(feature = "local-stt")]
+pub use local::LocalStt;
 pub use jarvis_core::stt_protocol::SttResult;
 pub use server::{ServerStt, ServerSttOptions};
 
@@ -101,10 +105,28 @@ pub trait SttEngine: Send + Sync {
     }
 }
 
-/// Выбрать движок по `config.stt.engine`: `server` (по умолчанию) или `groq_whisper`.
+/// Выбрать движок по `config.stt.engine`: `local` (на этом ПК), `server` (Xeon) или `groq_whisper`.
+/// `local` без модели или без поддержки в сборке — запасной вариант: сервер (с предупреждением в журнале).
 pub fn engine_from_config(cfg: &jarvis_core::Config, project_root: &std::path::Path) -> Result<std::sync::Arc<dyn SttEngine>> {
     Ok(match cfg.stt.engine.as_str() {
         "groq_whisper" | "groq" => std::sync::Arc::new(GroqWhisperStt::from_config(cfg)?),
+        "local" => match local_engine(cfg, project_root) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(error = %e, "локальный STT недоступен — распознаёт сервер");
+                std::sync::Arc::new(ServerStt::new(&cfg.stt, project_root)?)
+            }
+        },
         _ => std::sync::Arc::new(ServerStt::new(&cfg.stt, project_root)?),
     })
+}
+
+#[cfg(feature = "local-stt")]
+fn local_engine(cfg: &jarvis_core::Config, project_root: &std::path::Path) -> Result<std::sync::Arc<dyn SttEngine>> {
+    Ok(std::sync::Arc::new(LocalStt::new(LocalStt::default_dir(project_root, &cfg.data_dir))?))
+}
+
+#[cfg(not(feature = "local-stt"))]
+fn local_engine(_cfg: &jarvis_core::Config, _root: &std::path::Path) -> Result<std::sync::Arc<dyn SttEngine>> {
+    Err(crate::error::VoiceError::Config("сборка без локального распознавания (фича local-stt)".into()))
 }

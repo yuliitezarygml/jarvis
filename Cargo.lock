@@ -2920,6 +2920,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sherpa-onnx",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",

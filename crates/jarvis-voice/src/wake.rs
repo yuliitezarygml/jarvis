@@ -102,8 +102,13 @@ impl WakeFilter {
 
     pub fn is_wake_word(&self, word: &str) -> bool {
         let w = word.to_lowercase().replace('ё', "е");
+        let len = w.chars().count();
         // Точное совпадение или одна ошибка распознавания для длинных вариантов («джарвас»).
-        self.names.iter().any(|n| *n == w || (w.chars().count() >= 6 && edit_distance(n, &w) <= 1))
+        if self.names.iter().any(|n| *n == w || (len >= 6 && edit_distance(n, &w) <= 1)) {
+            return true;
+        }
+        // «Дж…» в русском редкость: две ошибки распознавания («джаруз», «джарис») — тоже обращение.
+        w.starts_with("дж") && (5..=8).contains(&len) && self.names.iter().any(|n| edit_distance(n, &w) <= 2)
     }
 
     /// Если реплика начинается с обращения — вернуть остаток в исходном виде (без запятой/тире после имени).
@@ -196,6 +201,13 @@ mod tests {
         assert_eq!(f.classify("Джарвис.", idle()), Intent::WakeOnly);
         assert_eq!(f.classify("джарвас открой", idle()), Intent::Command("открой".into()), "одна ошибка распознавания");
         assert_eq!(f.classify("открой браузер", idle()), Intent::Ignored);
+        // Частые ошибки распознавания имени (из журнала) и защита от похожих обычных слов.
+        for t in ["джаруз", "джарис открой", "Джервиз, открой"] {
+            assert_ne!(f.classify(t, idle()), Intent::Ignored, "{t}");
+        }
+        for t in ["джинсы купи", "жарко сегодня", "джаз включи"] {
+            assert_eq!(f.classify(t, idle()), Intent::Ignored, "{t}");
+        }
         assert_eq!(f.classify("я говорил с Джарвисом", idle()), Intent::Ignored, "обращение только в начале");
         assert_eq!(f.classify("открой браузер", WakeContext { follow_up: true, ..idle() }), Intent::Command("открой браузер".into()));
     }

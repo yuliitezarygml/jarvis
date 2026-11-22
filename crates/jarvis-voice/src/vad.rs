@@ -75,6 +75,9 @@ pub struct VadConfig {
     pub max_utterance_ms: u32,
     /// Кадры тише этого уровня — тишина, что бы ни сказала нейросеть (шум вентилятора).
     pub energy_gate_dbfs: Option<f32>,
+    /// Адаптивный порог: кадр тише «фона помещения + N дБ» — тишина. Фон оценивается по кадрам вне речи.
+    /// `None` — выключено.
+    pub noise_margin_db: Option<f32>,
 }
 
 impl Default for VadConfig {
@@ -83,23 +86,27 @@ impl Default for VadConfig {
             threshold: 0.5,
             release_threshold: 0.35,
             start_frames: 3,
-            end_silence_ms: 1000,
+            end_silence_ms: 700,
             min_speech_ms: 250,
             pre_roll_ms: 300,
             post_roll_ms: 160,
-            max_utterance_ms: 30_000,
+            max_utterance_ms: 15_000,
             energy_gate_dbfs: Some(-60.0),
+            noise_margin_db: Some(8.0),
         }
     }
 }
 
 impl VadConfig {
-    /// Тишина для конца фразы в рекомендованных пределах 800–1200 мс.
+    /// Тишина для конца фразы в пределах 500–1200 мс.
     pub fn with_end_silence(mut self, ms: u32) -> Self {
-        self.end_silence_ms = ms.clamp(800, 1200);
+        self.end_silence_ms = ms.clamp(500, 1200);
         self
     }
 }
+
+/// Начальная оценка фона помещения (dBFS), пока не набралась статистика.
+const NOISE_FLOOR_INIT: f32 = -70.0;
 
 /// Готовая фраза для STT.
 #[derive(Debug, Clone, PartialEq)]
@@ -143,7 +150,16 @@ pub struct Vad {
     silence_frames: usize,
     started_at: Instant,
     last_score: f32,
+    /// Оценка фона помещения (dBFS): минимум громкости кадров за последние ~3 с (между словами
+    /// всегда есть провалы, поэтому минимум — это фон, а не речь).
+    noise_floor: f32,
+    levels: VecDeque<f32>,
 }
+
+/// Окно оценки фона: 188 кадров × 16 мс ≈ 3 с.
+const NOISE_WINDOW_FRAMES: usize = 188;
+/// Пока кадров меньше — фон не оценивается (старт, после сброса).
+const NOISE_MIN_FRAMES: usize = 30;
 
 fn samples_ms(n: usize) -> Duration {
     Duration::from_micros(n as u64 * 1_000_000 / STT_SAMPLE_RATE as u64)
@@ -168,7 +184,20 @@ impl Vad {
             silence_frames: 0,
             started_at: Instant::now(),
             last_score: 0.0,
+            noise_floor: NOISE_FLOOR_INIT,
+            levels: VecDeque::with_capacity(NOISE_WINDOW_FRAMES + 1),
         }
+    }
+
+    /// Текущая оценка фона помещения, dBFS.
+    pub fn noise_floor_dbfs(&self) -> f32 {
+        self.noise_floor
+    }
+
+    /// Закончить текущую фразу сейчас (например, текст распознавания перестал меняться).
+    /// `None`, если фразы нет.
+    pub fn force_end(&mut self, now: Instant) -> Option<VadEvent> {
+        self.active.then(|| self.finish(now))
     }
 
     pub fn config(&self) -> &VadConfig {
@@ -203,8 +232,21 @@ impl Vad {
     /// То же с явным временем кадра (для тестов и для кадров из буфера).
     pub fn push_at(&mut self, frame: &[i16], now: Instant) -> Option<VadEvent> {
         let mut score = self.scorer.score(frame);
-        if self.cfg.energy_gate_dbfs.is_some_and(|g| dbfs(frame) < g) {
+        let level = dbfs(frame);
+        if self.cfg.energy_gate_dbfs.is_some_and(|g| level < g) {
             score = 0.0;
+        }
+        if let Some(margin) = self.cfg.noise_margin_db {
+            self.levels.push_back(if level.is_finite() { level } else { -150.0 });
+            if self.levels.len() > NOISE_WINDOW_FRAMES {
+                self.levels.pop_front();
+            }
+            if self.levels.len() >= NOISE_MIN_FRAMES {
+                self.noise_floor = self.levels.iter().copied().fold(f32::INFINITY, f32::min).max(NOISE_FLOOR_INIT);
+            }
+            if level < self.noise_floor + margin {
+                score = 0.0;
+            }
         }
         self.last_score = score;
         if !self.active {
@@ -331,9 +373,35 @@ mod tests {
     }
 
     #[test]
+    fn force_end_finishes_active_phrase() {
+        let mut vad = energy_vad(VadConfig::default());
+        assert!(vad.force_end(Instant::now()).is_none(), "нет фразы — нечего заканчивать");
+        let ev = run(&mut vad, &signal(&[(300, 0.0), (600, 0.3)]));
+        assert!(matches!(ev.as_slice(), [VadEvent::SpeechStart { .. }]), "{ev:?}");
+        assert!(vad.is_active());
+        assert!(matches!(vad.force_end(Instant::now()), Some(VadEvent::SpeechEnd(_))));
+        assert!(!vad.is_active());
+    }
+
+    #[test]
+    fn noise_floor_follows_room_and_gates_hum() {
+        // Энергетический скорер считает «речью» всё громче −40 dBFS; гул −35 dBFS сначала проходит,
+        // но фон его выучивает, и через несколько секунд гул — уже тишина.
+        let mut vad = Vad::with_scorer(VadConfig::default(), Box::new(EnergyScorer { threshold_dbfs: -40.0 }));
+        let hum = signal(&[(30_000, 0.025)]);
+        let ev = run(&mut vad, &hum);
+        assert!(vad.noise_floor_dbfs() > -45.0, "фон выучен: {}", vad.noise_floor_dbfs());
+        let ends = ev.iter().filter(|e| matches!(e, VadEvent::SpeechEnd(_))).count();
+        assert!(ends <= 2, "гул не должен давать поток фраз: {ev:?}");
+        // Голос заметно громче фона по-прежнему распознаётся.
+        let ev = run(&mut vad, &signal(&[(600, 0.4), (1000, 0.025)]));
+        assert!(ev.iter().any(|e| matches!(e, VadEvent::SpeechEnd(_))), "{ev:?}");
+    }
+
+    #[test]
     fn end_silence_configurable_and_max_length() {
         let cfg = VadConfig::default().with_end_silence(2000);
-        assert_eq!(cfg.end_silence_ms, 1200, "ограничено 800–1200");
+        assert_eq!(cfg.end_silence_ms, 1200, "ограничено 500–1200");
         let mut vad = energy_vad(VadConfig::default().with_end_silence(800));
         // Пауза 900 мс уже рвёт фразу при пороге 800.
         let ev = run(&mut vad, &signal(&[(300, 0.0), (400, 0.3), (900, 0.0), (400, 0.3), (1000, 0.0)]));

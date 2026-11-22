@@ -60,8 +60,8 @@ impl Default for VoiceConfig {
             player: PlayerConfig::default(),
             capture: CaptureConfig::default(),
             max_phrase_chars: MAX_PHRASE_CHARS,
-            final_timeout: Duration::from_secs(6),
-            follow_up: Duration::from_secs(8),
+            final_timeout: Duration::from_millis(2500),
+            follow_up: Duration::from_secs(15),
             barge_in_while_speaking: true,
             buffer_ms: 100,
             prefetch_phrases: 2,
@@ -442,6 +442,8 @@ async fn listen_loop(
     let (ev_tx, mut ev_rx) = mpsc::channel::<SttEvent>(64);
     let stream: Option<SttStream> = inner.stt.open_stream(ev_tx);
     let mut pending: VecDeque<Pending> = VecDeque::new();
+    // Фразы, ушедшие в POST по таймауту: их запоздалый потоковый final отбрасываем (иначе команда выполнится дважды).
+    let mut late_finals_to_skip: usize = 0;
     let mut was_muted = false;
     let (tr_tx, mut tr_rx) = mpsc::channel::<(String, Instant)>(8);
     let transcribe = |utt: Utterance, ended: Instant| {
@@ -506,6 +508,10 @@ async fn listen_loop(
                 }
             }
             ev = ev_rx.recv(), if stream.is_some() => match ev {
+                Some(SttEvent::Final { text, .. }) if pending.is_empty() && late_finals_to_skip > 0 => {
+                    late_finals_to_skip -= 1;
+                    tracing::info!(text = %text, "STT: запоздалый потоковый final отброшен (фраза уже распознана через POST)");
+                }
                 Some(SttEvent::Final { text, .. }) => {
                     let p = pending.pop_front();
                     tracing::info!(
@@ -537,6 +543,7 @@ async fn listen_loop(
                         "STT: потоковый ответ не пришёл, повтор через POST"
                     );
                     if let Some(s) = &stream { s.reset(); }
+                    late_finals_to_skip += 1;
                     transcribe(p.utt, p.ended);
                 }
             }
