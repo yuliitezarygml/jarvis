@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вышел Rust 1.100: что нового — Технообзор</title>
+  <meta property="og:title" content="Вышел Rust 1.100: что нового">
+  <meta property="og:site_name" content="Технообзор">
+  <meta name="author" content="Иван Петров">
+  <link rel="stylesheet" href="/static/main.css">
+  <script>window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date());</script>
+  <style>.cookie{position:fixed;bottom:0}</style>
+</head>
+<body>
+  <div class="cookie" id="cookie-banner">Мы используем cookies. <button>Принять</button></div>
+  <header class="site-header">
+    <a href="/" class="logo">Технообзор</a>
+    <nav class="main-nav">
+      <ul>
+        <li><a href="/news">Новости</a></li>
+        <li><a href="/reviews">Обзоры</a></li>
+        <li><a href="/dev">Разработка</a></li>
+        <li><a href="/hardware">Железо</a></li>
+        <li><a href="/about">О нас</a></li>
+      </ul>
+    </nav>
+    <form class="search" action="/search"><input name="q" placeholder="Поиск по сайту"><button>Найти</button></form>
+  </header>
+
+  <div class="layout">
+    <main class="content">
+      <article class="post">
+        <h1 class="post-title">Вышел Rust 1.100: что нового</h1>
+        <div class="post-meta">Иван Петров · 20 ноября 2026 · 6 минут чтения</div>
+        <div class="post-body">
+          <p>Команда Rust выпустила версию 1.100 — сотый минорный релиз стабильной ветки языка. Обновление
+          традиционно выходит через шесть недель после предыдущего и устанавливается командой
+          <code>rustup update stable</code>. В этом выпуске основное внимание уделено скорости компиляции,
+          улучшениям асинхронного программирования и стабилизации давно ожидаемых возможностей стандартной библиотеки.</p>
+
+          <h2>Ускорение компиляции</h2>
+          <p>По данным команды компилятора, инкрементальная сборка крупных проектов стала быстрее в среднем на
+          двенадцать процентов. Это достигнуто за счёт параллельного фронтенда, который теперь включён по умолчанию
+          на всех основных платформах, включая Windows и macOS. Разработчики отмечают, что выигрыш особенно заметен
+          на машинах с большим количеством ядер.</p>
+          <img src="/img/benchmark.png" alt="График времени компиляции">
+
+          <h2>Асинхронные замыкания</h2>
+          <p>Асинхронные замыкания, стабилизированные ранее, получили улучшенный вывод типов. Теперь компилятор
+          реже требует явных аннотаций, а сообщения об ошибках подсказывают, как исправить код. Пример:</p>
+          <pre><code class="language-rust">let fetch = async |url: &amp;str| reqwest::get(url).await?.text().await;
+let body = fetch("https://www.rust-lang.org").await?;</code></pre>
+
+          <h2>Стандартная библиотека</h2>
+          <ul>
+            <li>стабилизированы новые методы для работы со срезами;</li>
+            <li>улучшена производительность <code>HashMap</code> на коротких ключах;</li>
+            <li>добавлены удобные конструкторы для <code>Duration</code>.</li>
+          </ul>
+          <p>Полный список изменений опубликован в <a href="/go/release-notes">примечаниях к выпуску</a> и в
+          <a href="https://blog.rust-lang.org/">официальном блоге проекта</a>.</p>
+
+          <h2>Как обновиться</h2>
+          <p>Пользователям rustup достаточно выполнить одну команду в терминале. Тем, кто устанавливает Rust через
+          менеджер пакетов дистрибутива, стоит дождаться обновления пакета. Команда проекта напоминает, что
+          обратная совместимость гарантируется для всего стабильного кода.</p>
+        </div>
+        <div class="share">Поделиться: <a href="#">VK</a> <a href="#">Telegram</a></div>
+      </article>
+
+      <section class="comments">
+        <h3>Комментарии (2)</h3>
+        <div class="comment"><b>Анна</b>: Наконец-то!</div>
+        <div class="comment"><b>Олег</b>: А когда стабилизируют генераторы?</div>
+      </section>
+    </main>
+
+    <aside class="sidebar">
+      <h3>Популярное</h3>
+      <ul>
+        <li><a href="/p/1">10 лучших ноутбуков 2026 года</a></li>
+        <li><a href="/p/2">Как выбрать монитор для работы</a></li>
+        <li><a href="/p/3">Обзор новой видеокарты</a></li>
+      </ul>
+      <div class="ad">Реклама: купите курс по Rust со скидкой 90%!</div>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <p>© 2026 Технообзор. Все права защищены.</p>
+    <a href="/privacy">Политика конфиденциальности</a>
+  </footer>
+  <script src="/static/analytics.js"></script>
+</body>
+</html>

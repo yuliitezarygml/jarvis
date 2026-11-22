@@ -1,0 +1,35 @@
+{
+  "type": "search",
+  "query": { "original": "rust programming language", "more_results_available": true },
+  "mixed": { "type": "mixed", "main": [{ "type": "web", "index": 0, "all": false }] },
+  "web": {
+    "type": "search",
+    "family_friendly": true,
+    "results": [
+      {
+        "title": "Rust Programming Language",
+        "url": "https://www.rust-lang.org/",
+        "is_source_local": false,
+        "is_source_both": false,
+        "description": "A language empowering everyone to build reliable and efficient <strong>software</strong>.",
+        "profile": { "name": "Rust-lang", "url": "https://www.rust-lang.org/", "long_name": "rust-lang.org" },
+        "language": "en",
+        "family_friendly": true,
+        "type": "search_result",
+        "extra_snippets": ["Rust is blazingly fast and memory-efficient."]
+      },
+      {
+        "title": "Rust (programming language) - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+        "description": "<strong>Rust</strong> is a general-purpose programming language emphasizing performance, type safety, and concurrency.",
+        "type": "search_result"
+      },
+      {
+        "title": "The Rust Programming Language - The Rust Programming Language",
+        "url": "https://doc.rust-lang.org/book/",
+        "description": "by Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the Rust Community.",
+        "type": "search_result"
+      }
+    ]
+  }
+}

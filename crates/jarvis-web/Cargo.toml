@@ -1,0 +1,44 @@
+[package]
+name = "jarvis-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Интернет для J.A.R.V.I.S.: поиск (цепочка провайдеров с failover), чтение страниц в Markdown, исследование с источниками"
+
+# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+[workspace]
+
+[dependencies]
+jarvis-core = { path = "../jarvis-core" }
+
+async-trait = "0.1"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+url = "2.5"
+
+# HTTP: rustls с провайдером ring (как у jarvis-tts-rs; без aws-lc-sys/cmake/NASM на Windows),
+# сертификаты — системное хранилище Windows через rustls-platform-verifier.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls-no-provider", "http2", "json", "form", "query", "gzip", "brotli", "deflate", "system-proxy",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+# Кодировки страниц (windows-1251, koi8-r, …).
+encoding_rs = "0.8"
+# Readability-алгоритм (порт Mozilla Readability) поверх dom_query/html5ever.
+dom_smoothie = "0.20"
+# Тот же DOM, что у dom_smoothie: разбор выдачи DuckDuckGo и сниппетов.
+dom_query = "0.30"
+# HTML → Markdown.
+htmd = "0.6"
+# PDF → текст.
+pdf-extract = "0.12"
+# Открыть ссылку в браузере по умолчанию (ShellExecuteW на Windows).
+open = "5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+wiremock = "0.6"

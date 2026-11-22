@@ -1,0 +1,22 @@
+{
+  "searchParameters": { "q": "apple inc", "type": "search", "engine": "google" },
+  "knowledgeGraph": { "title": "Apple", "type": "Technology company" },
+  "organic": [
+    {
+      "title": "Apple",
+      "link": "https://www.apple.com/",
+      "snippet": "Discover the innovative world of Apple and shop everything iPhone, iPad, Apple Watch, Mac, and Apple TV.",
+      "sitelinks": [{ "title": "Support", "link": "https://support.apple.com/" }],
+      "position": 1
+    },
+    {
+      "title": "Apple Inc. - Wikipedia",
+      "link": "https://en.wikipedia.org/wiki/Apple_Inc.",
+      "snippet": "Apple Inc. is an American multinational technology company headquartered in Cupertino, California.",
+      "position": 2
+    },
+    { "title": "Apple Newsroom", "link": "https://www.apple.com/newsroom/", "position": 3 }
+  ],
+  "peopleAlsoAsk": [],
+  "credits": 1
+}

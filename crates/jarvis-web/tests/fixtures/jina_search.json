@@ -1,0 +1,20 @@
+{
+  "code": 200,
+  "status": 20000,
+  "data": [
+    {
+      "title": "Elastic Completes Acquisition of Jina AI, a Leader in Frontier Models for Multimodal and Multilingual Search",
+      "url": "https://ir.elastic.co/news/news-details/2025/Elastic-Completes-Acquisition-of-Jina-AI/default.aspx",
+      "description": "Acquisition advances Elastic’s leadership in context engineering.",
+      "date": "Oct 9, 2025",
+      "usage": { "tokens": 1000 }
+    },
+    {
+      "title": "Jina AI",
+      "url": "https://jina.ai/",
+      "description": "Search foundation models.",
+      "usage": { "tokens": 1000 }
+    }
+  ],
+  "meta": { "usage": { "tokens": 10000 } }
+}

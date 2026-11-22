@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "verified_at": "2026-11-22",
+  "providers": [
+    {
+      "id": "groq",
+      "name": "Groq",
+      "kind": "openai_compat",
+      "base_url": "https://api.groq.com/openai/v1",
+      "key_url": "https://console.groq.com/keys",
+      "docs_url": "https://console.groq.com/docs/openai",
+      "needs_key": true,
+      "max_tokens_field": "max_completion_tokens",
+      "notes": "Очень быстрый инференс. GET /models отдаёт context_window и active. По документации все модели поддерживают tools; зрение есть только у части (console.groq.com/docs/vision). На 429 приходит retry-after в секундах. Параметры logprobs/logit_bias/n≠1 дают 400."
+    },
+    {
+      "id": "opencode-zen",
+      "name": "OpenCode Zen",
+      "kind": "openai_compat",
+      "base_url": "https://opencode.ai/inference/openai/v1",
+      "key_url": "https://opencode.ai/console",
+      "docs_url": "https://opencode.ai/docs/zen/",
+      "needs_key": true,
+      "routes": [
+        {
+          "models": ["claude-*", "qwen3.5-plus", "qwen3.6-plus", "qwen3.8-flash"],
+          "kind": "anthropic",
+          "base_url": "https://opencode.ai/inference/anthropic/v1",
+          "auth": "bearer"
+        }
+      ],
+      "probe_skip": ["*-free", "big-pickle"],
+      "notes": "Ключ: opencode.ai/console → billing и кредиты → скопировать ключ. GET /models публичный (без ключа 200, с неверным ключом 401) и для каждой модели отдаёт limit.context, capabilities, modalities, cost (USD за 1M) и api.<тип>.base_url. Родные API: claude-* и qwen3.5-plus/3.6-plus/3.8-flash → /anthropic/v1/messages (маршрут выше); gpt-5*/gpt-6*/grok-4.x/muse-* → /openai/v1/responses; gemini-* → Google generateContent. По документации Zen любая текстовая модель работает и через другие API (Console переводит), поэтому модели без поддерживаемого здесь родного API идут через /chat/completions. Бесплатные модели (*-free, big-pickle) по документации доступны только из клиента OpenCode, из сторонних клиентов — платные модели или Go."
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "kind": "openai_compat",
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_url": "https://openrouter.ai/keys",
+      "docs_url": "https://openrouter.ai/docs/quickstart",
+      "needs_key": true,
+      "key_check_path": "/key",
+      "notes": "GET /models публичный, поэтому ключ проверяется через GET /key. В /models есть context_length, supported_parameters, architecture.input_modalities и pricing (USD за токен, строкой). 402 — кончились кредиты. Ответ 200 может нести объект error (в том числе посреди стрима). У бесплатных (:free) моделей жёсткие лимиты в минуту и в день."
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "kind": "openai_compat",
+      "base_url": "https://api.openai.com/v1",
+      "key_url": "https://platform.openai.com/api-keys",
+      "docs_url": "https://developers.openai.com/api/reference/resources/models/methods/list",
+      "needs_key": true,
+      "max_tokens_field": "max_completion_tokens",
+      "stream_usage": true,
+      "notes": "Chat Completions поддерживается, хотя новые примеры в документации используют Responses API. /models не отдаёт контекст и возможности, поэтому они берутся из каталога. Reasoning-модели не принимают max_tokens (нужен max_completion_tokens) и нестандартный temperature."
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic (Claude)",
+      "kind": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "key_url": "https://platform.claude.com/settings/keys",
+      "docs_url": "https://platform.claude.com/docs/en/api/overview",
+      "needs_key": true,
+      "auth": "x-api-key",
+      "anthropic_version": "2023-06-01",
+      "notes": "Messages API: POST /v1/messages, GET /v1/models (пагинация after_id/has_more, есть max_input_tokens и capabilities). Версия 2023-06-01 действующая. В 2026-10-21 убраны temperature/top_p/top_k (дают 400), поэтому клиент не шлёт temperature для версий от 2026-10-21. Новый основной заголовок — Authorization: Bearer, x-api-key остаётся поддерживаемым."
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini (OpenAI-совместимый)",
+      "kind": "openai_compat",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "key_url": "https://aistudio.google.com/apikey",
+      "docs_url": "https://aistudio.google.com/docs/openai",
+      "needs_key": true,
+      "notes": "Совместимый эндпоинт в бете. Неверный ключ даёт 400 «Please pass a valid API key», а не 401; без ключа /models отвечает 404. id в /models могут приходить с префиксом models/ — он срезается. Картинки передаются как base64 data URL. У 2.5 Pro и моделей 3/4 thinking не отключается."
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral (La Plateforme)",
+      "kind": "openai_compat",
+      "base_url": "https://api.mistral.ai/v1",
+      "key_url": "https://console.mistral.ai/api-keys",
+      "docs_url": "https://docs.mistral.ai/api/endpoint/models",
+      "needs_key": true,
+      "notes": "В /models есть max_context_length и capabilities (completion_chat, function_calling, vision). В документации ответ /models описан и как {data:[…]}, и как массив — разбираются оба варианта."
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "kind": "openai_compat",
+      "base_url": "https://api.deepseek.com",
+      "key_url": "https://platform.deepseek.com/api_keys",
+      "docs_url": "https://api-docs.deepseek.com/",
+      "needs_key": true,
+      "notes": "В /models есть context_window и input_modalities. Thinking включён по умолчанию; в этом режиме tool_choice=required даёт 400, а temperature игнорируется. Ответ может содержать reasoning_content, клиент его не показывает."
+    },
+    {
+      "id": "together",
+      "name": "Together AI",
+      "kind": "openai_compat",
+      "base_url": "https://api.together.ai/v1",
+      "key_url": "https://api.together.ai/settings/projects/~current/api-keys",
+      "docs_url": "https://docs.together.ai/docs/inference/openai-compatibility",
+      "needs_key": true,
+      "notes": "id моделей в формате org/model (например openai/gpt-oss-120b). Старый хост api.together.xyz тоже отвечает. Не подтверждено, приходит ли /models массивом или объектом {data} (разбираются оба), и что содержится в context_length/pricing."
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks AI",
+      "kind": "openai_compat",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "key_url": "https://app.fireworks.ai/settings/users/api-keys",
+      "docs_url": "https://docs.fireworks.ai/tools-sdks/openai-compatibility",
+      "needs_key": true,
+      "notes": "id моделей вида accounts/fireworks/models/<name>. Маршрут /inference/v1/models существует (с неверным ключом 401), но в документации не описан. Если prompt + max_tokens превышают контекст, max_tokens молча урезается."
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras",
+      "kind": "openai_compat",
+      "base_url": "https://api.cerebras.ai/v1",
+      "key_url": "https://cloud.cerebras.ai",
+      "docs_url": "https://inference-docs.cerebras.ai/resources/openai",
+      "needs_key": true,
+      "notes": "Ключ: cloud.cerebras.ai → API Keys в левом меню. /models отдаёт только id/owned_by, без контекста. Только n=1. Картинки — только base64 PNG/JPEG. Нельзя одновременно передавать tools и response_format."
+    },
+    {
+      "id": "xai",
+      "name": "xAI (Grok)",
+      "kind": "openai_compat",
+      "base_url": "https://api.x.ai/v1",
+      "key_url": "https://console.x.ai/team/default/api-keys",
+      "docs_url": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions",
+      "needs_key": true,
+      "max_tokens_field": "max_completion_tokens",
+      "notes": "Неверный ключ даёт 400 «Incorrect API key provided», а не 401. В /models есть context_length. Chat Completions xAI называет предшественником Responses, но он работает. Reasoning-модели не принимают stop/presence_penalty/frequency_penalty."
+    },
+    {
+      "id": "zai",
+      "name": "Z.AI (GLM)",
+      "kind": "openai_compat",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "key_url": "https://z.ai/manage-apikey/apikey-list",
+      "docs_url": "https://docs.z.ai/guides/overview/quick-start",
+      "needs_key": true,
+      "fallback_models": ["glm-5.3", "glm-5.3-flash"],
+      "notes": "Международный эндпоинт. Есть отдельный Coding Plan (https://api.z.ai/api/coding/paas/v4): его ключи с 2026-10-16 не подходят к обычному API, а сам план разрешён только в официально поддерживаемых инструментах. GET /models в OpenAPI не описан; если он даст 404, используется fallback_models (id не подтверждены живым ключом). tool_choice — только auto."
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama (локально)",
+      "kind": "openai_compat",
+      "base_url": "http://localhost:11434/v1",
+      "key_url": "",
+      "docs_url": "https://docs.ollama.com/api/openai-compatibility",
+      "needs_key": false,
+      "local": true,
+      "notes": "Ключ не нужен. /v1/models не отдаёт контекст (он задаётся в Modelfile num_ctx или через OLLAMA_CONTEXT_LENGTH). tool_choice не поддерживается. Картинки — только base64."
+    },
+    {
+      "id": "lmstudio",
+      "name": "LM Studio (локально)",
+      "kind": "openai_compat",
+      "base_url": "http://localhost:1234/v1",
+      "key_url": "",
+      "docs_url": "https://lmstudio.ai/docs/developer/openai-compat",
+      "needs_key": false,
+      "local": true,
+      "notes": "Ключ не нужен (необязательный токен включается в Server Settings). Контекст и возможности моделей отдаёт только родной GET /api/v1/models; здесь они берутся из каталога."
+    },
+    {
+      "id": "custom",
+      "name": "Свой OpenAI-совместимый URL",
+      "kind": "openai_compat",
+      "base_url": "",
+      "key_url": "",
+      "docs_url": "",
+      "needs_key": false,
+      "notes": "Любой сервер с /chat/completions и /models (vLLM, llama.cpp server, прокси). Ключ необязателен: если он указан, отправляется как Bearer."
+    }
+  ]
+}

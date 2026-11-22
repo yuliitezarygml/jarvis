@@ -1,0 +1,28 @@
+[package]
+name = "jarvis-llm"
+version = "0.1.0"
+edition = "2024"
+description = "LLM-провайдеры J.A.R.V.I.S.: OpenAI-совместимый и Anthropic клиенты, пресеты, каталог, обнаружение моделей, живая проверка, рейтинг, цепочки с failover"
+
+# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
+[workspace]
+
+[dependencies]
+jarvis-core = { path = "../jarvis-core" }
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+futures-util = "0.3"
+httpdate = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+tokio-util = "0.7"
+tracing = "0.1"
+
+[dev-dependencies]
+axum = "0.8"
+png = "0.17"
+tokio = { version = "1", features = ["full"] }

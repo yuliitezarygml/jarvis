@@ -1,0 +1,25 @@
+{
+  "kind": "customsearch#search",
+  "url": { "type": "application/json", "template": "https://www.googleapis.com/customsearch/v1?q={searchTerms}&cx={cx?}" },
+  "queries": { "request": [{ "title": "Google Custom Search - rust", "totalResults": "2", "searchTerms": "rust", "count": 2, "startIndex": 1 }] },
+  "searchInformation": { "searchTime": 0.31, "formattedSearchTime": "0.31", "totalResults": "2", "formattedTotalResults": "2" },
+  "items": [
+    {
+      "kind": "customsearch#result",
+      "title": "Rust Programming Language",
+      "htmlTitle": "<b>Rust</b> Programming Language",
+      "link": "https://www.rust-lang.org/",
+      "displayLink": "www.rust-lang.org",
+      "snippet": "A language empowering everyone to build reliable and efficient software.",
+      "htmlSnippet": "A language empowering everyone to build reliable and efficient <b>software</b>.",
+      "formattedUrl": "https://www.rust-lang.org/"
+    },
+    {
+      "kind": "customsearch#result",
+      "title": "Rust - Wikipedia",
+      "link": "https://en.wikipedia.org/wiki/Rust",
+      "displayLink": "en.wikipedia.org",
+      "snippet": "Rust is an iron oxide, a usually reddish-brown oxide formed by the reaction of iron and oxygen."
+    }
+  ]
+}

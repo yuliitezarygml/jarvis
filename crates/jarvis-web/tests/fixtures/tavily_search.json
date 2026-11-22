@@ -1,0 +1,24 @@
+{
+  "query": "Who is Leo Messi?",
+  "answer": null,
+  "images": [],
+  "results": [
+    {
+      "title": "Lionel Messi Facts | Britannica",
+      "url": "https://www.britannica.com/facts/Lionel-Messi",
+      "content": "Lionel Messi, an Argentine footballer, is widely regarded as one of the greatest football players of his generation.",
+      "score": 0.81025416,
+      "raw_content": null,
+      "favicon": "https://britannica.com/favicon.png"
+    },
+    {
+      "title": "Lionel Messi - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Lionel_Messi",
+      "content": "Lionel Andrés \"Leo\" Messi is an Argentine professional footballer who plays as a forward.",
+      "score": 0.7685,
+      "raw_content": null
+    }
+  ],
+  "response_time": "1.67",
+  "request_id": "123e4567-e89b-12d3-a456-426614174111"
+}

@@ -1,0 +1,48 @@
+[package]
+name = "jarvis"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "J.A.R.V.I.S. — оболочка Tauri 2: окна hud/corner/overlay/settings, трей, хоткеи, мост событий"
+default-run = "jarvis"
+
+# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
+[workspace]
+
+[lib]
+name = "jarvis_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jarvis"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+jarvis-core = { path = "../crates/jarvis-core" }
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2.4"
+tauri-plugin-single-instance = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "test"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

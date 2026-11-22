@@ -1,0 +1,49 @@
+[package]
+name = "jarvis-pc"
+version = "0.1.0"
+edition = "2024"
+description = "J.A.R.V.I.S.: взаимодействие с ПК — мышь, клавиатура, UI Automation, экран, OCR, терминал"
+
+# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
+[workspace]
+
+[dependencies]
+jarvis-core = { path = "../jarvis-core" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+base64 = "0.22"
+regex = "1"
+portable-pty = "0.9"
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    # WinRT: встроенный OCR
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+ab_glyph = "0.2"

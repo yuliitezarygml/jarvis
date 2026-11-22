@@ -1,0 +1,24 @@
+[package]
+name = "jarvis-kb"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "База знаний Windows J.A.R.V.I.S.: SQLite FTS5 (bm25 с весами полей), поиск по нескольким запросам со слиянием RRF, точный поиск команд, инструменты kb_search / kb_lookup_command / kb_status"
+
+# Пока каждый крейт собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+# На этапе интеграции эту таблицу уберём и соберём общий workspace в корне.
+[workspace]
+
+[dependencies]
+jarvis-core = { path = "../jarvis-core" }
+# Та же версия, что у jarvis-memory: libsqlite3-sys — `links`-крейт, в общем workspace версии должны совпасть.
+rusqlite = { version = "0.43", features = ["bundled"] }
+rust-stemmers = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tempfile = "3"

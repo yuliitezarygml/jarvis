@@ -1,0 +1,57 @@
+[package]
+name = "jarvis-sys"
+version = "0.1.0"
+edition = "2024"
+description = "J.A.R.V.I.S.: политика рисков, PowerShell/cmd, файлы с откатом, ресурсы, поиск и открытие"
+
+# Каждый крейт пока собирается отдельно (свой target), чтобы параллельные агенты не блокировали друг друга.
+[workspace]
+
+[features]
+default = []
+# Загрузка GPU через NVML (NVIDIA). Без фичи — счётчики PDH `\GPU Engine(*)\Utilization Percentage`.
+nvml = ["dep:nvml-wrapper"]
+
+[dependencies]
+jarvis-core = { path = "../jarvis-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "process", "time", "sync", "macros", "io-util"] }
+tokio-util = "0.7"
+regex = "1"
+strsim = "0.11"
+sysinfo = "0.37"
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+trash = "5"
+nvml-wrapper = { version = "0.11", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Globalization",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Power",
+    "Win32_System_Performance",
+    "Win32_System_Services",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }

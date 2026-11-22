@@ -1,19 +1,38 @@
 {
+  "data_dir": "data",
   "tts": {
     "url": "https://192.168.50.38:8443",
-    "voice": "jarvis-ru"
-  },
-  "llm": {
-    "provider": "groq",
-    "model": "openai/gpt-oss-120b",
-    "api_key": ""
+    "voice": "jarvis-ru",
+    "ca_path": "src-tauri/config/xeon-tts-ca.pem"
   },
   "stt": {
-    "engine": "",
-    "url": ""
+    "engine": "server",
+    "url": "https://192.168.50.38:8444",
+    "ca_path": "src-tauri/config/xeon-tts-ca.pem"
   },
-  "web_search": {
-    "provider": "",
-    "api_key": ""
-  }
+  "providers": [
+    {
+      "id": "groq",
+      "kind": "openai_compat",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key": "",
+      "enabled": true
+    }
+  ],
+  "roles": {
+    "brain": ["groq/openai/gpt-oss-120b"],
+    "fast": [],
+    "vision": [],
+    "reflection": []
+  },
+  "web_search": [
+    { "id": "duckduckgo", "api_key": "", "extra": "", "enabled": true }
+  ],
+  "autonomy": "ask_dangerous",
+  "run_as_admin": true,
+  "vision_enabled": true,
+  "terminal_autorun": true,
+  "resource_guard": true,
+  "search_roots": ["%USERPROFILE%", "D:\\"],
+  "hud": { "mode": "corner", "corner_x": null, "corner_y": null }
 }

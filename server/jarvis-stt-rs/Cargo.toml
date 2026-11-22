@@ -1,0 +1,42 @@
+[package]
+name = "jarvis-stt-rs"
+version = "0.1.0"
+edition = "2024"
+description = "J.A.R.V.I.S. STT-сервис (русская речь, sherpa-onnx) для сервера Xeon"
+publish = false
+
+# Отдельный крейт со своим target (как jarvis-core и jarvis-tts-rs).
+[workspace]
+
+[features]
+default = []
+# Движок sherpa-onnx (собирается на Linux-сервере). Без него крейт собирается и тестируется на Windows
+# с тестовым движком: протокол, аудио, WAV, ресемплинг, WebSocket-логика.
+sherpa = ["dep:sherpa-onnx"]
+
+[dependencies]
+jarvis-core = { path = "../../crates/jarvis-core" }
+anyhow = "1"
+axum = { version = "0.8", features = ["ws", "json"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Версия совпадает с нативной библиотекой /opt/jarvis-stt-rs/lib (sherpa-onnx-v2.0.2-linux-x64-shared-lib).
+sherpa-onnx = { version = "=2.0.2", default-features = false, features = ["shared"], optional = true }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "json", "stream"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+
+[[bin]]
+name = "stt-bench"
+path = "src/bin/stt-bench.rs"
+required-features = ["sherpa"]
+
+[profile.release]
+debug = "line-tables-only"
