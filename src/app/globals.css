@@ -374,6 +374,53 @@ code,
   gap: 6px;
 }
 
+/* текстовая команда и микрофон */
+.command-bar {
+  width: min(720px, 92vw);
+  display: grid;
+  gap: 6px;
+}
+.command-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.command-input {
+  flex: 1;
+  min-width: 0;
+}
+.command-mic {
+  white-space: nowrap;
+}
+.command-mic .state-dot {
+  background: var(--muted);
+  box-shadow: none;
+}
+.command-mic[data-on='true'] .state-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+}
+.command-mic[data-error='true'] .state-dot {
+  background: var(--amber);
+  box-shadow: 0 0 10px var(--amber);
+}
+.command-warn {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0.4em 0.8em;
+  border: 1px solid rgba(255, 181, 71, 0.6);
+  background: rgba(255, 181, 71, 0.1);
+  color: #ffe2b8;
+}
+.command-error {
+  margin: 0;
+  color: var(--amber);
+  text-align: center;
+}
+
 /* телеметрия */
 .tele {
   display: flex;

@@ -127,6 +127,7 @@ const memory = {
   ],
 };
 let nextId = 100;
+let mockMic = { enabled: false, listening: false, voice_ready: false, error: 'в браузере микрофон не используется' as string | null };
 
 export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Promise<T> {
   const r = (v: unknown) => v as T;
@@ -192,10 +193,26 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
     case 'simulate_event':
       emitEvent(a.event as JarvisEvent);
       return r(null);
+    case 'agent_submit': {
+      const text = String(a.text ?? '').trim();
+      if (!text) throw 'Пустая команда';
+      emitEvent({ type: 'subtitle', speaker: 'user', text, is_final: true });
+      emitEvent({ type: 'subtitle', speaker: 'jarvis', text: 'В браузере я только интерфейс, сэр: запустите приложение.', is_final: true });
+      return r(null);
+    }
+    case 'mic_get':
+      return r(mockMic);
+    case 'mic_set':
+      mockMic = { ...mockMic, enabled: Boolean(a.enabled) };
+      return r(mockMic);
+    case 'assistant_status':
+      return r({ llm_ready: true, llm_problem: null, brain_model: 'mock/demo', mic: mockMic, issues: [], tools: 0, busy: false });
+    case 'provider_apply_best':
+      return r(masked(a.config as Config));
     case 'provider_presets':
       return r([
         { id: 'groq', name: 'Groq', kind: 'openai_compat', base_url: 'https://api.groq.com/openai/v1', key_url: 'https://console.groq.com/keys', needs_key: true, note: 'Быстрые открытые модели' },
-        { id: 'opencode-zen', name: 'OpenCode Zen', kind: 'openai_compat', base_url: 'https://opencode.ai/zen/v1', key_url: 'https://opencode.ai/auth', needs_key: true, note: '' },
+        { id: 'opencode-zen', name: 'OpenCode Zen', kind: 'openai_compat', base_url: 'https://opencode.ai/inference/openai/v1', key_url: 'https://opencode.ai/auth', needs_key: true, note: '' },
         { id: 'openrouter', name: 'OpenRouter', kind: 'openai_compat', base_url: 'https://openrouter.ai/api/v1', key_url: 'https://openrouter.ai/keys', needs_key: true, note: '' },
         { id: 'anthropic', name: 'Anthropic (Claude)', kind: 'anthropic', base_url: 'https://api.anthropic.com/v1', key_url: '', needs_key: true, note: '' },
         { id: 'ollama', name: 'Ollama (локально)', kind: 'openai_compat', base_url: 'http://127.0.0.1:11434/v1', key_url: '', needs_key: false, note: 'Без ключа' },

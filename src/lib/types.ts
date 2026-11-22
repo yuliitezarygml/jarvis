@@ -96,7 +96,7 @@ export interface Config {
   hud: { mode: HudMode; corner_x: number | null; corner_y: number | null };
 }
 
-// ───────────── ответы команд-заглушек (src-tauri/src/demo.rs) ─────────────
+// ───────────── ответы команд экранов (src-tauri/src/api.rs; `demo` всегда false в приложении) ─────────────
 
 export interface ProviderPreset {
   id: string;
@@ -221,6 +221,25 @@ export interface OverlayGeometry {
   width: number;
   height: number;
   scale: number;
+}
+
+/** Микрофон (команды `mic_get` / `mic_set`). */
+export interface MicStatus {
+  enabled: boolean;
+  listening: boolean;
+  voice_ready: boolean;
+  error: string | null;
+}
+
+/** Сводка ядра для HUD (`assistant_status`). */
+export interface AssistantStatus {
+  llm_ready: boolean;
+  llm_problem: string | null;
+  brain_model: string | null;
+  mic: MicStatus;
+  issues: string[];
+  tools: number;
+  busy: boolean;
 }
 
 export interface AppInfo {

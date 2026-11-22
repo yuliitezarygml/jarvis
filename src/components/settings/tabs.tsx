@@ -78,7 +78,8 @@ export function AudioTab() {
     <section className="section">
       <h2 className="section-title">Микрофон и динамики</h2>
       <p className="section-lead">
-        Выбор устройства появится в config.json вместе с аудиомодулем; сейчас Джарвис берёт устройства Windows по умолчанию.
+        Джарвис берёт устройства Windows по умолчанию (отмечены в списке); выбор другого устройства в config.json пока не
+        поддерживается. Микрофон включается и выключается кнопкой в HUD.
         {dev?.demo && ' Список ниже — демо-данные.'}
       </p>
       {error && <p className="status" data-ok="false">{error}</p>}

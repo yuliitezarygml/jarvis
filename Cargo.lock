@@ -2740,13 +2740,25 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 name = "jarvis"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "cpal",
+ "jarvis-agent",
  "jarvis-core",
+ "jarvis-kb",
+ "jarvis-llm",
+ "jarvis-memory",
+ "jarvis-pc",
+ "jarvis-sys",
+ "jarvis-voice",
+ "jarvis-web",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-single-instance",
+ "tempfile",
+ "tokio",
  "windows 0.62.2",
 ]
 

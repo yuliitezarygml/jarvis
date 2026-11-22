@@ -1,5 +1,5 @@
-//! Tauri-команды (вызываются из фронтенда через `invoke`). Имена и сигнатуры — контракт для интегратора;
-//! команды с пометкой «ДЕМО» возвращают мок-данные (`demo: true`) и подлежат замене.
+//! Tauri-команды (вызываются из фронтенда через `invoke`). Все экраны обслуживают настоящие модули через
+//! ядро `runtime::Core`; демо осталось только в симуляторе (dev-панель: `simulate_*`).
 
 use std::sync::{Arc, Mutex};
 
@@ -9,9 +9,10 @@ use jarvis_core::{AssistantState, CancellationToken, Config, Event, EventSink};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::api;
 use crate::config_store::{self, ConfigStore};
-use crate::demo;
 use crate::hooks::AppHooks;
+use crate::runtime::{Core, MicStatus, services};
 use crate::simulator;
 use crate::sink::{EMERGENCY_EVENT, TauriSink};
 use crate::windows_manager::{self, OverlayGeometry, WindowsState};
@@ -67,9 +68,13 @@ pub fn config_get(store: State<'_, ConfigStore>) -> Config {
 }
 
 /// Сохранить конфиг из UI. Маска вместо ключа = «не менять». Возвращает сохранённое (замаскированным).
+/// Модели и провайдеры, автономия, зрение, поиск, серверы голоса и resource guard применяются сразу
+/// (`Core::apply_config`); папка данных и папки поиска — после перезапуска (об этом сообщение в HUD).
 #[tauri::command]
-pub fn config_set(store: State<'_, ConfigStore>, config: Config) -> CmdResult<Config> {
-    store.set_from_ui(config).map(|c| config_store::masked(&c))
+pub fn config_set(store: State<'_, ConfigStore>, core: State<'_, CoreState>, config: Config) -> CmdResult<Config> {
+    let saved = store.set_from_ui(config)?;
+    core.0.apply_config(&saved);
+    Ok(config_store::masked(&saved))
 }
 
 #[tauri::command]
@@ -123,7 +128,10 @@ pub fn resolve_confirm(app: &AppHandle, id: &str, approved: bool) -> bool {
         return false;
     }
     app.state::<AppHooks>().confirm(id, approved);
-    sink.emit(Event::ConfirmResolved { id: id.to_string(), approved });
+    // Настоящий бэкенд (ConfirmGate) сам шлёт ConfirmResolved; заглушка — нет, тогда закрываем здесь.
+    if sink.cache().lock().unwrap().pending_confirm_id().as_deref() == Some(id) {
+        sink.emit(Event::ConfirmResolved { id: id.to_string(), approved });
+    }
     true
 }
 
@@ -191,73 +199,180 @@ pub fn simulate_event(sink: State<'_, SinkState>, event: Event) {
     sink.0.emit(event);
 }
 
-// ───────────────────────────── ДЕМО: провайдеры, серверы, поиск, аудио ─────────────────────────────
+// ───────────────────────────── ядро: команды, микрофон, статус ─────────────────────────────
 
+/// Ядро-оркестратор в состоянии Tauri.
+pub struct CoreState(pub Arc<Core>);
+
+/// Текстовая команда из HUD («Сказать Джарвису…») — то же, что голосом после «Джарвис, …».
 #[tauri::command]
-pub fn provider_presets() -> Vec<demo::ProviderPreset> {
-    demo::provider_presets()
+pub fn agent_submit(core: State<'_, CoreState>, text: String) -> CmdResult<()> {
+    core.0.submit(&text, false)
 }
 
-/// ДЕМО. Проверка ключа и список моделей с ранжировкой по ролям. `api_key` может быть маской сохранённого ключа.
 #[tauri::command]
-pub fn provider_check(store: State<'_, ConfigStore>, provider_id: String, base_url: String, api_key: String) -> demo::ProviderCheck {
+pub fn mic_get(core: State<'_, CoreState>) -> MicStatus {
+    core.0.mic_status()
+}
+
+/// Включить/выключить прослушивание микрофона (кнопка в HUD). Открытие устройства может занять секунды.
+#[tauri::command]
+pub async fn mic_set(core: State<'_, CoreState>, enabled: bool) -> CmdResult<MicStatus> {
+    let core = core.0.clone();
+    tauri::async_runtime::spawn_blocking(move || core.set_mic(enabled)).await.map_err(err)
+}
+
+/// Сводка для HUD: готова ли модель, микрофон, что не открылось при старте.
+#[derive(Serialize)]
+pub struct AssistantStatus {
+    pub llm_ready: bool,
+    /// «Нет ключа LLM — добавьте его в Настройках…», если модель «мозг» недоступна.
+    pub llm_problem: Option<String>,
+    pub brain_model: Option<String>,
+    pub mic: MicStatus,
+    pub issues: Vec<String>,
+    pub tools: usize,
+    pub busy: bool,
+}
+
+#[tauri::command]
+pub fn assistant_status(core: State<'_, CoreState>) -> AssistantStatus {
+    let c = &core.0;
+    let problem = c.models.brain.problem();
+    AssistantStatus {
+        llm_ready: problem.is_none(),
+        brain_model: c.models.brain.current().map(|m| m.id()),
+        llm_problem: problem,
+        mic: c.mic_status(),
+        issues: c.issues.iter().map(|i| i.message.clone()).collect(),
+        tools: c.agent.tools().len(),
+        busy: c.is_busy(),
+    }
+}
+
+// ───────────────────────────── провайдеры, серверы, поиск, аудио ─────────────────────────────
+
+#[tauri::command]
+pub fn provider_presets(core: State<'_, CoreState>) -> Vec<api::ProviderPreset> {
+    services::provider_presets(&core.0)
+}
+
+/// Проверка ключа, список моделей, живая проверка и рейтинг по ролям (jarvis-llm `check_provider`).
+/// `api_key` может быть маской сохранённого ключа.
+#[tauri::command]
+pub async fn provider_check(
+    store: State<'_, ConfigStore>,
+    core: State<'_, CoreState>,
+    provider_id: String,
+    base_url: String,
+    api_key: String,
+) -> CmdResult<api::ProviderCheck> {
     let key = config_store::resolve_key(&store.get(), &provider_id, &api_key);
-    let needs_key = demo::provider_presets().iter().find(|p| p.id == provider_id).is_none_or(|p| p.needs_key);
-    demo::provider_check(&provider_id, &base_url, &key, needs_key)
+    // Будущее проверки из jarvis-llm не доказывается как `Send` (ограничение rustc на замыканиях с dyn-трейтами),
+    // поэтому оно выполняется через `block_on` в блокирующем потоке рантайма.
+    let core = core.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::block_on(services::provider_check(&core, &provider_id, &base_url, key))
+    })
+    .await
+    .map_err(err)
 }
 
-/// ДЕМО. `kind`: `tts` | `stt`.
+/// «Выбрать лучшее автоматически» (jarvis-llm `apply_best`) по последним проверкам: цепочки ролей
+/// записываются в черновик из UI, он сохраняется в config.json и применяется без перезапуска.
 #[tauri::command]
-pub fn voice_check(kind: String, url: String) -> demo::ServiceCheck {
-    demo::voice_check(&kind, &url)
+pub fn provider_apply_best(
+    store: State<'_, ConfigStore>,
+    core: State<'_, CoreState>,
+    config: Config,
+    provider_ids: Option<Vec<String>>,
+) -> CmdResult<Config> {
+    let mut merged = config_store::merge_from_ui(&store.get(), config);
+    services::apply_best(&core.0, &mut merged, provider_ids.as_deref())?;
+    let saved = store.update(|c| *c = merged)?;
+    core.0.apply_config(&saved);
+    Ok(config_store::masked(&saved))
+}
+
+/// `kind`: `tts` (`GET /ready`) | `stt` (`GET /health`).
+#[tauri::command]
+pub async fn voice_check(core: State<'_, CoreState>, kind: String, url: String) -> CmdResult<api::ServiceCheck> {
+    let c = &core.0;
+    Ok(services::voice_check(&c.config(), &c.root, &kind, &url).await)
 }
 
 #[tauri::command]
-pub fn search_presets() -> Vec<demo::SearchPreset> {
-    demo::search_presets()
+pub fn search_presets() -> Vec<api::SearchPreset> {
+    services::search_presets()
 }
 
-/// ДЕМО. Тестовый поисковый запрос.
+/// Тестовый поисковый запрос (jarvis-web `validate_config`).
 #[tauri::command]
-pub fn search_check(store: State<'_, ConfigStore>, id: String, api_key: String, extra: String) -> demo::ServiceCheck {
+pub async fn search_check(store: State<'_, ConfigStore>, id: String, api_key: String, extra: String) -> CmdResult<api::ServiceCheck> {
     let key = config_store::resolve_search_key(&store.get(), &id, &api_key);
-    demo::search_check(&id, &key, &extra)
+    Ok(services::search_check(&id, key, &extra).await)
 }
 
-/// ДЕМО. Список микрофонов и устройств вывода.
+/// Микрофоны и устройства вывода (только имена; устройства не открываются).
 #[tauri::command]
-pub fn audio_devices() -> demo::AudioDevices {
-    demo::audio_devices()
+pub async fn audio_devices() -> CmdResult<api::AudioDevices> {
+    tauri::async_runtime::spawn_blocking(services::audio_devices).await.map_err(err)?
 }
 
-// ───────────────────────────── ДЕМО: память, KB, история ─────────────────────────────
+// ───────────────────────────── память, KB, история ─────────────────────────────
 
-#[tauri::command]
-pub fn memory_list(mem: State<'_, demo::MemoryStore>) -> demo::MemoryData {
-    mem.list()
+fn memory_of(core: &Core) -> CmdResult<jarvis_memory::Memory> {
+    core.memory.clone().ok_or_else(|| {
+        core.issues
+            .iter()
+            .find(|i| i.module == "memory")
+            .map(|i| i.message.clone())
+            .unwrap_or_else(|| "Память не открыта".into())
+    })
 }
 
-/// ДЕМО. `kind`: `facts` | `lessons` | `playbooks`; `item` с пустым `id` — новая запись.
-#[tauri::command]
-pub fn memory_upsert(mem: State<'_, demo::MemoryStore>, kind: String, item: serde_json::Value) -> CmdResult<demo::MemoryData> {
-    mem.upsert(&kind, item)
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
 }
 
 #[tauri::command]
-pub fn memory_delete(mem: State<'_, demo::MemoryStore>, kind: String, id: String) -> CmdResult<demo::MemoryData> {
-    mem.delete(&kind, &id)
+pub async fn memory_list(core: State<'_, CoreState>) -> CmdResult<api::MemoryData> {
+    let mem = memory_of(&core.0)?;
+    blocking(move || services::memory_list(&mem)).await
 }
 
-/// ДЕМО. Поиск по базе знаний Windows.
+/// `kind`: `facts` | `lessons` | `playbooks`; `item` с пустым `id` — новая запись.
 #[tauri::command]
-pub fn kb_search(query: String) -> demo::KbResult {
-    demo::kb_search(&query)
+pub async fn memory_upsert(core: State<'_, CoreState>, kind: String, item: serde_json::Value) -> CmdResult<api::MemoryData> {
+    let mem = memory_of(&core.0)?;
+    blocking(move || services::memory_upsert(&mem, &kind, item)).await
 }
 
-/// ДЕМО. История диалогов.
 #[tauri::command]
-pub fn history_list() -> demo::HistoryResult {
-    demo::history()
+pub async fn memory_delete(core: State<'_, CoreState>, kind: String, id: String) -> CmdResult<api::MemoryData> {
+    let mem = memory_of(&core.0)?;
+    blocking(move || services::memory_delete(&mem, &kind, &id)).await
+}
+
+/// Поиск по базе знаний Windows (`data/kb.sqlite`).
+#[tauri::command]
+pub async fn kb_search(core: State<'_, CoreState>, query: String) -> CmdResult<api::KbResult> {
+    let kb = core.0.kb.clone().ok_or_else(|| {
+        core.0
+            .issues
+            .iter()
+            .find(|i| i.module == "kb")
+            .map(|i| i.message.clone())
+            .unwrap_or_else(|| "База знаний не открыта".into())
+    })?;
+    blocking(move || services::kb_search(&kb, &query)).await
+}
+
+/// История диалогов (сеансы и реплики памяти).
+#[tauri::command]
+pub async fn history_list(core: State<'_, CoreState>) -> CmdResult<api::HistoryResult> {
+    let mem = memory_of(&core.0)?;
+    blocking(move || services::history_list(&mem)).await
 }
 
 /// Сведения для экрана «Окна»/«Разрешения».

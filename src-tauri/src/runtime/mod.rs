@@ -53,11 +53,13 @@ pub struct CoreOptions {
     pub brain_override: Option<Arc<dyn ChatModel>>,
     /// Таймаут подтверждения T3.
     pub confirm_timeout: Duration,
+    /// Другая база знаний вместо `{data_dir}/kb.sqlite` (тесты на настоящей базе без чужой памяти).
+    pub kb_path: Option<PathBuf>,
 }
 
 impl CoreOptions {
     pub fn app(root: PathBuf) -> Self {
-        Self { root, voice: true, telemetry: true, reflect: true, brain_override: None, confirm_timeout: CONFIRM_TIMEOUT }
+        Self { root, voice: true, telemetry: true, reflect: true, brain_override: None, confirm_timeout: CONFIRM_TIMEOUT, kb_path: None }
     }
 
     pub fn headless(root: PathBuf) -> Self {
@@ -141,7 +143,11 @@ impl Core {
             }
         };
         let session = memory.as_ref().and_then(|m| m.start_session(Some("Сеанс J.A.R.V.I.S.")).ok());
-        let kb = match Kb::open_in_data_dir(&root, &cfg) {
+        let kb_opened = match &opts.kb_path {
+            Some(p) => Kb::open(p),
+            None => Kb::open_in_data_dir(&root, &cfg),
+        };
+        let kb = match kb_opened {
             Ok(k) => Some(Arc::new(k)),
             Err(e) => {
                 issues.push(ModuleIssue { module: "kb", message: format!("База знаний недоступна: {e}") });

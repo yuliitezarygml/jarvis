@@ -95,7 +95,16 @@ export default function SettingsPage() {
         <p className="muted">{status?.text ?? 'Загружаю настройки…'}</p>
       ) : (
         <div role="tabpanel">
-          {tab === 'providers' && <ProvidersTab draft={draft} update={update} />}
+          {tab === 'providers' && (
+            <ProvidersTab
+              draft={draft}
+              update={update}
+              onSaved={(c) => {
+                setSaved(c);
+                setDraft(c);
+              }}
+            />
+          )}
           {tab === 'voice' && <VoiceTab draft={draft} update={update} />}
           {tab === 'audio' && <AudioTab />}
           {tab === 'permissions' && <PermissionsTab draft={draft} update={update} />}

@@ -217,7 +217,8 @@ impl MemoryHooks for MemoryBridge {
         let mem = self.mem.clone();
         self.handle.spawn(async move {
             let cancel = CancellationToken::new();
-            let run = Reflector::new(model).reflect_and_apply(&mem, &task, cancel.clone());
+            let reflector = Reflector::new(model);
+            let run = reflector.reflect_and_apply(&mem, &task, cancel.clone());
             match tokio::time::timeout(Duration::from_secs(90), run).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => eprintln!("[jarvis] рефлектор: {e}"),

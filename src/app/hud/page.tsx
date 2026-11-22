@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import DevPanel from '@/components/DevPanel';
 import ActionFeed from '@/components/hud/ActionFeed';
+import CommandBar from '@/components/hud/CommandBar';
 import ConfirmDialog from '@/components/hud/ConfirmDialog';
 import ErrorToast from '@/components/hud/ErrorToast';
 import HudBackground from '@/components/hud/HudBackground';
@@ -88,6 +89,7 @@ export default function HudPage() {
       <footer className="hud-bottom">
         <Subtitles />
         <Waveform />
+        <CommandBar />
       </footer>
 
       <ErrorToast />

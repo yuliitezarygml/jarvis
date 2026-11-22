@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { call, errorText } from '@/lib/bridge';
 import { fmtCtx, fmtLatency, fmtNumber } from '@/lib/format';
 import { ROLE_LABEL, ROLE_NAMES, addProvider, addToChain, applyRanking, moveItem, removeFromChain, removeProvider } from '@/lib/settings';
-import type { ProviderCheck, ProviderPreset, RoleName } from '@/lib/types';
+import type { Config, ProviderCheck, ProviderPreset, RoleName, RoleRanking } from '@/lib/types';
 
 import { Field, KeyField, type TabProps } from './common';
 
@@ -81,7 +81,7 @@ function ModelTable({ providerId, check, onAdd }: { providerId: string; check: P
 }
 
 /** Провайдеры LLM: ключи, проверка, таблица моделей с метками и назначение цепочек по ролям. */
-export default function ProvidersTab({ draft, update }: TabProps) {
+export default function ProvidersTab({ draft, update, onSaved }: TabProps & { onSaved?: (c: Config) => void }) {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [checks, setChecks] = useState<Record<string, ProviderCheck | 'loading' | { error: string }>>({});
   const [addId, setAddId] = useState('');
@@ -113,6 +113,21 @@ export default function ProvidersTab({ draft, update }: TabProps) {
   };
 
   const allRanking = Object.values(checks).flatMap((c) => (c && typeof c === 'object' && 'ranking' in c ? c.ranking : []));
+  const [bestMsg, setBestMsg] = useState<string | null>(null);
+
+  /** «Выбрать лучшее автоматически»: рейтинг jarvis-llm (`apply_best`) записывается в config.json и применяется сразу. */
+  const applyBest = async (providerIds: string[] | null, ranking: RoleRanking[]) => {
+    try {
+      const saved = await call<Config>('provider_apply_best', { config: draft, providerIds });
+      if (onSaved) onSaved(saved);
+      else update(() => saved);
+      setBestMsg('Лучшие модели выбраны и сохранены — Джарвис уже использует их');
+    } catch (e) {
+      // нет результатов проверки на стороне ядра — подставляем рейтинг в черновик, сохранит кнопка «Сохранить»
+      update((cfg) => ({ ...cfg, roles: applyRanking(cfg.roles, ranking) }));
+      setBestMsg(`${errorText(e)}. Рейтинг подставлен в черновик — нажмите «Сохранить».`);
+    }
+  };
 
   return (
     <>
@@ -159,7 +174,7 @@ export default function ProvidersTab({ draft, update }: TabProps) {
                   {c === 'loading' ? 'Проверяю…' : 'Проверить'}
                 </button>
                 {c && typeof c === 'object' && 'ranking' in c && c.ranking.length > 0 && (
-                  <button type="button" className="btn" onClick={() => update((cfg) => ({ ...cfg, roles: applyRanking(cfg.roles, c.ranking) }))}>
+                  <button type="button" className="btn" onClick={() => void applyBest([p.id], c.ranking)}>
                     Выбрать лучшее автоматически
                   </button>
                 )}
@@ -251,10 +266,11 @@ export default function ProvidersTab({ draft, update }: TabProps) {
           Цепочка — порядок перехода при сбоях: если первая модель не ответила (лимит, ошибка сервера), Джарвис берёт следующую.
         </p>
         {allRanking.length > 0 && (
-          <button type="button" className="btn" onClick={() => update((cfg) => ({ ...cfg, roles: applyRanking(cfg.roles, allRanking) }))}>
+          <button type="button" className="btn" onClick={() => void applyBest(null, allRanking)}>
             Выбрать лучшее автоматически по всем проверкам
           </button>
         )}
+        {bestMsg && <p className="status small">{bestMsg}</p>}
         <datalist id="known-models">
           {knownModels.map((m) => (
             <option key={m} value={m} />
