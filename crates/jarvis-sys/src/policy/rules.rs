@@ -840,7 +840,7 @@ impl Cx<'_> {
             "schtasks" => self.rule_schtasks(inv),
             "register-scheduledtask" => self.rule_register_task(inv),
             "unregister-scheduledtask" | "set-scheduledtask" => self.acc.raise(T3, format!("{n}: изменение задач планировщика")),
-            "start-scheduledtask" | "stop-scheduledtask" => self.acc.raise(T2, format!("{n}")),
+            "start-scheduledtask" | "stop-scheduledtask" => self.acc.raise(T2, n.to_string()),
             "enable-scheduledtask" | "disable-scheduledtask" => {
                 if a.iter().any(|x| x.low.contains("\\microsoft\\") || x.low.contains("microsoft")) {
                     self.acc.raise(T3, "изменение системной задачи планировщика");

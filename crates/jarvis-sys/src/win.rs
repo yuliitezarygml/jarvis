@@ -82,7 +82,7 @@ impl JobObject {
         Ok(job)
     }
 
-    pub fn assign(&self, process: HANDLE) -> io::Result<()> {
+    pub(crate) fn assign(&self, process: HANDLE) -> io::Result<()> {
         // SAFETY: дескрипторы валидны
         if unsafe { windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(self.0.0, process) } == 0 {
             return Err(last_err());
@@ -294,7 +294,7 @@ pub fn enum_windows() -> Vec<WindowInfo> {
         // SAFETY: lparam — указатель на наш Vec
         let out = unsafe { &mut *(lparam as *mut Vec<(HWND, String, u32)>) };
         unsafe {
-            if IsWindowVisible(hwnd) == 0 || GetWindow(hwnd, GW_OWNER) != null_mut() {
+            if IsWindowVisible(hwnd) == 0 || !GetWindow(hwnd, GW_OWNER).is_null() {
                 return 1;
             }
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
@@ -553,7 +553,7 @@ impl GpuCounter {
             let mut size = 0u32;
             let mut count = 0u32;
             let r = PdhGetFormattedCounterArrayW(self.counter as _, PDH_FMT_DOUBLE, &mut size, &mut count, null_mut());
-            if r != PDH_MORE_DATA as u32 || size == 0 {
+            if r != PDH_MORE_DATA || size == 0 {
                 return None;
             }
             let mut buf = vec![0u8; size as usize];

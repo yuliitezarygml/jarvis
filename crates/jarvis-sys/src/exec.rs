@@ -78,6 +78,17 @@ async fn pump(mut r: impl tokio::io::AsyncRead + Unpin, buf: Arc<Mutex<Buf>>, ca
 
 /// Запустить программу в собственном объекте задания.
 pub async fn run_program(program: &str, args: Args<'_>, opts: &RunOptions, cancel: &CancellationToken) -> io::Result<RunResult> {
+    run_program_env(program, args, opts, cancel, &[]).await
+}
+
+/// То же с дополнительными переменными окружения.
+pub async fn run_program_env(
+    program: &str,
+    args: Args<'_>,
+    opts: &RunOptions,
+    cancel: &CancellationToken,
+    env: &[(&str, &str)],
+) -> io::Result<RunResult> {
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
 
@@ -93,6 +104,9 @@ pub async fn run_program(program: &str, args: Args<'_>, opts: &RunOptions, cance
     if let Some(cwd) = &opts.cwd {
         cmd.current_dir(cwd);
     }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // CREATE_SUSPENDED: успеваем поместить процесс в задание до того, как он запустит потомков
     cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
@@ -103,11 +117,11 @@ pub async fn run_program(program: &str, args: Args<'_>, opts: &RunOptions, cance
     let job = JobObject::new()?;
     let mut child = cmd.spawn()?;
     let pid = child.id().unwrap_or(0);
-    if let Some(h) = child.raw_handle() {
-        if let Err(e) = job.assign(h as _) {
-            let _ = child.start_kill();
-            return Err(e);
-        }
+    if let Some(h) = child.raw_handle()
+        && let Err(e) = job.assign(h as _)
+    {
+        let _ = child.start_kill();
+        return Err(e);
     }
     if let Err(e) = win::resume_process(pid) {
         job.terminate();
@@ -169,9 +183,12 @@ pub async fn run_powershell(script: &str, opts: &RunOptions, cancel: &Cancellati
     run_program("powershell.exe", Args::List(&args), opts, cancel).await
 }
 
+/// cmd.exe кэширует кодовую страницу при старте, поэтому `chcp 65001` действует только на cmd, запущенный
+/// после него. Команду передаём через переменную окружения и отложенное раскрытие `!JARVIS_CMD!`:
+/// оно происходит после разбора `&`/`|` внешним cmd, так что команда целиком уходит внутреннему cmd.
 pub async fn run_cmd(command: &str, opts: &RunOptions, cancel: &CancellationToken) -> io::Result<RunResult> {
-    let raw = format!("/D /S /C \"chcp 65001>nul & {command}\"");
-    run_program("cmd.exe", Args::Raw(&raw), opts, cancel).await
+    let raw = "/D /V:ON /S /C \"chcp 65001>nul & cmd.exe /D /S /C !JARVIS_CMD!\"";
+    run_program_env("cmd.exe", Args::Raw(raw), opts, cancel, &[("JARVIS_CMD", command)]).await
 }
 
 /// Ответ инструмента: код возврата, stdout, stderr (обрезанные и без секретов).
@@ -321,6 +338,9 @@ mod tests {
         let r = run_cmd("echo привет & exit /b 2", &RunOptions::default(), &CancellationToken::new()).await.unwrap();
         assert_eq!(r.exit_code, Some(2));
         assert!(r.stdout.contains("привет"), "{r:?}");
+        // кавычки и & внутри кавычек не разваливают команду
+        let r = run_cmd("echo \"a & b\" & echo c", &RunOptions::default(), &CancellationToken::new()).await.unwrap();
+        assert!(r.stdout.contains("\"a & b\"") && r.stdout.contains('c'), "{r:?}");
     }
 
     fn alive(pid: u32) -> bool {

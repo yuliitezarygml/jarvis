@@ -407,10 +407,10 @@ pub fn resolve(src: &dyn TargetSources, name: &str) -> Vec<Candidate> {
         }
     }
     // 7. поиск файла — только если ничего хорошего
-    if out.iter().all(|c| c.score < 0.7) && !q.settings_hint {
+    if out.iter().all(|c| c.score < 0.85) && !q.settings_hint {
         for path in src.find_files(&q.text) {
             let title = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let s = 0.6 + 0.1 * sim(&q.text, path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default().as_str());
+            let s = 0.55 + 0.35 * sim(&q.text, path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default().as_str());
             push(&mut out, title, TargetKind::File { path }, s, "file", 7);
         }
     }

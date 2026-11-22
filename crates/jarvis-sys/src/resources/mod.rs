@@ -82,7 +82,7 @@ pub fn networks() -> Vec<NetInfo> {
             tx_total: d.total_transmitted(),
         })
         .collect();
-    v.sort_by(|a, b| (b.rx_total + b.tx_total).cmp(&(a.rx_total + a.tx_total)));
+    v.sort_by_key(|n| std::cmp::Reverse(n.rx_total + n.tx_total));
     v
 }
 
@@ -231,7 +231,7 @@ pub fn sort_procs(v: &mut [ProcInfo], by: &str) {
         "cpu" => v.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal)),
         "name" => v.sort_by_key(|a| a.name.to_lowercase()),
         "pid" => v.sort_by_key(|a| a.pid),
-        _ => v.sort_by(|a, b| b.memory.cmp(&a.memory)),
+        _ => v.sort_by_key(|a| std::cmp::Reverse(a.memory)),
     }
 }
 

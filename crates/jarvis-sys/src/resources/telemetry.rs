@@ -73,8 +73,11 @@ mod tests {
     fn emits_telemetry() {
         let sink = Arc::new(CollectSink::default());
         let cancel = CancellationToken::new();
-        let h = spawn_telemetry(sink.clone(), Duration::from_millis(250), None, cancel.clone());
-        std::thread::sleep(Duration::from_millis(900));
+        let h = spawn_telemetry(sink.clone(), Duration::from_millis(200), None, cancel.clone());
+        let t = Instant::now();
+        while sink.0.lock().unwrap().len() < 2 && t.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
         cancel.cancel();
         h.join().unwrap();
         let ev = sink.take();

@@ -333,10 +333,10 @@ mod tests {
         std::fs::write(keep.join("k.tmp"), "k").unwrap();
         std::fs::File::options().write(true).open(keep.join("k.tmp")).unwrap().set_modified(past).unwrap();
 
-        let dry = cleanup_dir(t.path(), Duration::from_secs(86400), true, &[keep.clone()]);
+        let dry = cleanup_dir(t.path(), Duration::from_secs(86400), true, std::slice::from_ref(&keep));
         assert_eq!((dry.files, dry.bytes), (1, 1000));
         assert!(old.exists());
-        let real = cleanup_dir(t.path(), Duration::from_secs(86400), false, &[keep.clone()]);
+        let real = cleanup_dir(t.path(), Duration::from_secs(86400), false, std::slice::from_ref(&keep));
         assert_eq!(real.files, 1);
         assert!(!old.exists() && sub.join("new.tmp").exists() && keep.join("k.tmp").exists());
     }

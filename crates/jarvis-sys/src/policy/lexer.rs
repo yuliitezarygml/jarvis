@@ -697,10 +697,10 @@ impl<'a> CmdLexer<'a> {
                     self.i += 1;
                 }
                 '^' => {
-                    if let Some(n) = self.peek(1) {
-                        if n != '\n' {
-                            text.push(n);
-                        }
+                    if let Some(n) = self.peek(1)
+                        && n != '\n'
+                    {
+                        text.push(n);
                     }
                     self.i += 2;
                 }

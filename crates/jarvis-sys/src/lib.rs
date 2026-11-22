@@ -114,4 +114,23 @@ mod tests {
             assert!(!s.description.is_empty());
         }
     }
+
+    #[tokio::test]
+    async fn powershell_run_tool_end_to_end() {
+        use jarvis_core::{RiskTier, ToolCtx, ToolError};
+        use serde_json::json;
+        let t = tempfile::tempdir().unwrap();
+        let sys = Sys::new(SysConfig::for_tests(t.path()));
+        let ps = exec::ShellRun::new(sys.clone(), Shell::PowerShell);
+        use jarvis_core::Tool;
+        assert_eq!(ps.tier_for(&json!({"command": "Get-Date"})), RiskTier::T0);
+        assert_eq!(ps.tier_for(&json!({"command": "Remove-Item C:\\Windows\\x -Recurse"})), RiskTier::T3);
+        assert!(sys.classify_call("powershell_run", &json!({"command": "Remove-Item C:\\Windows\\x"})).unwrap().protected_path);
+        let out = ps.call(json!({"command": "Get-Date"}), &ToolCtx::for_tests()).await.unwrap();
+        assert!(out.untrusted && out.content.starts_with("код возврата: 0"), "{}", out.content);
+        let out = ps.call(json!({"command": "exit 5"}), &ToolCtx::for_tests()).await.unwrap();
+        assert!(out.content.starts_with("код возврата: 5"));
+        let e = ps.call(json!({"command": "Start-Sleep 5", "timeout_sec": 1}), &ToolCtx::for_tests()).await.unwrap_err();
+        assert_eq!(e, ToolError::Timeout);
+    }
 }

@@ -231,8 +231,7 @@ fn run(sys: &Sys, op: FileOp, tool: &str, args: &Value) -> Result<ToolOutput, To
                 std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| io_err("не удалось создать папку", &dir, e))?;
                 actions.push(UndoAction::Created { path: dir });
             }
-            let what;
-            if op == FileOp::Move {
+            let what = if op == FileOp::Move {
                 std::fs::rename(&from, &to)
                     .or_else(|e| {
                         if from.is_file() {
@@ -244,7 +243,7 @@ fn run(sys: &Sys, op: FileOp, tool: &str, args: &Value) -> Result<ToolOutput, To
                     })
                     .map_err(|e| io_err("не удалось перенести", &from, e))?;
                 actions.push(UndoAction::Moved { from: from.clone(), to: to.clone() });
-                what = "Перенесено";
+                "Перенесено"
             } else {
                 let existed = actions.iter().any(|a| matches!(a, UndoAction::Backup { .. }));
                 if from.is_dir() {
@@ -255,8 +254,8 @@ fn run(sys: &Sys, op: FileOp, tool: &str, args: &Value) -> Result<ToolOutput, To
                 if !existed {
                     actions.push(UndoAction::Created { path: to.clone() });
                 }
-                what = "Скопировано";
-            }
+                "Скопировано"
+            };
             let id = sys
                 .undo
                 .record(tool, &format!("{what}: {} → {}", from.display(), to.display()), actions)
