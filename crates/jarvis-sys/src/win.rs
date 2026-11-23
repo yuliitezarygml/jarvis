@@ -344,10 +344,15 @@ pub fn focus_window(hwnd: isize) -> bool {
 
 pub fn shell_execute(file: &str, params: Option<&str>, verb: &str) -> io::Result<()> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, SW_SHOWNORMAL};
     let f = wide(file);
     let v = wide(verb);
     let p = params.map(wide);
+    // Windows не даёт процессу из фона выводить новое окно вперёд — браузер «открылся», но где-то сзади.
+    // Разрешаем любому процессу (запускаемой программе) забрать передний план.
+    const ASFW_ANY: u32 = u32::MAX;
+    // SAFETY: системный вызов без указателей.
+    unsafe { AllowSetForegroundWindow(ASFW_ANY) };
     // SAFETY: строки нуль-терминированы и живут во время вызова
     let r = unsafe {
         ShellExecuteW(null_mut(), v.as_ptr(), f.as_ptr(), p.as_ref().map_or(null(), |p| p.as_ptr()), null(), SW_SHOWNORMAL)

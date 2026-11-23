@@ -41,6 +41,43 @@ impl SearchProvider for DuckDuckGo {
     }
 
     async fn search(&self, query: &str, n: usize) -> Result<Vec<SearchHit>, SearchError> {
+        match self.search_html(query, n).await {
+            // HTML-версия показала капчу (частые запросы с одного IP) или сменила разметку —
+            // облегчённая версия обычно ещё отвечает.
+            Err(e @ (SearchError::Blocked | SearchError::BadResponse(_))) if self.base_url == DEFAULT_BASE => {
+                tracing::info!(error = %e, "DuckDuckGo HTML недоступен — пробую Lite");
+                self.search_lite(query, n).await.map_err(|_| e)
+            }
+            other => other,
+        }
+    }
+}
+
+impl DuckDuckGo {
+    async fn search_lite(&self, query: &str, n: usize) -> Result<Vec<SearchHit>, SearchError> {
+        let mut resp = self
+            .client
+            .post(LITE_URL)
+            .header(reqwest::header::USER_AGENT, BROWSER_USER_AGENT)
+            .header(reqwest::header::REFERER, "https://lite.duckduckgo.com/")
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .form(&[("q", query), ("kl", self.region.as_str())])
+            .send()
+            .await
+            .map_err(SearchError::from_reqwest)?;
+        let status = resp.status();
+        let (body, _) = crate::http::read_limited(&mut resp, 2 * 1024 * 1024)
+            .await
+            .map_err(SearchError::from_reqwest)?;
+        let html = String::from_utf8_lossy(&body);
+        if !status.is_success() && status.as_u16() != 202 {
+            return Err(SearchError::from_status(status.as_u16(), &html));
+        }
+        parse_lite_results(&html, n)
+    }
+
+    async fn search_html(&self, query: &str, n: usize) -> Result<Vec<SearchHit>, SearchError> {
         let url = format!("{}/html/", self.base_url.trim_end_matches('/'));
         let mut resp = self
             .client
@@ -66,6 +103,39 @@ impl SearchProvider for DuckDuckGo {
         }
         parse_results(&html, n)
     }
+}
+
+/// Облегчённая выдача DuckDuckGo (запасной путь, если HTML-версия показала капчу).
+pub const LITE_URL: &str = "https://lite.duckduckgo.com/lite/";
+
+/// Разобрать Lite-выдачу: ссылки `a.result-link` (прямые) и сниппеты `td.result-snippet` в том же порядке.
+pub fn parse_lite_results(html: &str, n: usize) -> Result<Vec<SearchHit>, SearchError> {
+    let doc = Document::from(html);
+    if doc.select(".anomaly-modal__modal, #challenge-form").exists() {
+        return Err(SearchError::Blocked);
+    }
+    let snippets: Vec<String> = doc.select("td.result-snippet").iter().map(|s| s.text().to_string()).collect();
+    let mut hits: Vec<SearchHit> = Vec::new();
+    for (i, link) in doc.select("a.result-link").iter().enumerate() {
+        let Some(href) = link.attr("href") else { continue };
+        let Some(url) = decode_href(&href) else { continue };
+        if is_ad_url(&url) {
+            continue;
+        }
+        let snippet = snippets.get(i).map(String::as_str).unwrap_or("");
+        if let Some(hit) = SearchHit::cleaned(&link.text(), &url, snippet)
+            && !hits.iter().any(|h| h.url == hit.url)
+        {
+            hits.push(hit);
+        }
+        if hits.len() >= n {
+            break;
+        }
+    }
+    if hits.is_empty() && !html.contains("result-link") && !html.contains("No results") {
+        return Err(SearchError::BadResponse("не похоже на страницу выдачи DuckDuckGo Lite".into()));
+    }
+    Ok(hits)
 }
 
 /// Разобрать страницу выдачи. Капча (`anomaly-modal`, HTTP 202) → [`SearchError::Blocked`].
@@ -146,6 +216,22 @@ fn is_ad_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_lite_results() {
+        let html = r#"<table>
+            <tr><td><a rel="nofollow" href="https://www.gismeteo.ru/weather-balti-4976/" class='result-link'>Погода в Бельцах</a></td></tr>
+            <tr><td class='result-snippet'>Прогноз на сегодня: +1 °C, мокрый снег</td></tr>
+            <tr><td><a rel="nofollow" href="https://yandex.ru/pogoda/ru/beltsi" class='result-link'>Яндекс Погода</a></td></tr>
+            <tr><td class='result-snippet'>Погода в Бельцах, Молдова</td></tr>
+        </table>"#;
+        let hits = parse_lite_results(html, 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].url, "https://www.gismeteo.ru/weather-balti-4976/");
+        assert!(hits[0].snippet.contains("мокрый снег"));
+        let blocked = r#"<div class="anomaly-modal__modal">bots</div>"#;
+        assert!(matches!(parse_lite_results(blocked, 5), Err(SearchError::Blocked)));
+    }
 
     #[test]
     fn decodes_uddg_redirects() {

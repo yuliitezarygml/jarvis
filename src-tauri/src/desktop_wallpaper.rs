@@ -198,18 +198,6 @@ mod input {
             );
             // SAFETY: системные вызовы; PostMessage не блокирует (перехватчик должен отвечать быстро).
             unsafe {
-                if msg == WM_LBUTTONDOWN {
-                    let under = WindowFromPoint(info.pt);
-                    tracing::info!(
-                        x = info.pt.x,
-                        y = info.pt.y,
-                        under = %class_of(under),
-                        root = %class_of(GetAncestor(under, GA_ROOT)),
-                        desktop = is_desktop(under),
-                        target = target().is_some(),
-                        "живые обои: клик"
-                    );
-                }
                 if interesting
                     && is_desktop(WindowFromPoint(info.pt))
                     && let Some(t) = target()

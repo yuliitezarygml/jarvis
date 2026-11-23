@@ -133,6 +133,9 @@ impl LlmError {
                 | LlmError::Network(_)
                 | LlmError::Timeout
                 | LlmError::Auth
+                // Модель выдала битый ответ (например, Groq: «Failed to parse tool call arguments as JSON») —
+                // другая модель цепочки обычно справляется.
+                | LlmError::BadResponse(_)
         )
     }
 }
@@ -193,7 +196,7 @@ mod tests {
     fn failover_policy() {
         assert!(LlmError::RateLimited { retry_after_ms: None }.should_failover());
         assert!(!LlmError::Cancelled.should_failover());
-        assert!(!LlmError::BadResponse("x".into()).should_failover());
+        assert!(LlmError::BadResponse("Failed to parse tool call arguments as JSON".into()).should_failover());
     }
 
     #[test]

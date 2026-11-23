@@ -38,16 +38,6 @@ export default function HudPage() {
   useEffect(() => {
     const isWallpaper = new URLSearchParams(window.location.search).has('wallpaper');
     setWallpaper(isWallpaper);
-    if (isWallpaper) {
-      // Диагностика: доходят ли клики и клавиши до страницы обоев.
-      const report = (e: Event) => {
-        const t = e.target as HTMLElement | null;
-        void call('wallpaper_debug', { what: `${e.type} ${t?.tagName ?? ''}.${typeof t?.className === 'string' ? t.className : ''}` }).catch(() => {});
-      };
-      window.addEventListener('pointerdown', report, true);
-      window.addEventListener('keydown', report, true);
-      void call('wallpaper_debug', { what: 'страница обоев загружена' }).catch(() => {});
-    }
     void call<boolean>('get_wallpaper_mode')
       .then((v) => setWallpaperOn(Boolean(v)))
       .catch(() => {});
