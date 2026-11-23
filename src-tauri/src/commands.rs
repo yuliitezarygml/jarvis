@@ -49,6 +49,38 @@ pub async fn toggle_hud_mode(app: AppHandle) -> CmdResult<HudMode> {
     windows_manager::toggle_mode(&app).map_err(err)
 }
 
+/// Живые обои: HUD на рабочем столе под иконками. Возвращает новое состояние.
+#[tauri::command]
+pub async fn set_wallpaper_mode(app: AppHandle, on: bool) -> CmdResult<bool> {
+    let app2 = app.clone();
+    // Окно создаётся вне цикла событий.
+    tauri::async_runtime::spawn_blocking(move || windows_manager::set_wallpaper(&app2, on, true))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Клик по полю ввода на обоях: клавиатуру обоям не передать — открыть окно HUD и поставить курсор в поле.
+#[tauri::command]
+pub async fn focus_command(app: AppHandle) -> CmdResult<()> {
+    tracing::info!("живые обои: клик по полю ввода — открываю окно HUD");
+    windows_manager::set_mode(&app, HudMode::Fullscreen).map_err(err)?;
+    app.emit_to(windows_manager::HUD, FOCUS_COMMAND_EVENT, ()).map_err(err)
+}
+
+/// Диагностика живых обоев: страница сообщает, что увидела клик (доходит ли ввод до WebView2).
+#[tauri::command]
+pub fn wallpaper_debug(what: String) {
+    tracing::info!(%what, "живые обои: страница получила событие");
+}
+
+/// Событие окну HUD: поставить курсор в «Сказать Джарвису…».
+pub const FOCUS_COMMAND_EVENT: &str = "jarvis://focus_command";
+
+#[tauri::command]
+pub fn get_wallpaper_mode() -> bool {
+    windows_manager::wallpaper_on()
+}
+
 /// Виджет в углу: открыть/закрыть панель подписей (что сказали, что отвечает, что делает).
 /// Возвращает сторону панели: `left` / `right` / `none`.
 #[tauri::command]
@@ -108,6 +140,14 @@ pub async fn config_set(
 pub fn after_save<R: tauri::Runtime>(app: &AppHandle<R>, core: &Core, saved: &Config) -> Config {
     core.apply_config(saved);
     apply_corner_size(app, saved.appearance.corner_size);
+    if saved.hud.wallpaper != windows_manager::wallpaper_on() {
+        let (app, on) = (app.clone(), saved.hud.wallpaper);
+        std::thread::spawn(move || {
+            if let Err(e) = windows_manager::set_wallpaper(&app, on, false) {
+                tracing::warn!(error = %e, "живые обои");
+            }
+        });
+    }
     let masked = config_store::masked(saved);
     let _ = app.emit(config_store::CONFIG_CHANGED_EVENT, &masked);
     masked

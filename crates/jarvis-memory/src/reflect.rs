@@ -324,7 +324,80 @@ pub fn extract_json(text: &str) -> Option<Value> {
             }
         }
     }
+    repair_truncated(text)
+}
+
+/// Ответ оборван по лимиту токенов (reasoning-модели тратят бюджет на рассуждения): отрезать недописанный
+/// элемент по последней запятой вне строк и закрыть открытые строки/массивы/объекты. Берётся самый длинный
+/// вариант, который разбирается и содержит facts/lessons/playbooks.
+fn repair_truncated(text: &str) -> Option<Value> {
+    let start = text.find('{')?;
+    let s = &text[start..];
+    let mut cuts: Vec<usize> = Vec::new();
+    let (mut in_str, mut esc) = (false, false);
+    for (i, ch) in s.char_indices() {
+        if in_str {
+            match (esc, ch) {
+                (true, _) => esc = false,
+                (false, '\\') => esc = true,
+                (false, '"') => in_str = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            ',' => cuts.push(i),
+            '}' | ']' => cuts.push(i + 1),
+            _ => {}
+        }
+    }
+    let ends = std::iter::once(s.len()).chain(cuts.into_iter().rev()).take(80);
+    for end in ends {
+        let Some(fixed) = close_json(&s[..end]) else { continue };
+        if let Ok(v @ Value::Object(_)) = serde_json::from_str::<Value>(&fixed)
+            && ["facts", "lessons", "playbooks"].iter().any(|k| v.get(k).is_some())
+        {
+            return Some(v);
+        }
+    }
     None
+}
+
+/// Закрыть оборванный JSON: незакрытая строка, висящие `,`/`:`, открытые скобки.
+fn close_json(prefix: &str) -> Option<String> {
+    let mut stack: Vec<char> = Vec::new();
+    let (mut in_str, mut esc) = (false, false);
+    for ch in prefix.chars() {
+        if in_str {
+            match (esc, ch) {
+                (true, _) => esc = false,
+                (false, '\\') => esc = true,
+                (false, '"') => in_str = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            '{' => stack.push('}'),
+            '[' => stack.push(']'),
+            '}' | ']' => {
+                stack.pop()?;
+            }
+            _ => {}
+        }
+    }
+    let mut out = prefix.to_string();
+    if in_str {
+        out.push('"');
+    }
+    let trimmed = out.trim_end().trim_end_matches([',', ':']).to_string();
+    let mut out = trimmed;
+    while let Some(c) = stack.pop() {
+        out.push(c);
+    }
+    Some(out)
 }
 
 /// Все сбалансированные по фигурным скобкам фрагменты верхнего уровня (с учётом строк).

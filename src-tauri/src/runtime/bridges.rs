@@ -111,12 +111,55 @@ impl GateConfirmer {
     }
 }
 
+/// Что сказать голосом при подтверждении. Сырой вызов («powershell_run: command=$text=…») вслух не читаем —
+/// только действие по-русски и короткое имя объекта; подробности видны в окне подтверждения.
+pub fn spoken_confirm(summary: &str) -> String {
+    let tool = summary.split(':').next().unwrap_or(summary).trim();
+    let arg = |key: &str| -> Option<String> {
+        let rest = summary.split_once(':')?.1;
+        rest.split(", ").find_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            let v = v.trim();
+            (k.trim() == key
+                && !v.is_empty()
+                && v.chars().count() <= 30
+                && v.chars().all(|c| c.is_alphanumeric() || " .-_".contains(c)))
+            .then(|| v.to_string())
+        })
+    };
+    let named = |what: &str, key: &str| match arg(key) {
+        Some(n) => format!("{what} {n}"),
+        None => what.to_string(),
+    };
+    let action = match tool {
+        "powershell_run" => "выполнить команду PowerShell".to_string(),
+        "cmd_run" => "выполнить команду в командной строке".to_string(),
+        "terminal_run" | "terminal_type" => "выполнить команду в терминале".to_string(),
+        "service_stop" => named("остановить службу", "name"),
+        "service_start" => named("запустить службу", "name"),
+        "service_set_startup" => named("изменить запуск службы", "name"),
+        "process_kill" => named("завершить процесс", "name"),
+        "process_suspend" => named("приостановить процесс", "name"),
+        "file_delete" => "удалить файл".to_string(),
+        "file_move" => "переместить файл".to_string(),
+        "file_write" => "записать файл".to_string(),
+        "winget_install" => named("установить программу", "id"),
+        "winget_uninstall" => named("удалить программу", "id"),
+        "winget_upgrade" => "обновить программы".to_string(),
+        "startup_disable" => named("убрать из автозагрузки", "name"),
+        "power_plan_set" => "сменить план питания".to_string(),
+        "temp_cleanup" => "очистить временные файлы".to_string(),
+        "shell_hook_install" => "подключить терминал".to_string(),
+        "undo_last" => "отменить последнее действие".to_string(),
+        _ => "выполнить это действие".to_string(),
+    };
+    format!("Сэр, {action}? Скажите «да» или «нет».")
+}
+
 #[async_trait]
 impl Confirmer for GateConfirmer {
     async fn confirm(&self, summary: &str, tier: RiskTier, protected_path: bool) -> bool {
-        let first = self
-            .ask(summary.to_string(), tier, format!("Сэр, нужно ваше подтверждение: {summary}. Скажите «да, сэр» или «нет»."))
-            .await;
+        let first = self.ask(summary.to_string(), tier, spoken_confirm(summary)).await;
         if !first || !protected_path {
             return first;
         }
@@ -280,6 +323,18 @@ pub fn to_task_transcript(t: &Transcript) -> TaskTranscript {
 mod tests {
     use super::*;
     use jarvis_core::CollectSink;
+
+    #[test]
+    fn spoken_confirm_is_human_not_raw_call() {
+        // Как в журнале: вслух звучало «пауэршелл ран, команд равно доллар текст равно…».
+        let s = spoken_confirm("powershell_run: command=$text = 'Бельцы…'; Set-Content $env:USERPROFILE\\info.txt $text");
+        assert_eq!(s, "Сэр, выполнить команду PowerShell? Скажите «да» или «нет».");
+        assert!(!s.contains('$') && !s.contains('='));
+        assert_eq!(spoken_confirm("service_stop: name=Spooler"), "Сэр, остановить службу Spooler? Скажите «да» или «нет».");
+        // Длинное или странное имя не читаем.
+        assert!(!spoken_confirm("process_kill: name=C:\\Windows\\x.exe").contains("Windows"));
+        assert_eq!(spoken_confirm("что-то_новое"), "Сэр, выполнить это действие? Скажите «да» или «нет».");
+    }
 
     #[test]
     fn glow_is_held_for_whole_task() {

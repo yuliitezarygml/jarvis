@@ -354,6 +354,27 @@ export function WindowsTab({ draft, update }: TabProps) {
         {msg && <p className="status">{msg}</p>}
       </section>
       <section className="section">
+        <h2 className="section-title">Живые обои</h2>
+        <p className="section-lead">
+          Весь HUD — реактор, телеметрия, лента действий, субтитры — становится обоями рабочего стола, как в Wallpaper Engine:
+          под иконками, клики проходят к рабочему столу. Работает вместе с виджетом и окном HUD. Включается сразу.
+        </p>
+        <Toggle
+          checked={draft.hud.wallpaper}
+          title="HUD как обои рабочего стола"
+          desc="Выключите — вернутся ваши обычные обои."
+          onChange={async (on) => {
+            try {
+              await call('set_wallpaper_mode', { on });
+              update((c) => ({ ...c, hud: { ...c.hud, wallpaper: on } }));
+              setMsg(on ? 'HUD теперь на рабочем столе' : 'Обычные обои возвращены');
+            } catch (err) {
+              setMsg(errorText(err));
+            }
+          }}
+        />
+      </section>
+      <section className="section">
         <h2 className="section-title">Виджет в углу</h2>
         <p className="section-lead">
           Перетащите виджет мышью — позиция сохранится.{' '}

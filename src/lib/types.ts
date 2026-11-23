@@ -97,7 +97,7 @@ export interface Config {
   terminal_autorun: boolean;
   resource_guard: boolean;
   search_roots: string[];
-  hud: { mode: HudMode; corner_x: number | null; corner_y: number | null };
+  hud: { mode: HudMode; corner_x: number | null; corner_y: number | null; wallpaper: boolean };
   audio: AudioConfig;
   appearance: AppearanceConfig;
 }

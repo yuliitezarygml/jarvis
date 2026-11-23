@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { call, errorText } from '@/lib/bridge';
+import { useTauriEvent } from '@/lib/store';
 import type { AssistantStatus, MicStatus } from '@/lib/types';
+
+/** Событие из Rust: поставить курсор в поле (клик по полю на живых обоях). */
+const FOCUS_COMMAND_EVENT = 'jarvis://focus_command';
 
 /** Как часто обновлять сводку (модель, микрофон), пока HUD открыт. */
 const STATUS_POLL_MS = 5000;
@@ -12,8 +16,12 @@ const STATUS_POLL_MS = 5000;
  * Нижняя панель HUD: текстовая команда («Сказать Джарвису…» — то же, что голосом), кнопка микрофона
  * и постоянная плашка, если языковая модель недоступна (например, нет ключа LLM).
  */
-export default function CommandBar() {
+export default function CommandBar({ wallpaper = false }: { wallpaper?: boolean }) {
   const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  useTauriEvent(FOCUS_COMMAND_EVENT, () => {
+    if (!wallpaper) setTimeout(() => inputRef.current?.focus(), 50);
+  });
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [micBusy, setMicBusy] = useState(false);
@@ -90,8 +98,10 @@ export default function CommandBar() {
           {micBusy ? '…' : micLabel}
         </button>
         <input
+          ref={inputRef}
           className="input command-input"
           value={text}
+          // На обоях клавиатура доходит до страницы (окно обоев — дочернее окно рабочего стола), печатать можно сразу.
           placeholder="Сказать Джарвису…"
           aria-label="Команда Джарвису текстом"
           spellCheck={false}

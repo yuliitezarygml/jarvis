@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Окна J.A.R.V.I.S.: события, команды приложения, перетаскивание виджета",
-  "windows": ["hud", "corner", "overlay", "settings"],
+  "windows": ["hud", "corner", "overlay", "settings", "wallpaper"],
   "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

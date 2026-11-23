@@ -176,6 +176,9 @@ pub struct HudConfig {
     pub mode: HudMode,
     pub corner_x: Option<i32>,
     pub corner_y: Option<i32>,
+    /// Живые обои: весь HUD на рабочем столе под иконками (как Wallpaper Engine). Работает вместе
+    /// с виджетом и окном HUD; клики проходят к рабочему столу.
+    pub wallpaper: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

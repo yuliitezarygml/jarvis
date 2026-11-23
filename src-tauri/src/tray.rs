@@ -14,6 +14,7 @@ pub const TRAY_ID: &str = "jarvis-tray";
 pub enum TrayAction {
     Fullscreen,
     Corner,
+    Wallpaper,
     Settings,
     Quit,
 }
@@ -22,6 +23,7 @@ pub fn action_for(id: &str) -> Option<TrayAction> {
     Some(match id {
         "fullscreen" => TrayAction::Fullscreen,
         "corner" => TrayAction::Corner,
+        "wallpaper" => TrayAction::Wallpaper,
         "settings" => TrayAction::Settings,
         "quit" => TrayAction::Quit,
         _ => return None,
@@ -32,6 +34,16 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: TrayAction) {
     let res = match action {
         TrayAction::Fullscreen => windows_manager::set_mode(app, HudMode::Fullscreen),
         TrayAction::Corner => windows_manager::set_mode(app, HudMode::Corner),
+        TrayAction::Wallpaper => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let on = !windows_manager::wallpaper_on();
+                if let Err(e) = windows_manager::set_wallpaper(&app, on, true) {
+                    eprintln!("[jarvis] трей: {e}");
+                }
+            });
+            Ok(())
+        }
         TrayAction::Settings => {
             // создание окна — не из обработчика цикла событий, а из отдельного потока
             let app = app.clone();
@@ -55,10 +67,11 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: TrayAction) {
 pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let full = MenuItem::with_id(app, "fullscreen", "Во весь экран", true, Some("Ctrl+Alt+J"))?;
     let corner = MenuItem::with_id(app, "corner", "В угол", true, None::<&str>)?;
+    let wallpaper = MenuItem::with_id(app, "wallpaper", "Живые обои: вкл/выкл", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Настройки", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&full, &corner, &settings, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&full, &corner, &wallpaper, &settings, &sep, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("J.A.R.V.I.S.")
@@ -89,6 +102,7 @@ mod tests {
     fn menu_ids() {
         assert_eq!(action_for("fullscreen"), Some(TrayAction::Fullscreen));
         assert_eq!(action_for("corner"), Some(TrayAction::Corner));
+        assert_eq!(action_for("wallpaper"), Some(TrayAction::Wallpaper));
         assert_eq!(action_for("settings"), Some(TrayAction::Settings));
         assert_eq!(action_for("quit"), Some(TrayAction::Quit));
         assert_eq!(action_for("other"), None);

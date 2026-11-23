@@ -8,6 +8,7 @@
 pub mod api;
 pub mod commands;
 pub mod config_store;
+pub mod desktop_wallpaper;
 pub mod hooks;
 pub mod hotkeys;
 pub mod runtime;
@@ -115,6 +116,10 @@ pub fn run() {
             commands::toggle_hud_mode,
             commands::toggle_hud_fullscreen,
             commands::corner_caption,
+            commands::set_wallpaper_mode,
+            commands::get_wallpaper_mode,
+            commands::focus_command,
+            commands::wallpaper_debug,
             commands::exit_hud_fullscreen,
             commands::open_settings,
             commands::overlay_geometry,

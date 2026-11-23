@@ -54,7 +54,7 @@ export function defaultConfig(): Config {
     terminal_autorun: true,
     resource_guard: true,
     search_roots: ['%USERPROFILE%', 'D:\\'],
-    hud: { mode: 'corner', corner_x: null, corner_y: null },
+    hud: { mode: 'corner', corner_x: null, corner_y: null, wallpaper: false },
     audio: { input_device: null, output_device: null, volume: 1, listen_on_start: true },
     appearance: {
       theme: 'arc-reactor',

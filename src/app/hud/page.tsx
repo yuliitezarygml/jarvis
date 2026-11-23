@@ -32,6 +32,33 @@ export default function HudPage() {
   useTauriEvent(EMERGENCY_EVENT, () => setStopped(Date.now()));
 
   const [fullscreen, setFullscreen] = useState(false);
+  // `?wallpaper` — та же страница как живые обои рабочего стола: без кнопок и поля ввода (клики идут иконкам).
+  const [wallpaper, setWallpaper] = useState(false);
+  const [wallpaperOn, setWallpaperOn] = useState(false);
+  useEffect(() => {
+    const isWallpaper = new URLSearchParams(window.location.search).has('wallpaper');
+    setWallpaper(isWallpaper);
+    if (isWallpaper) {
+      // Диагностика: доходят ли клики и клавиши до страницы обоев.
+      const report = (e: Event) => {
+        const t = e.target as HTMLElement | null;
+        void call('wallpaper_debug', { what: `${e.type} ${t?.tagName ?? ''}.${typeof t?.className === 'string' ? t.className : ''}` }).catch(() => {});
+      };
+      window.addEventListener('pointerdown', report, true);
+      window.addEventListener('keydown', report, true);
+      void call('wallpaper_debug', { what: 'страница обоев загружена' }).catch(() => {});
+    }
+    void call<boolean>('get_wallpaper_mode')
+      .then((v) => setWallpaperOn(Boolean(v)))
+      .catch(() => {});
+  }, []);
+  const toggleWallpaper = async () => {
+    try {
+      setWallpaperOn(Boolean(await call<boolean>('set_wallpaper_mode', { on: !wallpaperOn })));
+    } catch {
+      /* в браузере без Tauri обоев нет */
+    }
+  };
 
   const toggleFullscreen = async () => {
     try {
@@ -72,7 +99,7 @@ export default function HudPage() {
   }, [stopped]);
 
   return (
-    <main className="hud" data-state={assistant}>
+    <main className="hud" data-state={assistant} data-wallpaper={wallpaper ? '' : undefined}>
       <HudBackground />
 
       <header className="hud-top">
@@ -86,12 +113,23 @@ export default function HudPage() {
         </div>
         <Clock />
         <nav className="hud-actions" aria-label="Управление окном">
-          <button type="button" className="btn btn-ghost" onClick={() => void toggleFullscreen()} title="F11">
-            {fullscreen ? 'Окно' : 'Во весь экран'}
+          <button type="button" className={wallpaperOn ? 'btn btn-primary' : 'btn btn-ghost'} onClick={() => void toggleWallpaper()} title="HUD как обои рабочего стола">
+            Обои
           </button>
-          <button type="button" className="btn btn-ghost" onClick={() => void call('set_hud_mode', { mode: 'corner' })} title="Esc или Ctrl+Alt+J">
-            В угол
-          </button>
+          {wallpaper ? (
+            <button type="button" className="btn btn-ghost" onClick={() => void call('set_hud_mode', { mode: 'fullscreen' })} title="Ctrl+Alt+J">
+              Открыть окно
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={() => void toggleFullscreen()} title="F11">
+                {fullscreen ? 'Окно' : 'Во весь экран'}
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => void call('set_hud_mode', { mode: 'corner' })} title="Esc или Ctrl+Alt+J">
+                В угол
+              </button>
+            </>
+          )}
           <button type="button" className="btn btn-ghost" onClick={() => void call('open_settings', {})}>
             Настройки
           </button>
@@ -118,7 +156,7 @@ export default function HudPage() {
       <footer className="hud-bottom">
         <Subtitles />
         <Waveform />
-        <CommandBar />
+        <CommandBar wallpaper={wallpaper} />
       </footer>
 
       <ErrorToast />

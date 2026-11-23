@@ -787,6 +787,12 @@ code,
   overflow: hidden;
   user-select: none;
 }
+/* Живые обои (`hud/?wallpaper`): всё как в окне HUD (клики пересылает Rust), только без симулятора. */
+.hud[data-wallpaper] .devpanel-toggle,
+.hud[data-wallpaper] .devpanel-body {
+  display: none !important;
+}
+
 /* В обычном браузере под прозрачным виджетом — тёмный «рабочий стол» (в Tauri фон прозрачный). */
 html[data-browser] body:has(.corner) {
   background: radial-gradient(ellipse at 70% 40%, #1c2b36 0%, #0d151b 70%);

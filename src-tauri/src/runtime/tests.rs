@@ -269,7 +269,8 @@ async fn t3_denied(deny: impl Fn(&Core, &str)) {
     assert!(ev.iter().any(|e| matches!(e, Event::Action { tool, status: ActionStatus::Cancelled, .. } if tool == "powershell_run")));
     assert!(!ev.iter().any(|e| matches!(e, Event::Action { tool, status: ActionStatus::Running, .. } if tool == "powershell_run")), "не выполнялась");
     // Джарвис озвучил вопрос (субтитр) и модель получила отказ, а не вывод команды.
-    assert!(ev.iter().any(|e| matches!(e, Event::Subtitle { speaker: Speaker::Jarvis, text, .. } if text.contains("подтверждение"))));
+    assert!(ev.iter().any(|e| matches!(e, Event::Subtitle { speaker: Speaker::Jarvis, text, .. }
+        if text == "Сэр, выполнить команду PowerShell? Скажите «да» или «нет».")));
     let tool_msg = h.model.requests()[1].messages.iter().find(|m| m.role == Role::Tool).unwrap().content.clone();
     assert_eq!(tool_msg, DENIED_TEXT);
     assert!(!h.core.gate.awaiting());

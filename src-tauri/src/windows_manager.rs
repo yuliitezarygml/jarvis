@@ -30,6 +30,8 @@ pub const HUD: &str = "hud";
 pub const CORNER: &str = "corner";
 pub const OVERLAY: &str = "overlay";
 pub const SETTINGS: &str = "settings";
+/// Живые обои: HUD под иконками рабочего стола.
+pub const WALLPAPER: &str = "wallpaper";
 
 /// Логический размер виджета в углу.
 pub const CORNER_SIZE: f64 = 220.0;
@@ -193,6 +195,16 @@ pub fn create_windows<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> tauri::Re
     }
 
     create_overlay(app)?;
+
+    if cfg.hud.wallpaper {
+        // Окно создаётся из отдельного потока: не из цикла событий при старте.
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = set_wallpaper(&app, true, false) {
+                tracing::warn!(error = %e, "живые обои не включились при старте");
+            }
+        });
+    }
     Ok(())
 }
 
@@ -287,6 +299,123 @@ pub fn set_mode<R: Runtime>(app: &AppHandle<R>, mode: HudMode) -> tauri::Result<
     }
     app.emit(HUD_MODE_EVENT, mode)?;
     Ok(())
+}
+
+// ───────────────────────────── живые обои ─────────────────────────────
+
+/// Включены ли обои (желаемое состояние; сторож восстанавливает окно, если Explorer его уничтожил).
+static WALLPAPER_ON: AtomicBool = AtomicBool::new(false);
+static WALLPAPER_WATCHDOG: AtomicBool = AtomicBool::new(false);
+static WALLPAPER_ATTACHED: Mutex<Option<(isize, crate::desktop_wallpaper::Attached)>> = Mutex::new(None);
+
+fn create_wallpaper<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    if let Some(old) = app.get_webview_window(WALLPAPER) {
+        let _ = old.destroy();
+        // Закрытие асинхронное: подождать, пока метка освободится (иначе «webview already exists»).
+        for _ in 0..40 {
+            if app.get_webview_window(WALLPAPER).is_none() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    let m = primary_monitor(app).ok_or("нет монитора")?;
+    // Рабочая область, а не весь монитор: панель задач (снизу или сверху) не перекрывает кнопки HUD.
+    let wa = work_area_of(&m);
+    let (pos, size) = (PhysicalPosition::new(wa.x, wa.y), PhysicalSize::new(wa.w, wa.h));
+    let w = WebviewWindowBuilder::new(app, WALLPAPER, WebviewUrl::App("hud/?wallpaper=1".into()))
+        .title("J.A.R.V.I.S. wallpaper")
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .skip_taskbar(true)
+        .shadow(false)
+        .focused(false)
+        .focusable(false)
+        .background_color(HUD_BG)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = w.set_position(pos);
+    let _ = w.set_size(size);
+    let hwnd = w.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    match crate::desktop_wallpaper::attach(hwnd, pos.x, pos.y, size.width as i32, size.height as i32) {
+        Ok(a) => {
+            let _ = w.show();
+            *WALLPAPER_ATTACHED.lock().unwrap_or_else(|e| e.into_inner()) = Some((hwnd, a));
+            crate::desktop_wallpaper::forward_mouse_to(hwnd);
+            tracing::info!(x = pos.x, y = pos.y, w = size.width, h = size.height, "живые обои включены");
+            Ok(())
+        }
+        Err(e) => {
+            let _ = w.destroy();
+            Err(format!("не удалось поставить HUD обоями: {e}"))
+        }
+    }
+}
+
+fn spawn_wallpaper_watchdog<R: Runtime>(app: &AppHandle<R>) {
+    if WALLPAPER_WATCHDOG.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(3));
+            if !WALLPAPER_ON.load(Ordering::SeqCst) {
+                continue;
+            }
+            let state = *WALLPAPER_ATTACHED.lock().unwrap_or_else(|e| e.into_inner());
+            let alive = app.get_webview_window(WALLPAPER).is_some()
+                && state.is_some_and(|(h, a)| crate::desktop_wallpaper::still_attached(h, a));
+            if !alive {
+                // Explorer перезапустился (или слой обоев пересоздан) — поставить обои заново.
+                tracing::info!("живые обои: слой рабочего стола пропал, восстанавливаю");
+                if let Err(e) = create_wallpaper(&app) {
+                    tracing::warn!(error = %e, "живые обои не восстановлены");
+                }
+            }
+        }
+    });
+}
+
+/// Включить/выключить живые обои (HUD на рабочем столе под иконками). `save` — запомнить в config.json.
+pub fn set_wallpaper<R: Runtime>(app: &AppHandle<R>, on: bool, save: bool) -> Result<bool, String> {
+    if on {
+        let ok = WALLPAPER_ATTACHED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some_and(|(h, a)| crate::desktop_wallpaper::still_attached(h, a));
+        if !(ok && app.get_webview_window(WALLPAPER).is_some()) {
+            create_wallpaper(app)?;
+        }
+        WALLPAPER_ON.store(true, Ordering::SeqCst);
+        spawn_wallpaper_watchdog(app);
+    } else {
+        WALLPAPER_ON.store(false, Ordering::SeqCst);
+        crate::desktop_wallpaper::stop_mouse_forwarding();
+        if let Some((h, _)) = WALLPAPER_ATTACHED.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            crate::desktop_wallpaper::detach(h);
+        }
+        if let Some(w) = app.get_webview_window(WALLPAPER) {
+            let _ = w.destroy();
+        }
+        tracing::info!("живые обои выключены");
+    }
+    if save {
+        let store = app.state::<ConfigStore>();
+        if store.get().hud.wallpaper != on
+            && let Err(e) = store.update(|c| c.hud.wallpaper = on)
+        {
+            tracing::warn!(error = %e, "не удалось сохранить режим обоев");
+        }
+    }
+    Ok(on)
+}
+
+pub fn wallpaper_on() -> bool {
+    WALLPAPER_ON.load(Ordering::SeqCst)
 }
 
 /// Окно HUD: полный экран без рамки ↔ обычное окно. Возвращает новое состояние (`true` = полный экран).

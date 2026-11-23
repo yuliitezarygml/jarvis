@@ -284,12 +284,16 @@ impl Tool for KeyType {
         let delay = u64_opt(&args, "delay_ms")?.unwrap_or(5).min(200);
         let session = self.0.glow.session(ctx.events.clone(), RiskTier::T1);
         session.target(foreground_rect(), format!("Печатаю: «{}»", clip(&text.replace(['\r', '\n'], "⏎"), 40)));
-        let n = run_input(ctx.cancel.clone(), move |r| {
+        let (n, via) = run_input(ctx.cancel.clone(), move |r| {
             r.wait_user_modifiers_released()?;
             type_text(r, &text, delay)
         })
         .await?;
-        Ok(ToolOutput { content: format!("Напечатал {n} символов"), data: Some(json!({"chars": n})), ..Default::default() })
+        let how = match via {
+            super::TypedVia::Keys => "напечатал",
+            super::TypedVia::Paste => "вставил через буфер обмена (Ctrl+V)",
+        };
+        Ok(ToolOutput { content: format!("Ввёл {n} символов: {how}"), data: Some(json!({"chars": n})), ..Default::default() })
     }
 }
 

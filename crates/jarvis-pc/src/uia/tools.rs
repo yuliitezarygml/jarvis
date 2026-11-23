@@ -203,7 +203,7 @@ impl Tool for UiSetValue {
                         r.send(&crate::input::events::key_tap(crate::input::hotkey::vk::DELETE))?;
                         Ok(0)
                     } else {
-                        type_text(r, &text, 3)
+                        type_text(r, &text, 3).map(|(n, _)| n)
                     }
                 })
                 .await?;

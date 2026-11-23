@@ -72,6 +72,18 @@ fn parses_plain_fenced_and_noisy_json() {
 }
 
 #[test]
+fn truncated_reply_keeps_complete_items() {
+    // Как в журнале: reasoning-модель упёрлась в лимит токенов посреди урока.
+    let cut = r#"{"facts":[{"text":"Пользователь предпочитает Google Chrome","category":"preference","confidence":0.9},{"text":"Пользователь хранит заметки в Documents","category":"habit"}],"lessons":[{"scope":"tool","trigger":"запись текста в бло"#;
+    let r = parse_reflection(cut).expect("оборванный JSON чинится");
+    assert_eq!(r.facts.len(), 2, "оба полных факта сохранены");
+    assert!(r.facts[0].text.contains("Chrome"));
+    assert!(r.lessons.is_empty(), "недописанный урок без fix отброшен");
+    // Совсем без JSON — по-прежнему ошибка.
+    assert!(parse_reflection("не могу ответить").is_err());
+}
+
+#[test]
 fn extract_json_ignores_braces_inside_strings() {
     let v = extract_json(r#"мусор { "facts": [{"text": "скобка } внутри \" строки {"}] } хвост"#).unwrap();
     assert_eq!(v["facts"][0]["text"], "скобка } внутри \" строки {");
