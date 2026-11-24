@@ -85,7 +85,7 @@ async fn start(mock: Mock) -> (ServerStt, Mock) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let cfg = SttConfig { engine: "server".into(), url: format!("http://{addr}"), ca_path: "нет.pem".into() };
+    let cfg = SttConfig { engine: "server".into(), url: format!("http://{addr}"), ca_path: "нет.pem".into(), ..Default::default() };
     let opts = ServerSttOptions { reconnect_min: Duration::from_millis(20), ..Default::default() };
     (ServerStt::with_options(&cfg, std::path::Path::new("."), opts).unwrap(), mock)
 }
@@ -147,7 +147,7 @@ async fn ws_waits_for_server_and_buffers() {
     let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = probe.local_addr().unwrap();
     drop(probe);
-    let cfg = SttConfig { engine: "server".into(), url: format!("http://{addr}"), ca_path: String::new() };
+    let cfg = SttConfig { engine: "server".into(), url: format!("http://{addr}"), ca_path: String::new(), ..Default::default() };
     let opts = ServerSttOptions { reconnect_min: Duration::from_millis(20), reconnect_max: Duration::from_millis(50), ..Default::default() };
     let stt = ServerStt::with_options(&cfg, std::path::Path::new("."), opts).unwrap();
     let (tx, mut rx) = mpsc::channel(64);
@@ -222,8 +222,11 @@ async fn groq_whisper_multipart() {
     assert_eq!(r, SttResult { text: "Джарвис, открой браузер.".into(), duration_ms: 1000 });
     let f = mock.fields.lock().unwrap().clone();
     let get = |k: &str| f.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
-    assert_eq!(get("model"), "whisper-large-v3-turbo");
+    assert_eq!(get("model"), "whisper-large-v3");
     assert_eq!(get("language"), "ru");
+    // prompt: подсказка стиля + словарь названий.
+    let prompt = get("prompt");
+    assert!(prompt.starts_with("Джарвис, открой браузер. ") && prompt.contains("VS Code, GitHub"), "{prompt}");
     assert_eq!(get("response_format"), "json");
     assert_eq!(get("file"), format!("audio.wav|audio/wav|riff=true|{}", 44 + 32_000));
 
@@ -231,4 +234,67 @@ async fn groq_whisper_multipart() {
     assert_eq!(bad.transcribe(&vec![0i16; 1600], &CancellationToken::new()).await.err(), Some(VoiceError::Auth(401)));
     cfg.providers[0].api_key.clear();
     assert!(matches!(GroqWhisperStt::from_config(&cfg), Err(VoiceError::Config(_))));
+}
+
+/// Groq: первый ключ упёрся в лимит (429) — запрос повторяется со вторым; свои слова из `stt.hints` — в prompt.
+#[derive(Clone, Default)]
+struct Groq429 {
+    auths: Arc<Mutex<Vec<String>>>,
+    prompts: Arc<Mutex<Vec<String>>>,
+    models: Arc<Mutex<Vec<String>>>,
+}
+
+async fn groq_429_route(State(m): State<Groq429>, headers: HeaderMap, mut mp: Multipart) -> Response {
+    let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    m.auths.lock().unwrap().push(auth.clone());
+    while let Some(field) = mp.next_field().await.unwrap() {
+        let name = field.name().unwrap_or_default().to_string();
+        let v = if name == "file" { String::new() } else { field.text().await.unwrap() };
+        match name.as_str() {
+            "prompt" => m.prompts.lock().unwrap().push(v),
+            "model" => m.models.lock().unwrap().push(v),
+            _ => {}
+        }
+    }
+    if auth == "Bearer gsk_first" {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": {"message": "Rate limit reached"}}))).into_response();
+    }
+    Json(serde_json::json!({"text": "Джарвис, запусти VS Code"})).into_response()
+}
+
+#[tokio::test]
+async fn groq_whisper_switches_key_on_429_and_sends_hints() {
+    let mock = Groq429::default();
+    let app = Router::new().route("/openai/v1/audio/transcriptions", post(groq_429_route)).with_state(mock.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let base = format!("http://{addr}/openai/v1");
+
+    let mut cfg = jarvis_core::Config::default();
+    cfg.providers[0].base_url = base.clone();
+    cfg.providers[0].api_key = "gsk_first".into();
+    let mut second = cfg.providers[0].clone();
+    second.id = "groq-2".into();
+    second.api_key = "gsk_second".into();
+    cfg.providers.push(second);
+    cfg.stt.cloud_model = "whisper-large-v3-turbo".into();
+    cfg.stt.hints = vec!["Кузя".into()];
+    let stt = GroqWhisperStt::from_config_with_hints(&cfg, &["Мама Лена".into()]).unwrap();
+    assert_eq!(stt.key_count(), 2);
+    let r = stt.transcribe(&vec![0i16; 16_000], &CancellationToken::new()).await.unwrap();
+    assert_eq!(r.text, "Джарвис, запусти VS Code");
+    assert_eq!(mock.auths.lock().unwrap().as_slice(), ["Bearer gsk_first", "Bearer gsk_second"]);
+    // Следующий запрос сразу со второго ключа.
+    stt.transcribe(&vec![0i16; 16_000], &CancellationToken::new()).await.unwrap();
+    assert_eq!(mock.auths.lock().unwrap().last().unwrap(), "Bearer gsk_second");
+    assert!(mock.models.lock().unwrap().iter().all(|m| m == "whisper-large-v3-turbo"));
+    let p = mock.prompts.lock().unwrap()[0].clone();
+    assert!(p.starts_with("Джарвис, открой браузер. Кузя, Мама Лена, Джарвис, VS Code"), "{p}");
+
+    // Один ключ: 429 возвращается как есть (повторять не с чем).
+    cfg.providers.truncate(1);
+    let one = GroqWhisperStt::from_config(&cfg).unwrap();
+    let e = one.transcribe(&vec![0i16; 16_000], &CancellationToken::new()).await.err().unwrap();
+    assert!(matches!(e, VoiceError::Http { status: 429, .. }), "{e:?}");
 }

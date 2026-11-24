@@ -70,7 +70,15 @@ pub enum Event {
     Action { id: String, tool: String, summary: String, status: ActionStatus },
     ConfirmRequest { id: String, summary: String, tier: RiskTier, timeout_ms: u64 },
     ConfirmResolved { id: String, approved: bool },
-    Telemetry { cpu: f32, ram_used_mb: u64, ram_total_mb: u64, gpu: Option<f32> },
+    /// `net_kbps` — принято + отправлено всеми сетевыми адаптерами, кбит/с (`None` — ещё не измерено).
+    Telemetry {
+        cpu: f32,
+        ram_used_mb: u64,
+        ram_total_mb: u64,
+        gpu: Option<f32>,
+        #[serde(default)]
+        net_kbps: Option<f32>,
+    },
     Sources { items: Vec<SourceLink> },
     Error { message: String },
 }

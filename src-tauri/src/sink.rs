@@ -187,7 +187,7 @@ mod tests {
             Event::Action { id: "a1".into(), tool: "ui_click".into(), summary: "Клик".into(), status: ActionStatus::AwaitingConfirm },
             Event::ConfirmRequest { id: "c1".into(), summary: "Остановить службу".into(), tier: RiskTier::T3, timeout_ms: 20000 },
             Event::ConfirmResolved { id: "c1".into(), approved: false },
-            Event::Telemetry { cpu: 12.5, ram_used_mb: 8000, ram_total_mb: 16000, gpu: None },
+            Event::Telemetry { cpu: 12.5, ram_used_mb: 8000, ram_total_mb: 16000, gpu: None, net_kbps: Some(512.0) },
             Event::Sources { items: vec![SourceLink { title: "Rust".into(), url: "https://www.rust-lang.org".into() }] },
             Event::Error { message: "сбой".into() },
         ]

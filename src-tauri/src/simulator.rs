@@ -69,7 +69,7 @@ impl Script {
             cpu = (cpu + (self.rng.next() - 0.45) * 14.0).clamp(3.0, 96.0);
             ram = (ram as i64 + ((self.rng.next() - 0.5) * 300.0) as i64).clamp(6_000, 15_500) as u64;
             let gpu = Some((cpu * 0.6 + self.rng.next() * 10.0).clamp(0.0, 100.0));
-            self.at(t, Event::Telemetry { cpu, ram_used_mb: ram, ram_total_mb: 16_384, gpu });
+            self.at(t, Event::Telemetry { cpu, ram_used_mb: ram, ram_total_mb: 16_384, gpu, net_kbps: Some(cpu * 40.0) });
             t += 1000;
         }
     }
@@ -216,7 +216,7 @@ mod tests {
             Event::Action { id: String::new(), tool: String::new(), summary: String::new(), status: ActionStatus::Done },
             Event::ConfirmRequest { id: String::new(), summary: String::new(), tier: RiskTier::T3, timeout_ms: 0 },
             Event::ConfirmResolved { id: String::new(), approved: true },
-            Event::Telemetry { cpu: 0.0, ram_used_mb: 0, ram_total_mb: 0, gpu: None },
+            Event::Telemetry { cpu: 0.0, ram_used_mb: 0, ram_total_mb: 0, gpu: None, net_kbps: None },
             Event::Sources { items: vec![] },
             Event::Error { message: String::new() },
         ];

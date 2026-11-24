@@ -25,7 +25,7 @@ pub use error::{Result, VoiceError};
 pub use normalizer::SpeechNormalizer;
 pub use pipeline::{ListenHandle, SpeakOutcome, ToneConfig, VoiceConfig, VoicePipeline};
 pub use player::{AudioOutput, Player, PlayerConfig};
-pub use stt::{GroqWhisperStt, ServerStt, SttEngine, SttEvent, SttStream};
+pub use stt::{GroqWhisperStt, HybridStt, ServerStt, SttEngine, SttEvent, SttStream};
 pub use tone::{VoiceFeatures, VoiceProfile, VoiceTone};
 pub use tts::{TtsClient, TtsEngine, TtsStream};
 pub use vad::{Utterance, Vad, VadConfig, VadEvent};

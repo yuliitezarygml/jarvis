@@ -8,7 +8,11 @@
   "stt": {
     "engine": "local",
     "url": "https://192.168.50.38:8444",
-    "ca_path": "src-tauri/config/xeon-tts-ca.pem"
+    "ca_path": "src-tauri/config/xeon-tts-ca.pem",
+    "cloud_model": "whisper-large-v3",
+    "cloud_timeout_ms": 1500,
+    "language": "ru",
+    "hints": []
   },
   "providers": [
     {

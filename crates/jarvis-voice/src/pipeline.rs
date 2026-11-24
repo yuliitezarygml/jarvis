@@ -54,6 +54,9 @@ pub struct VoiceConfig {
     pub prefetch_phrases: usize,
     /// Тон голоса (громкость/темп относительно обычного).
     pub tone: ToneConfig,
+    /// Подсказки для облачного распознавания от приложения (имена из памяти и т. п.) — к `config.stt.hints`
+    /// и встроенному словарю (см. `stt::hints`).
+    pub stt_hints: Vec<String>,
 }
 
 /// Оценка тона голоса: где профиль обычного голоса, какой микрофон, какое усиление.
@@ -85,6 +88,7 @@ impl Default for VoiceConfig {
             buffer_ms: 100,
             prefetch_phrases: 2,
             tone: ToneConfig::default(),
+            stt_hints: Vec::new(),
         }
     }
 }
@@ -208,7 +212,7 @@ impl VoicePipeline {
             cfg.tone.profile_path = Some(project_root.join(&app.data_dir).join("voice-profile.json"));
         }
         let tts = Arc::new(TtsClient::new(&app.tts, project_root)?);
-        let stt = crate::stt::engine_from_config(app, project_root)?;
+        let stt = crate::stt::engine_from_config_with_hints(app, project_root, &cfg.stt_hints)?;
         let player = Arc::new(Player::start(cfg.player.clone(), events.clone())?);
         Ok(Self::new(cfg, tts, stt, player, events))
     }

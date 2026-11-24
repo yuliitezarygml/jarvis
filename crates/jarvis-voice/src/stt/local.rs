@@ -2,11 +2,12 @@
 //! Сеть не нужна. Модель лежит в `data/models/stt/gigaam-v3-ctc` (`model*.onnx` + `tokens.txt`).
 //!
 //! Модель офлайновая: `final` — одно декодирование всей фразы после конца речи (≈0,1–0,3 с на обычном CPU).
-//! «Потоковая» сессия имитируется: `partial` — декодирование накопленного звука каждые ~0,5 с в фоне,
-//! причём только если распознаватель свободен (очереди не бывает, `final` не ждёт кучу partial).
+//! «Потоковая» сессия имитируется: `partial` — декодирование всего накопленного звука фразы каждые ~0,4 с
+//! в фоне, причём только если распознаватель свободен и прошлый partial досчитан (очереди не бывает,
+//! `final` не ждёт кучу partial, процессор не забивается: на длинной фразе partial просто реже).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -21,10 +22,8 @@ use crate::error::{Result, VoiceError};
 const SR: i32 = 16_000;
 /// Каталог модели по умолчанию внутри `data_dir`.
 pub const DEFAULT_MODEL_SUBDIR: &str = "models/stt/gigaam-v3-ctc";
-/// Partial не чаще, чем раз в столько сэмплов нового звука (0,5 с).
-const PARTIAL_EVERY: usize = SR as usize / 2;
-/// Partial только для первых N секунд фразы: дальше они дорогие, а текст всё равно придёт в final.
-const PARTIAL_MAX_SAMPLES: usize = SR as usize * 12;
+/// Partial не чаще, чем раз в столько сэмплов нового звука (0,4 с). Предела длины фразы нет.
+const PARTIAL_EVERY: usize = SR as usize * 2 / 5;
 
 struct Inner {
     dir: PathBuf,
@@ -179,17 +178,21 @@ impl SttEngine for LocalStt {
             let mut decoded_at = 0usize;
             // Номер фразы: partial от прошлой фразы (досчитался после end/reset) не отправляем.
             let generation = Arc::new(AtomicU64::new(0));
+            // Partial уже считается: следующий не запускаем (и не копируем звук впустую).
+            let partial_busy = Arc::new(AtomicBool::new(false));
             while let Some(cmd) = rx.recv().await {
                 match cmd {
                     StreamCmd::Audio(pcm) => {
                         audio.extend(pcm.iter().map(|&s| s as f32 / 32768.0));
-                        if audio.len() >= decoded_at + PARTIAL_EVERY && audio.len() <= PARTIAL_MAX_SAMPLES {
+                        if audio.len() >= decoded_at + PARTIAL_EVERY && !partial_busy.swap(true, Ordering::SeqCst) {
                             decoded_at = audio.len();
-                            let (inner, events, gen_now, generation) =
-                                (inner.clone(), events.clone(), generation.load(Ordering::SeqCst), generation.clone());
+                            let (inner, events, gen_now, generation, busy) =
+                                (inner.clone(), events.clone(), generation.load(Ordering::SeqCst), generation.clone(), partial_busy.clone());
                             let snapshot = audio.clone();
                             tokio::task::spawn_blocking(move || {
-                                if let Some(text) = inner.try_decode(&snapshot)
+                                let text = inner.try_decode(&snapshot);
+                                busy.store(false, Ordering::SeqCst);
+                                if let Some(text) = text
                                     && !text.is_empty()
                                     && generation.load(Ordering::SeqCst) == gen_now
                                 {

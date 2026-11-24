@@ -84,6 +84,50 @@ export interface SearchProviderConfig {
   enabled: boolean;
 }
 
+/** Распознавание речи (`config.stt`). */
+export interface SttConfig {
+  /** `local` | `server` | `groq` (`groq_whisper`) | `hybrid` */
+  engine: string;
+  url: string;
+  ca_path: string;
+  /** Модель Groq Whisper: `whisper-large-v3` | `whisper-large-v3-turbo`. */
+  cloud_model: string;
+  /** Гибрид: сколько ждать облачный финал, мс (дольше — локальный текст). */
+  cloud_timeout_ms: number;
+  /** Язык распознавания (ISO-639-1), обычно `ru`. */
+  language: string;
+  /** Свои слова-подсказки для облака. */
+  hints: string[];
+}
+
+/** Результат замера одного движка распознавания (`jarvis_voice::stt::bench::EngineScore`). */
+export interface SttEngineScore {
+  engine: string;
+  /** Ошибка создания движка (тогда остальные поля пустые). */
+  error: string | null;
+  wer: number;
+  cer: number;
+  name_errors: number;
+  name_total: number;
+  median_ms: number;
+  max_ms: number;
+  failed: number;
+  phrases: SttPhraseResult[];
+}
+
+export interface SttPhraseResult {
+  name: string;
+  reference: string;
+  hypothesis: string;
+  word_errors: number;
+  words: number;
+  char_errors: number;
+  chars: number;
+  latency_ms: number;
+  error: string | null;
+  wrong_names: string[];
+}
+
 export interface Config {
   data_dir: string;
   tts: {
@@ -94,7 +138,7 @@ export interface Config {
     /** Секрет: из ядра приходит замаскированным. */
     /** `auto` | `lan` | `internet` */
   };
-  stt: { engine: string; url: string; ca_path: string };
+  stt: SttConfig;
   providers: ProviderConfig[];
   roles: Roles;
   web_search: SearchProviderConfig[];

@@ -98,10 +98,23 @@ impl Default for TtsConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SttConfig {
-    /// `server` (Xeon) или `groq_whisper` (резерв).
+    /// `local` (GigaAM на этом ПК), `server` (Xeon), `groq` / `groq_whisper` (облако Groq Whisper)
+    /// или `hybrid` (живой текст — локально, финал — гонка облако vs локальный).
     pub engine: String,
     pub url: String,
     pub ca_path: String,
+    /// Модель Groq Whisper: `whisper-large-v3` (точнее) или `whisper-large-v3-turbo` (быстрее).
+    pub cloud_model: String,
+    /// Гибрид: сколько ждать облачный финал после конца фразы, мс; дольше — берётся локальный текст.
+    pub cloud_timeout_ms: u64,
+    /// Язык распознавания (ISO-639-1) для облака.
+    pub language: String,
+    /// Свои слова-подсказки для облака (названия программ, имена) — добавляются к встроенному словарю.
+    pub hints: Vec<String>,
+}
+impl SttConfig {
+    pub const DEFAULT_CLOUD_MODEL: &'static str = "whisper-large-v3";
+    pub const DEFAULT_CLOUD_TIMEOUT_MS: u64 = 1500;
 }
 impl Default for SttConfig {
     fn default() -> Self {
@@ -109,6 +122,10 @@ impl Default for SttConfig {
             engine: "server".into(),
             url: crate::stt_protocol::DEFAULT_URL.into(),
             ca_path: "src-tauri/config/xeon-tts-ca.pem".into(),
+            cloud_model: Self::DEFAULT_CLOUD_MODEL.into(),
+            cloud_timeout_ms: Self::DEFAULT_CLOUD_TIMEOUT_MS,
+            language: "ru".into(),
+            hints: Vec::new(),
         }
     }
 }
@@ -357,6 +374,24 @@ mod tests {
         .unwrap();
         assert_eq!(c, Config { autonomy: Autonomy::Never, ..Config::default() });
         assert!(!serde_json::to_string(&c).unwrap().contains("persona"), "при сохранении секция пропадает");
+    }
+
+    #[test]
+    fn old_stt_section_gets_cloud_defaults() {
+        // Прежний вид секции: только engine/url/ca_path — новые поля берутся по умолчанию.
+        let c: Config =
+            serde_json::from_str(r#"{"stt":{"engine":"groq_whisper","url":"https://x:8444","ca_path":"ca.pem"}}"#).unwrap();
+        assert_eq!(c.stt.engine, "groq_whisper");
+        assert_eq!(c.stt.url, "https://x:8444");
+        assert_eq!(c.stt.cloud_model, "whisper-large-v3");
+        assert_eq!(c.stt.cloud_timeout_ms, 1500);
+        assert_eq!(c.stt.language, "ru");
+        assert!(c.stt.hints.is_empty());
+        let c: Config = serde_json::from_str(r#"{"stt":{"engine":"hybrid","hints":["Кузя"],"cloud_timeout_ms":900}}"#).unwrap();
+        assert_eq!((c.stt.engine.as_str(), c.stt.hints.as_slice(), c.stt.cloud_timeout_ms), ("hybrid", &["Кузя".to_string()][..], 900));
+        let j = serde_json::to_value(Config::default()).unwrap();
+        assert_eq!(j["stt"]["cloud_model"], "whisper-large-v3");
+        assert_eq!(j["stt"]["hints"], serde_json::json!([]));
     }
 
     #[test]

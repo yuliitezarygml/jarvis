@@ -1,0 +1,17 @@
+[package]
+name = "stt-bench"
+version = "0.1.0"
+edition = "2024"
+description = "Замер распознавания речи J.A.R.V.I.S.: WER/CER/ошибки в названиях/время по папке WAV + refs.tsv; синтез проверочных фраз голосом Джарвиса"
+
+
+[[bin]]
+name = "stt-bench"
+path = "src/main.rs"
+
+[dependencies]
+jarvis-core = { path = "../../crates/jarvis-core" }
+jarvis-voice = { path = "../../crates/jarvis-voice", features = ["local-stt"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+serde_json = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

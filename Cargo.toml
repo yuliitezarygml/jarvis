@@ -17,6 +17,7 @@ members = [
     "crates/jarvis-kb",
     "src-tauri",
     "tools/kb-build",
+    "tools/stt-bench",
     "server/jarvis-stt-rs",
 ]
 exclude = ["server/jarvis-tts-rs"]
