@@ -484,7 +484,9 @@ mod tests {
         let t0 = Instant::now();
         assert!(p.notes("открой блокнот", None, t0).is_empty());
         let n = p.notes("открой блокнод", None, t0 + Duration::from_secs(10));
-        assert_eq!(n, vec!["повторяет команду".to_string()]);
+        assert_eq!(n[0], "повторяет команду");
+        // К повтору — пример реплики для этой ситуации (встроенный дворецкий).
+        assert!(n[1].starts_with(SAMPLES_NOTE) && n[1].ends_with("«Уже выполняю, сэр.»"), "{n:?}");
         let n = p.notes("Открой блокнот!", None, t0 + Duration::from_secs(20));
         assert_eq!(n[0], "повторяет команду 3 раз");
         // Другая команда и старые повторы (> 90 с) не считаются.

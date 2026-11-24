@@ -79,7 +79,7 @@ export default function ConfirmDialog({ compact = false }: { compact?: boolean }
           Нет
         </button>
       </div>
-      {!compact && <p className="muted small">Можно ответить голосом: «да, сэр» или «нет».</p>}
+      {!compact && <p className="muted small">Можно ответить голосом: «да» или «нет».</p>}
       {error && <p className="error-text small">{error}</p>}
     </div>
   );
