@@ -14,6 +14,7 @@ pub mod resample;
 pub mod stt;
 pub mod tls;
 pub mod tone;
+pub mod trim;
 pub mod tts;
 pub mod vad;
 pub mod wake;

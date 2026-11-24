@@ -52,6 +52,8 @@ pub struct VoiceConfig {
     pub buffer_ms: u32,
     /// Сколько фраз синтезировать заранее, пока играет текущая.
     pub prefetch_phrases: usize,
+    /// Подрезка тишины в речи (паузы на точках, тишина в начале/конце кусков). `None` — играть как есть.
+    pub trim: Option<crate::trim::TrimConfig>,
     /// Тон голоса (громкость/темп относительно обычного).
     pub tone: ToneConfig,
     /// Подсказки для облачного распознавания от приложения (имена из памяти и т. п.) — к `config.stt.hints`
@@ -87,6 +89,7 @@ impl Default for VoiceConfig {
             barge_in_while_speaking: true,
             buffer_ms: 100,
             prefetch_phrases: 2,
+            trim: Some(crate::trim::TrimConfig::default()),
             tone: ToneConfig::default(),
             stt_hints: Vec::new(),
         }
@@ -403,6 +406,9 @@ impl Inner {
             let mut dec = S16Decoder::new();
             let target = (rate * self.cfg.buffer_ms / 1000).max(256) as usize;
             let mut buf: Vec<f32> = Vec::with_capacity(target * 2);
+            // Подрезка тишины: один подрезчик на кусок (фразу).
+            let mut trimmer = self.cfg.trim.map(|t| crate::trim::SilenceTrimmer::new(t, rate));
+            let mut raw: Vec<f32> = Vec::new();
             loop {
                 let chunk = tokio::select! {
                     _ = token.cancelled() => return Err(VoiceError::Cancelled),
@@ -410,7 +416,14 @@ impl Inner {
                 };
                 match chunk {
                     Some(Ok(bytes)) => {
-                        dec.decode_into(&bytes, &mut buf);
+                        match trimmer.as_mut() {
+                            Some(t) => {
+                                raw.clear();
+                                dec.decode_into(&bytes, &mut raw);
+                                t.push(&raw, &mut buf);
+                            }
+                            None => dec.decode_into(&bytes, &mut buf),
+                        }
                         if buf.len() >= target {
                             let b = std::mem::replace(&mut buf, Vec::with_capacity(target * 2));
                             self.play(b, rate, token).await?;
@@ -423,6 +436,9 @@ impl Inner {
                     }
                     None => break,
                 }
+            }
+            if let Some(t) = trimmer.as_mut() {
+                t.finish(&mut buf);
             }
             if !buf.is_empty() {
                 self.play(buf, rate, token).await?;
@@ -487,7 +503,9 @@ impl Inner {
         device: &str,
         on_intent: &(dyn Fn(Intent) + Send + Sync),
     ) {
-        let text = text.trim();
+        // Английские термины — в исходном написании («пауэршелл» → «PowerShell»), какой бы движок ни распознал.
+        let text = crate::stt::terms::apply(text.trim());
+        let text = text.as_str();
         if text.is_empty() {
             return;
         }
@@ -686,6 +704,7 @@ async fn listen_loop(
                 }
                 Some(SttEvent::Partial { text }) => {
                     if inner.wake.has_wake_prefix(&text) || inner.in_follow_up() {
+                        let text = crate::stt::terms::apply(&text);
                         inner.events.emit(Event::Subtitle { speaker: Speaker::User, text, is_final: false });
                     }
                 }

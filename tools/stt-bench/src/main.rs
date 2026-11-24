@@ -158,6 +158,10 @@ fn print_diffs(scores: &[EngineScore]) {
             println!("  {}  эталон:     {}", p.name, p.reference);
             match &p.error {
                 Some(e) => println!("      сбой:       {e}"),
+                None if p.raw_hypothesis != p.hypothesis => {
+                    println!("      движок:     {}", p.raw_hypothesis);
+                    println!("      после слов: {}", p.hypothesis);
+                }
                 None => println!("      распознано: {}", p.hypothesis),
             }
             let names = if p.wrong_names.is_empty() { String::new() } else { format!("; названия: {}", p.wrong_names.join(", ")) };

@@ -3,8 +3,8 @@
 //! «Проверить на моём голосе» в настройках.
 //!
 //! Нормализация для подсчёта: нижний регистр, «ё» → «е», знаки препинания → пробел, числа как есть.
-//! Разговорные написания названий из словаря (`hints::NAME_HINTS`: «вс код» → «vs code») приводятся к
-//! одному виду в эталоне и в ответе: GigaAM пишет названия кириллицей, а для команд это одно и то же.
+//! До этого ответ движка проходит `terms::apply` — ту же обработку, что в конвейере («вс код» → «VS Code»,
+//! «конфиг джейсон» → «config.json»): оценивается то, что реально получит Джарвис.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use jarvis_core::CancellationToken;
 use serde::Serialize;
 
-use super::hints::{NAME_HINTS, stt_hints};
+use super::hints::stt_hints;
+use super::terms;
 use super::{GroqWhisperStt, SttEngine};
 use crate::error::{Result, VoiceError};
 
@@ -59,7 +60,10 @@ pub struct BenchItem {
 pub struct PhraseResult {
     pub name: String,
     pub reference: String,
+    /// Текст, который получит конвейер (ответ движка после `terms::apply`).
     pub hypothesis: String,
+    /// Сырой ответ движка.
+    pub raw_hypothesis: String,
     pub word_errors: usize,
     pub words: usize,
     pub char_errors: usize,
@@ -135,40 +139,10 @@ pub fn normalize(text: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Таблица «разговорное написание (слова) → каноническое (слова)», самые длинные — первыми.
-fn alias_table() -> Vec<(Vec<String>, Vec<String>)> {
-    let mut t = Vec::new();
-    for (canon, aliases) in NAME_HINTS {
-        let c: Vec<String> = normalize(canon).split(' ').map(String::from).collect();
-        for a in aliases.iter().chain(std::iter::once(canon)) {
-            let a: Vec<String> = normalize(a).split(' ').map(String::from).collect();
-            if !a.is_empty() && a != c {
-                t.push((a, c.clone()));
-            }
-        }
-    }
-    t.sort_by_key(|(a, _)| std::cmp::Reverse(a.len()));
-    t
-}
-
-/// Слова после нормализации и приведения названий к одному виду.
+/// Слова для подсчёта: текст после `terms::apply` (как его получает конвейер: «вс код» → «VS Code»),
+/// затем нормализация (регистр не важен).
 pub fn score_words(text: &str) -> Vec<String> {
-    let words: Vec<String> = normalize(text).split(' ').filter(|w| !w.is_empty()).map(String::from).collect();
-    let table = alias_table();
-    let mut out = Vec::with_capacity(words.len());
-    let mut i = 0;
-    'outer: while i < words.len() {
-        for (alias, canon) in &table {
-            if words[i..].starts_with(alias) {
-                out.extend(canon.iter().cloned());
-                i += alias.len();
-                continue 'outer;
-            }
-        }
-        out.push(words[i].clone());
-        i += 1;
-    }
-    out
+    normalize(&terms::apply(text)).split(' ').filter(|w| !w.is_empty()).map(String::from).collect()
 }
 
 /// Расстояние Левенштейна (вставка/удаление/замена).
@@ -238,6 +212,7 @@ pub fn score_phrase(item_name: &str, reference: &str, hypothesis: &str, latency_
         name: item_name.into(),
         reference: reference.into(),
         hypothesis: hypothesis.into(),
+        raw_hypothesis: hypothesis.into(),
         word_errors: we,
         words,
         char_errors: ce,
@@ -275,7 +250,11 @@ pub async fn bench_engine(name: &str, engine: &dyn SttEngine, items: &[BenchItem
         let ms = t0.elapsed().as_millis() as u64;
         name_total += name_errors(&it.reference, &it.reference, names).1;
         phrases.push(match r {
-            Ok(r) => score_phrase(&it.name, &it.reference, &r.text, ms, names),
+            // Оценивается то, что получит конвейер (после `terms::apply`); сырой ответ движка — рядом.
+            Ok(r) => PhraseResult {
+                raw_hypothesis: r.text.clone(),
+                ..score_phrase(&it.name, &it.reference, &terms::apply(&r.text), ms, names)
+            },
             Err(e) => PhraseResult { error: Some(e.to_string()), ..score_phrase(&it.name, &it.reference, "", ms, names) },
         });
     }
@@ -403,9 +382,9 @@ mod tests {
     }
 
     #[test]
-    fn names_unified() {
+    fn terms_applied_before_scoring() {
         assert_eq!(score_words("Джарвис, запусти вс код"), ["джарвис", "запусти", "vs", "code"]);
-        assert_eq!(score_words("jarvis выключи вай фай"), ["джарвис", "выключи", "wi", "fi"]);
+        assert_eq!(score_words("Джарвис, выключи вай фай"), ["джарвис", "выключи", "wi", "fi"]);
         assert_eq!(score_words("открой диск д"), ["открой", "диск", "d"]);
     }
 
@@ -416,6 +395,7 @@ mod tests {
         assert_eq!(edit_distance(&['к', 'о', 'т'], &['к', 'и', 'т', 'ы']), 2);
         assert_eq!(wer("Джарвис, открой браузер", "джарвис открой браузер."), 0.0);
         assert_eq!(word_errors("Джарвис, запусти VS Code", "Джарвис запусти вэс код"), (0, 4));
+        assert_eq!(word_errors("открой config.json", "открой конфиг джейсон"), (0, 3));
         // Числа как есть: «пятнадцать» ≠ «15».
         assert_eq!(word_errors("таймер на 15 минут", "таймер на пятнадцать минут"), (1, 4));
         assert_eq!(word_errors("открой браузер", ""), (2, 2));
@@ -427,7 +407,7 @@ mod tests {
     #[test]
     fn name_error_counting() {
         let names = stt_hints(&[], &[]);
-        let (wrong, total) = name_errors("Джарвис, открой GitHub и Discord", "джарвис открой гитхаб и дискорт", &names);
+        let (wrong, total) = name_errors("Джарвис, открой GitHub и Discord", "джарвис открой гитхаб и диксон", &names);
         assert_eq!(total, 3, "Джарвис, GitHub, Discord");
         assert_eq!(wrong, ["Discord"]);
     }

@@ -9,6 +9,7 @@ mod hybrid;
 #[cfg(feature = "local-stt")]
 mod local;
 mod server;
+pub mod terms;
 
 pub use groq::GroqWhisperStt;
 pub use hybrid::{HybridStt, Winner};

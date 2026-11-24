@@ -118,7 +118,10 @@ export interface SttEngineScore {
 export interface SttPhraseResult {
   name: string;
   reference: string;
+  /** Текст, который получит конвейер (после обратного словаря терминов). */
   hypothesis: string;
+  /** Сырой ответ движка. */
+  raw_hypothesis: string;
   word_errors: number;
   words: number;
   char_errors: number;

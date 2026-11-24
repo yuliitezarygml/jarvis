@@ -326,10 +326,13 @@ mod tests {
             let mut guard = DropFlag(Some(self.cancelled.clone()));
             tokio::select! {
                 _ = cancel.cancelled() => Err(VoiceError::Cancelled),
-                _ = tokio::time::sleep(self.delay) => if { guard.0 = None; self.fail } {
-                    Err(VoiceError::Http { status: 500, body: String::new() })
-                } else {
-                    Ok(SttResult { text: self.text.into(), duration_ms: 0 })
+                _ = tokio::time::sleep(self.delay) => {
+                    guard.0 = None; // досчитали сами — не отмена
+                    if self.fail {
+                        Err(VoiceError::Http { status: 500, body: String::new() })
+                    } else {
+                        Ok(SttResult { text: self.text.into(), duration_ms: 0 })
+                    }
                 }
             }
         }
@@ -366,7 +369,7 @@ mod tests {
         (h, flag, calls)
     }
 
-    const PCM: [i16; 16_000] = [0; 16_000];
+    static PCM: [i16; 16_000] = [0; 16_000];
 
     #[tokio::test]
     async fn cloud_in_time_wins() {
