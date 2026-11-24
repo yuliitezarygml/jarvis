@@ -120,7 +120,8 @@ fn normalizer_table() {
     let n = SpeechNormalizer::new();
     let mut failures = Vec::new();
     for (input, expected) in CASES {
-        let got = n.normalize(input);
+        // Знаки ударения в английских словах (U+0301, для произношения) проверяются в english.rs; здесь — текст.
+        let got = n.normalize(input).replace('\u{301}', "");
         if got != *expected {
             failures.push(format!("  {input:?}\n    ожидалось: {expected:?}\n    получено:  {got:?}"));
         }
