@@ -304,6 +304,13 @@ pub fn agent_submit(core: State<'_, CoreState>, text: String) -> CmdResult<()> {
     core.0.submit(&text, false)
 }
 
+/// Текущее настроение Джарвиса — HUD и виджет спрашивают при открытии окна (дальше — событие `persona:mood`).
+#[tauri::command]
+pub fn persona_mood(core: State<'_, CoreState>) -> serde_json::Value {
+    let (mood, reason) = core.0.persona.mood_now(std::time::Instant::now());
+    serde_json::json!({ "mood": mood.as_str(), "reason": reason })
+}
+
 #[tauri::command]
 pub fn mic_get(core: State<'_, CoreState>) -> MicStatus {
     core.0.mic_status()

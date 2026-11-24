@@ -140,6 +140,7 @@ pub fn run() {
             commands::simulate_event,
             commands::agent_submit,
             commands::mic_get,
+            commands::persona_mood,
             commands::mic_set,
             commands::assistant_status,
             commands::provider_presets,

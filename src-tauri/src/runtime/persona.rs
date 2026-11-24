@@ -14,7 +14,8 @@ use jarvis_agent::Phrases;
 use jarvis_core::config::{PersonaConfig, PersonaMode};
 use jarvis_core::persona::{normalize as lex_normalize, tokenize};
 use jarvis_core::{
-    Event, EventSink, MirrorState, Mood, MoodLabel, NullSink, Persona, PickState, Situation, SpeechTone, Vars, analyze,
+    Event, EventSink, MirrorState, Mood, MoodLabel, NullSink, Persona, PickState, Situation, SpeechTone, SwearLevel, Vars,
+    analyze,
 };
 use jarvis_voice::VoiceTone;
 
@@ -30,10 +31,31 @@ pub const SAMPLES_NOTE: &str = "примеры твоих реплик в так
 /// Начало пометки «зеркала» мата.
 pub const MAY_SWEAR_NOTE: &str = "можно материться";
 
-/// Пометка только для модели, не для рефлектора (примеры реплик, разрешение мата).
+/// Начало пометки со словечками пользователя (Джарвис может иногда вставлять их сам).
+pub const SLANG_NOTE: &str = "его словечки";
+/// Сколько словечек показывать модели за раз.
+const SLANG_SHOWN: usize = 4;
+/// Словечки — в каждом N-м ходе (и в любом «эмоциональном»), чтобы не тратить токены каждый раз.
+const SLANG_EVERY: u64 = 3;
+
+/// Пометка только для модели, не для рефлектора (примеры реплик, разрешение мата, словечки).
 pub fn is_model_only_note(note: &str) -> bool {
     let n = note.trim_start_matches('[');
-    n.starts_with(SAMPLES_NOTE) || n.starts_with(MAY_SWEAR_NOTE)
+    n.starts_with(SAMPLES_NOTE) || n.starts_with(MAY_SWEAR_NOTE) || n.starts_with(SLANG_NOTE)
+}
+
+/// Словечки из `user.json` (`words`: строки или `{ "text": … }`).
+fn read_slang(path: &Path) -> Vec<String> {
+    let Ok(s) = std::fs::read_to_string(path) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(s.trim_start_matches('\u{feff}')) else { return Vec::new() };
+    v.get("words")
+        .and_then(|w| w.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|w| w.as_str().or_else(|| w.get("text").and_then(|t| t.as_str())))
+        .map(|w| w.trim().to_string())
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 /// Изменяемое состояние характера между ходами.
@@ -43,6 +65,8 @@ struct TurnState {
     mirror: MirrorState,
     /// Ярлык настроения, который сейчас показан в HUD.
     shown: MoodLabel,
+    /// Сколько ходов было (для словечек раз в несколько ходов).
+    turns: u64,
 }
 
 pub struct PersonaRuntime {
@@ -55,6 +79,8 @@ pub struct PersonaRuntime {
     state: Mutex<TurnState>,
     /// Недавние команды (для пометки «повторяет команду»).
     recent: Mutex<VecDeque<(Instant, String)>>,
+    /// Любимые словечки пользователя (`lexicon/user.json` → `words`).
+    slang: RwLock<Vec<String>>,
 }
 
 impl Default for PersonaRuntime {
@@ -79,8 +105,10 @@ impl PersonaRuntime {
                 mood: Mood::new(),
                 mirror: MirrorState::new(),
                 shown: MoodLabel::Calm,
+                turns: 0,
             }),
             recent: Mutex::new(VecDeque::new()),
+            slang: RwLock::new(Vec::new()),
         }
     }
 
@@ -116,6 +144,7 @@ impl PersonaRuntime {
             "характер: словарь загружен"
         );
         *self.persona.write().unwrap_or_else(|e| e.into_inner()) = p;
+        *self.slang.write().unwrap_or_else(|e| e.into_inner()) = read_slang(&persona_dir.join("lexicon").join("user.json"));
         Ok(warnings)
     }
 
@@ -272,6 +301,29 @@ impl PersonaRuntime {
                 }
             }
         }
+        // Свои словечки пользователя: «Свой парень» — только приличные, «Без цензуры» — любые
+        // (мат — если сейчас можно), дворецкий — никогда. Раз в несколько ходов или в «эмоциональный» ход.
+        st.turns += 1;
+        if cfg.adaptive && mode != PersonaMode::Butler && (st.turns.is_multiple_of(SLANG_EVERY) || !tone.is_neutral()) {
+            let max_level = match mode {
+                PersonaMode::Uncensored if may_swear => SwearLevel::Mat,
+                PersonaMode::Uncensored => SwearLevel::Rude,
+                _ => SwearLevel::Soft,
+            };
+            let slang = self.slang.read().unwrap_or_else(|e| e.into_inner());
+            let allowed: Vec<&String> = slang
+                .iter()
+                .filter(|w| persona.lexicon.swear_level(w) <= max_level && persona.lexicon.never_say_hits(w).is_empty())
+                .filter(|w| !cfg.banned_words.iter().any(|b| w.to_lowercase().contains(&b.to_lowercase())))
+                .collect();
+            if !allowed.is_empty() {
+                // Свежие словечки — в конце списка; берём последние, по кругу от хода к ходу.
+                let start = (st.turns as usize / SLANG_EVERY as usize) % allowed.len();
+                let shown: Vec<String> =
+                    (0..SLANG_SHOWN.min(allowed.len())).map(|i| allowed[(start + i) % allowed.len()].clone()).collect();
+                out.push(format!("{SLANG_NOTE} (можешь иногда вставлять к месту, как свои): {}", shown.join(", ")));
+            }
+        }
         drop(persona);
         self.update_mood_badge(&mut st, now);
         out
@@ -296,6 +348,16 @@ impl PersonaRuntime {
     }
 
     // ───────────────────────────── настроение ─────────────────────────────
+
+    /// Текущее настроение (для HUD после перезагрузки окна): ярлык и причина.
+    pub fn mood_now(&self, now: Instant) -> (MoodLabel, Option<String>) {
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.config().mood {
+            return (MoodLabel::Calm, None);
+        }
+        let label = st.mood.label_at(now);
+        (label, (label != MoodLabel::Calm).then(|| st.mood.reason_at(now)).flatten())
+    }
 
     /// Проверить затухание настроения и сообщить HUD, если ярлык сменился (вызывается каждый ход и по таймеру).
     pub fn check_mood(&self, now: Instant) {
@@ -563,6 +625,35 @@ mod tests {
         // Остальные режимы такой пометки не получают.
         let (b, _) = real(PersonaMode::Buddy);
         assert!(!b.notes("да блядь", None, t0).iter().any(|x| x.starts_with(MAY_SWEAR_NOTE)));
+    }
+
+    #[test]
+    fn user_slang_used_by_mode() {
+        let words = vec!["красава".to_string(), "жиза".to_string(), "ёпта".to_string(), "нахуй".to_string()];
+        let slang_of = |n: &[String]| n.iter().find(|x| x.starts_with(SLANG_NOTE)).cloned();
+        let t0 = Instant::now();
+        // Дворецкий — никогда.
+        let (b, _) = real(PersonaMode::Butler);
+        *b.slang.write().unwrap() = words.clone();
+        for i in 0..6 {
+            assert!(slang_of(&b.notes(&format!("открой блокнот номер {i}"), None, t0 + Duration::from_secs(i * 100))).is_none());
+        }
+        // «Свой парень» — раз в 3 хода, без мата.
+        let (y, _) = real(PersonaMode::Buddy);
+        *y.slang.write().unwrap() = words.clone();
+        let mut seen = None;
+        for i in 0..3 {
+            seen = seen.or(slang_of(&y.notes(&format!("какая погода {i}"), None, t0 + Duration::from_secs(i * 100))));
+        }
+        let s = seen.expect("за 3 хода словечки показаны");
+        assert!(s.contains("красава") && !s.contains("нахуй"), "{s}");
+        // «Без цензуры»: пока пользователь не матерился — без мата; после мата — можно.
+        let (u, _) = real(PersonaMode::Uncensored);
+        *u.slang.write().unwrap() = words;
+        let n = u.notes("пошёл нахуй", None, t0);
+        let s = slang_of(&n).expect("эмоциональный ход — словечки сразу");
+        assert!(s.contains("нахуй"), "{s}");
+        assert!(is_model_only_note(&s), "рефлектору словечки не нужны");
     }
 
     #[test]

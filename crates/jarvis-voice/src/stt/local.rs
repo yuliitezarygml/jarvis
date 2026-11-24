@@ -281,6 +281,28 @@ mod tests {
         assert!(ms < 3000, "слишком медленно: {ms} мс");
     }
 
+    /// Ручная проверка распознавания папки WAV (любой частоты): `JARVIS_STT_WAV_DIR=<папка>`. Печатает
+    /// «файл → текст» — так проверяли, как GigaAM пишет мат (фразы синтезировал голос Джарвиса).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "нужны DLL sherpa-onnx рядом с тестовым exe и JARVIS_STT_WAV_DIR"]
+    async fn transcribe_wav_dir() {
+        let (Some(model), Ok(dir)) = (model_dir(), std::env::var("JARVIS_STT_WAV_DIR")) else {
+            eprintln!("нет модели или JARVIS_STT_WAV_DIR — пропуск");
+            return;
+        };
+        let stt = LocalStt::new(&model).unwrap();
+        let cancel = CancellationToken::new();
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).collect();
+        files.retain(|p| p.extension().is_some_and(|e| e == "wav"));
+        files.sort();
+        for p in files {
+            let wav = crate::pcm::wav_decode(&std::fs::read(&p).unwrap()).unwrap();
+            let pcm = wav.to_stt_pcm().unwrap();
+            let r = stt.transcribe(&pcm, &cancel).await.unwrap();
+            println!("STT\t{}\t{}", p.file_stem().unwrap().to_string_lossy(), r.text);
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "нужны DLL sherpa-onnx рядом с тестовым exe (см. комментарий выше)"]
     async fn stream_gives_final_after_end() {

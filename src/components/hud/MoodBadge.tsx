@@ -1,18 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { inTauri } from '@/lib/bridge';
+import { call, inTauri } from '@/lib/bridge';
 import { MOOD_ICON, MOOD_LABEL, parseMoodPayload } from '@/lib/persona';
 import { useTauriEvent } from '@/lib/store';
 import { PERSONA_MOOD_EVENT, type PersonaMood, type PersonaMoodPayload } from '@/lib/types';
 
 /**
- * Последнее настроение из события `persona:mood`. `null` до первого события и всегда в браузере без Tauri
- * (демо-режим значок не показывает).
+ * Настроение Джарвиса: при открытии окна — текущее (команда `persona_mood`, чтобы значок не пропадал после
+ * перезагрузки окна), дальше — из события `persona:mood`. `null` в браузере без Tauri (демо значок не показывает).
  */
 export function usePersonaMood(): PersonaMoodPayload | null {
   const [mood, setMood] = useState<PersonaMoodPayload | null>(null);
+  useEffect(() => {
+    if (!inTauri()) return;
+    let alive = true;
+    call<unknown>('persona_mood')
+      .then((p) => {
+        const m = parseMoodPayload(p);
+        // событие могло прийти раньше ответа — не затираем его
+        if (alive && m) setMood((cur) => cur ?? m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   useTauriEvent<unknown>(PERSONA_MOOD_EVENT, (p) => {
     if (!inTauri()) return;
     const m = parseMoodPayload(p);

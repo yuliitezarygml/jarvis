@@ -220,6 +220,8 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
     }
     case 'mic_get':
       return r(mockMic);
+    case 'persona_mood':
+      return r({ mood: 'calm', reason: null });
     case 'mic_set':
       mockMic = { ...mockMic, enabled: Boolean(a.enabled) };
       return r(mockMic);
