@@ -21,3 +21,6 @@ server/**/target/
 *.pem.key
 id_rsa*
 id_ed25519*
+
+# готовые сборки для друзей (ZIP с ключами!) — не коммитить
+release/
