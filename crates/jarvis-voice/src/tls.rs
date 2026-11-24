@@ -98,6 +98,45 @@ pub fn public_http_client(timeout: Duration) -> Result<reqwest::Client> {
         .map_err(|e| VoiceError::Tls(format!("не удалось создать HTTP-клиент: {e}")))
 }
 
+/// HTTP-клиент к публичному адресу сервера голоса (туннель Cloudflare) и к API Telegram: обычная проверка
+/// сертификатов через хранилище Windows (rustls-platform-verifier), без общего таймаута — поток PCM
+/// может идти долго; таймауты ставятся на запросы.
+pub fn web_http_client(connect_timeout: Duration) -> Result<reqwest::Client> {
+    ensure_default_provider();
+    reqwest::Client::builder()
+        .connect_timeout(connect_timeout)
+        .tcp_nodelay(true)
+        .user_agent(concat!("jarvis-voice/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| VoiceError::Tls(format!("не удалось создать HTTP-клиент: {e}")))
+}
+
+/// Адрес в домашней сети (частный/loopback IP, `localhost`, `*.local`, `*.lan`, `*.home.arpa`):
+/// для него TLS проверяется закреплённым CA, для остальных — обычными корнями.
+pub fn is_private_host(base_url: &str) -> bool {
+    use std::net::IpAddr;
+    let Ok(u) = reqwest::Url::parse(base_url) else { return false };
+    match u.host() {
+        Some(url::Host::Ipv4(ip)) => is_private_ip(IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => is_private_ip(IpAddr::V6(ip)),
+        Some(url::Host::Domain(d)) => {
+            let d = d.trim_end_matches('.').to_ascii_lowercase();
+            d == "localhost" || [".local", ".lan", ".home.arpa", ".localhost"].iter().any(|s| d.ends_with(s))
+        }
+        None => false,
+    }
+}
+
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            let s0 = v6.segments()[0];
+            v6.is_loopback() || (s0 & 0xfe00) == 0xfc00 || (s0 & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 /// `https://host:port` → `wss://host:port` (и `http` → `ws`).
 pub fn to_ws_url(base: &str, path: &str) -> String {
     let base = base.trim_end_matches('/');
@@ -139,5 +178,15 @@ mod tests {
         assert_eq!(to_ws_url("http://127.0.0.1:1", "/x"), "ws://127.0.0.1:1/x");
         let root = Path::new("D:/jarvis");
         assert_eq!(resolve_path(root, "a/b.pem"), root.join("a/b.pem"));
+    }
+
+    #[test]
+    fn private_hosts_use_pinned_ca() {
+        for u in ["https://192.168.50.38:8443", "http://127.0.0.1:9", "https://10.0.0.5", "https://[::1]:8443", "https://xeon.local:8443", "https://localhost"] {
+            assert!(is_private_host(u), "{u}");
+        }
+        for u in ["https://minute-aerial-slim-same.trycloudflare.com", "https://8.8.8.8", "https://api.telegram.org", "мусор"] {
+            assert!(!is_private_host(u), "{u}");
+        }
     }
 }

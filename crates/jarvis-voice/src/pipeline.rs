@@ -118,6 +118,9 @@ struct Inner {
     speaking: AtomicBool,
     awaiting_confirm: AtomicBool,
     follow_up_until: Mutex<Option<Instant>>,
+    /// Обычная громкость голоса пользователя (p90, дБFS; скользящее среднее по принятым репликам вне речи
+    /// Джарвиса). Эхо из колонок заметно тише — так оно отсеивается, даже если слова распознаны криво.
+    user_level: Mutex<Option<f32>>,
     /// Окно после явного «Джарвис» без команды: команда принимается даже поверх его «Слушаю, сэр»
     /// (люди начинают говорить сразу; собственный голос отсекает проверка эха по словам).
     addressed_until: Mutex<Option<Instant>>,
@@ -177,6 +180,7 @@ impl VoicePipeline {
                 speaking: AtomicBool::new(false),
                 awaiting_confirm: AtomicBool::new(false),
                 follow_up_until: Mutex::new(None),
+                user_level: Mutex::new(None),
                 addressed_until: Mutex::new(None),
                 profile,
             }),
@@ -376,8 +380,8 @@ impl Inner {
             // После ответа — короткое окно (уточнить, «а ещё…»), чтобы не ловить разговоры рядом.
             // Окно после явного «Джарвис» (длиннее) не укорачиваем.
             let after = Instant::now() + self.cfg.follow_up_after_answer;
-            let mut f = self.follow_up_until.lock().unwrap();
-            *f = Some(f.map_or(after, |t| t.max(after)));
+            let addressed = *self.addressed_until.lock().unwrap();
+            *self.follow_up_until.lock().unwrap() = Some(addressed.map_or(after, |t| t.max(after)));
         }
         self.events.emit(Event::State { state: AssistantState::Idle });
         match result {
@@ -484,16 +488,25 @@ impl Inner {
             return;
         }
         if self.echo.is_echo(text, started_at) {
-            tracing::debug!(text, "эхо TTS отброшено");
+            tracing::info!(text, "голос: эхо собственной речи отброшено (слова)");
+            return;
+        }
+        let near_playback = self.speaking.load(Ordering::Acquire) || self.echo.near_playback(started_at);
+        if near_playback && self.quiet_like_echo(features) {
+            tracing::info!(text, p90 = ?features.map(|f| f.p90_dbfs), user = ?*self.user_level.lock().unwrap(), "голос: эхо собственной речи отброшено (тише голоса пользователя)");
             return;
         }
         let tone = self.judge_voice(text, features, device);
         let during_speech = self.speaking.load(Ordering::Acquire) || self.echo.in_echo_zone(started_at);
+        // Человек отвечает поверх голоса Джарвиса: микрофон слышит обоих. Своё — то, что осталось без кусков
+        // его речи; если своих слов хотя бы два — это ответ, а не эхо.
+        let own = if during_speech { self.echo.own_words(text) } else { Vec::new() };
+        let replies_over_speech = own.len() >= 2;
         let ctx = WakeContext {
             awaiting_confirm: self.awaiting_confirm.load(Ordering::Acquire),
-            // Во время речи Джарвиса команду без обращения не берём (эхо, разговоры рядом) — кроме окна сразу
-            // после явного «Джарвис»: человек начинает говорить, пока звучит «Слушаю, сэр».
-            follow_up: self.in_follow_up() && (!during_speech || self.addressed()),
+            // Во время речи Джарвиса команду без обращения берём, только если в ней есть свои слова человека
+            // (не эхо), или сразу после явного «Джарвис»: человек начинает говорить, пока звучит «Слушаю».
+            follow_up: self.in_follow_up() && (!during_speech || self.addressed() || replies_over_speech),
         };
         let mut intent = self.wake.classify(text, ctx);
         tracing::info!(?intent, follow_up = ctx.follow_up, awaiting_confirm = ctx.awaiting_confirm, "голос: реплика разобрана");
@@ -505,6 +518,9 @@ impl Inner {
             _ => {}
         }
         self.learn_voice(text, features, device);
+        if !near_playback {
+            self.learn_user_level(features);
+        }
         if let Intent::Command { voice, .. } = &mut intent {
             *voice = tone;
         }
@@ -515,7 +531,9 @@ impl Inner {
                 if self.speaking.load(Ordering::Acquire) {
                     self.barge_in();
                 }
-                *self.follow_up_until.lock().unwrap() = None;
+                // Пока Джарвис думает и отвечает, разговор продолжается: ответ поверх его речи — не «посторонний»
+                // (окно после ответа поставит речь; явное обращение снимаем).
+                *self.follow_up_until.lock().unwrap() = Some(Instant::now() + CONVERSATION_WINDOW);
                 *self.addressed_until.lock().unwrap() = None;
             }
             Intent::WakeOnly => {
@@ -531,6 +549,32 @@ impl Inner {
         }
         self.events.emit(Event::Subtitle { speaker: Speaker::User, text: text.to_string(), is_final: true });
         on_intent(intent);
+    }
+}
+
+/// Сколько после команды разговор считается продолжающимся (думает + говорит), пока речь не поставит своё окно.
+const CONVERSATION_WINDOW: Duration = Duration::from_secs(45);
+/// Насколько эхо из колонок тише голоса пользователя, чтобы отсеять его по громкости.
+const ECHO_QUIETER_DB: f32 = 14.0;
+
+impl Inner {
+    /// Реплика рядом с речью Джарвиса заметно тише обычного голоса пользователя — это колонки, а не человек.
+    fn quiet_like_echo(&self, features: Option<&VoiceFeatures>) -> bool {
+        let (Some(f), Some(user)) = (features, *self.user_level.lock().unwrap()) else { return false };
+        f.speech_ms > 0 && f.p90_dbfs < user - ECHO_QUIETER_DB
+    }
+
+    /// Запомнить громкость принятой реплики пользователя (вне речи Джарвиса).
+    fn learn_user_level(&self, features: Option<&VoiceFeatures>) {
+        let Some(f) = features else { return };
+        if f.speech_ms < 300 || f.p90_dbfs < -60.0 {
+            return;
+        }
+        let mut l = self.user_level.lock().unwrap();
+        *l = Some(match *l {
+            None => f.p90_dbfs,
+            Some(v) => v + 0.2 * (f.p90_dbfs - v),
+        });
     }
 }
 
@@ -834,6 +878,66 @@ mod tests {
         let got = listen("да, сэр", |p, _| p.set_awaiting_confirm(true)).await;
         assert_eq!(got, vec![Intent::Confirm]);
     }
+    /// Случаи из журнала 2026-11-24 (колонки ноутбука, без наушников): Джарвис слышал свои «Готов, говорите» /
+    /// «К вашим услугам» как команды, а ответы человека поверх его речи («хули ты…») выбрасывались.
+    #[tokio::test]
+    async fn self_speech_dropped_and_reply_over_speech_accepted() {
+        let out = Arc::new(FakeOut::default());
+        let p = VoicePipeline::new(
+            VoiceConfig::default(),
+            Arc::new(FakeTts::default()),
+            Arc::new(FakeStt("")),
+            out.clone(),
+            Arc::new(CollectSink::default()),
+        );
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let g = got.clone();
+        let on = move |i: Intent| g.lock().unwrap().push(i);
+        let loud = VoiceFeatures {
+            mean_dbfs: -12.0,
+            p90_dbfs: -8.0,
+            peak_dbfs: -1.0,
+            noise_floor_dbfs: -57.0,
+            speech_ms: 900,
+            duration_ms: 1200,
+            clipped_ratio: 0.0,
+        };
+        let quiet = VoiceFeatures { mean_dbfs: -34.0, p90_dbfs: -30.0, peak_dbfs: -20.0, ..loud };
+        let take = || std::mem::take(&mut *got.lock().unwrap());
+        let inner = &p.inner;
+
+        // «Джарвис» — человек; его громкость запоминается.
+        inner.handle_transcript("джарвис", Instant::now(), Some(&loud), "default", &on);
+        assert_eq!(take(), vec![Intent::WakeOnly]);
+        // Отклик Джарвиса из колонок — тихий и искажённый: это эхо, не команда.
+        inner.echo.note_spoken("Готов, говорите.");
+        out.monitor.set_playing(true);
+        inner.handle_transcript("готосе говорите", Instant::now(), Some(&quiet), "default", &on);
+        inner.echo.note_spoken("К вашим услугам, сэр.");
+        inner.handle_transcript("вашим услугам с", Instant::now(), Some(&quiet), "default", &on);
+        // Даже без замеров громкости — по нечётким словам.
+        inner.handle_transcript("готосе говорите", Instant::now(), None, "default", &on);
+        assert!(take().is_empty(), "своя речь не должна стать командой");
+        out.monitor.set_ended_at(Instant::now() - Duration::from_secs(10));
+
+        // Команда → Джарвис отвечает → человек перебивает ответ без «Джарвис», микрофон слышит обоих.
+        inner.handle_transcript("джарвис что ты делаешь", Instant::now(), Some(&loud), "default", &on);
+        assert!(matches!(take().as_slice(), [Intent::Command { .. }]));
+        inner.echo.note_spoken("Сэр, уточните, пожалуйста, что именно вы хотите, чтобы я сделал.");
+        out.monitor.set_playing(true);
+        let mixed = "хули ты блять уточните пожалуйста что именно вы хотите чтобы я сделал хули ты меня блять не слушаешь";
+        inner.handle_transcript(mixed, Instant::now(), Some(&loud), "default", &on);
+        let got_now = take();
+        assert!(matches!(got_now.as_slice(), [Intent::Command { text, .. }] if text == mixed), "{got_now:?}");
+        // Короткий ответ поверх речи — тоже человек.
+        inner.handle_transcript("хули ты", Instant::now(), Some(&loud), "default", &on);
+        assert!(matches!(take().as_slice(), [Intent::Command { .. }]));
+        // А чистое эхо его фразы — нет (ни громкое, ни тихое).
+        inner.handle_transcript("уточните пожалуйста что именно вы хотите", Instant::now(), Some(&loud), "default", &on);
+        inner.handle_transcript("уточните пожалуйста", Instant::now(), Some(&quiet), "default", &on);
+        assert!(take().is_empty());
+    }
+
     /// Потоковый STT: на `end()` отвечает `Final` с заданным текстом.
     struct FakeStreamStt(&'static str);
 

@@ -291,7 +291,17 @@ impl Reflector {
         known: Option<&MemoryContext>,
         cancel: CancellationToken,
     ) -> Result<ReflectionResult, ReflectError> {
-        let resp = self.model.chat(self.build_request(t, known), cancel).await?;
+        let mut resp = self.model.chat(self.build_request(t, known), cancel.clone()).await?;
+        // Reasoning-модели (gpt-oss) иногда тратят весь бюджет на рассуждения и возвращают пустой текст
+        // (особенно на эмоциональных разговорах с матом). Один повтор с бюджетом вдвое больше.
+        if resp.message.content.trim().is_empty() {
+            let mut req = self.build_request(t, known);
+            req.max_tokens = Some(self.max_tokens.saturating_mul(2).min(4000));
+            resp = self.model.chat(req, cancel).await?;
+            if resp.message.content.trim().is_empty() {
+                return Err(ReflectError::Parse("модель вернула пустой ответ (дважды) — разговор пропущен".into()));
+            }
+        }
         let mut r = parse_reflection(&resp.message.content)?;
         r.attach_errors(t);
         Ok(r)

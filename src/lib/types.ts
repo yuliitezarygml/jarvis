@@ -96,7 +96,17 @@ export interface SearchProviderConfig {
 
 export interface Config {
   data_dir: string;
-  tts: { url: string; voice: string; ca_path: string };
+  tts: {
+    url: string;
+    voice: string;
+    ca_path: string;
+    /** Запасной адрес (обычно LAN, если `url` — туннель). */
+    lan_url: string;
+    /** Секрет: из ядра приходит замаскированным. */
+    discovery_bot_token: string;
+    /** `auto` | `lan` | `internet` */
+    prefer: string;
+  };
   stt: { engine: string; url: string; ca_path: string };
   providers: ProviderConfig[];
   roles: Roles;
