@@ -16,7 +16,10 @@ pub mod category {
     pub const HABIT: &str = "habit";
     pub const CONTACT: &str = "contact";
     pub const GENERAL: &str = "general";
-    pub const ALL: &[&str] = &[PREFERENCE, PERSONAL, ALIAS, HABIT, CONTACT, GENERAL];
+    /// Как пользователь общается: мат, юмор, что злит, любимые словечки. Всегда в контексте отдельным
+    /// блоком «Как с ним общаться» (не среди важных фактов).
+    pub const STYLE: &str = "style";
+    pub const ALL: &[&str] = &[PREFERENCE, PERSONAL, ALIAS, HABIT, CONTACT, GENERAL, STYLE];
 }
 
 /// Источник факта: пользователь сказал явно («запомни…») или выведено рефлектором.

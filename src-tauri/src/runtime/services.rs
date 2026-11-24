@@ -443,10 +443,12 @@ pub fn memory_list(mem: &Memory) -> Result<api::MemoryData, String> {
             text: f.text,
             confidence: f.confidence as f32,
             source: match f.source {
-                FactSource::Explicit => format!("сказано явно · {}", f.category),
-                FactSource::Inferred => format!("выведено · {}", f.category),
+                FactSource::Explicit => "сказано явно".to_string(),
+                FactSource::Inferred => "выведено".to_string(),
             },
             updated: date(f.updated_at),
+            category: f.category,
+            important: f.important,
         })
         .collect();
     let lessons = mem
@@ -539,8 +541,12 @@ pub fn memory_upsert(mem: &Memory, kind: &str, item: Value) -> Result<api::Memor
     match MemoryKind::parse(kind).ok_or_else(|| format!("неизвестный раздел памяти «{kind}»"))? {
         MemoryKind::Fact => {
             let f: api::Fact = serde_json::from_value(item).map_err(bad)?;
+            let category = Some(f.category.trim().to_string()).filter(|c| !c.is_empty());
             if f.id.trim().is_empty() {
-                let mut nf = NewFact::explicit(f.text);
+                let mut nf = NewFact::explicit(f.text).with_important(f.important);
+                if let Some(c) = category {
+                    nf = nf.with_category(c);
+                }
                 if f.confidence > 0.0 {
                     nf.confidence = f64::from(f.confidence.clamp(0.0, 1.0));
                 }
@@ -548,6 +554,11 @@ pub fn memory_upsert(mem: &Memory, kind: &str, item: Value) -> Result<api::Memor
             } else {
                 let mut cur = mem.get_fact(parse_id(&f.id)?).map_err(err)?.ok_or("запись не найдена")?;
                 cur.text = f.text;
+                // старый клиент без category не сбрасывает её и `important`
+                if let Some(c) = category {
+                    cur.category = c;
+                    cur.important = f.important;
+                }
                 if f.confidence > 0.0 {
                     cur.confidence = f64::from(f.confidence.clamp(0.0, 1.0));
                 }

@@ -186,6 +186,35 @@ pub struct MemoryBridge {
     pub handle: tokio::runtime::Handle,
     /// Запускать рефлектор (в тестах выключен, чтобы не ходить в модель повторно).
     pub reflect: bool,
+    /// Обычные разговоры без инструментов (копятся для рефлектора: так он узнаёт характер пользователя).
+    pub chat: std::sync::Mutex<Vec<String>>,
+}
+
+/// Сколько реплик разговора копить, прежде чем отдать рефлектору.
+pub const CHAT_REFLECT_EVERY: usize = 5;
+
+/// Реплика с «эмоцией» (крик, мат, посылание, повтор) — рефлектор разбирает разговор сразу.
+pub fn is_emotional(notes: &[String]) -> bool {
+    notes.iter().any(|n| ["голос:", "речь:", "повторяет", "настроение:"].iter().any(|k| n.contains(k)))
+}
+
+/// Строка разговора для рефлектора: реплика пользователя с пометками и ответ Джарвиса.
+pub fn chat_line(t: &Transcript) -> String {
+    let notes = t.notes.iter().filter(|n| n.starts_with('[')).cloned().collect::<Vec<_>>().join(" ");
+    let user = if notes.is_empty() { t.user_text.clone() } else { format!("{} {notes}", t.user_text) };
+    format!("Пользователь: {user}\nДжарвис: {}", t.final_text.trim())
+}
+
+/// Протокол «просто разговор» для рефлектора (несколько реплик сразу).
+pub fn chat_transcript(lines: &[String]) -> TaskTranscript {
+    TaskTranscript {
+        user_request: format!("Разговор без задач (реплики подряд):\n{}", lines.join("\n")),
+        steps: Vec::new(),
+        final_answer: None,
+        success: None,
+        user_feedback: None,
+        app: None,
+    }
 }
 
 #[async_trait]
@@ -252,11 +281,22 @@ impl MemoryHooks for MemoryBridge {
             })
             .await;
 
-        if !self.reflect || t.stop_reason == StopReason::Cancelled || !(t.used_tools() || t.error.is_some()) {
+        if !self.reflect || t.stop_reason == StopReason::Cancelled {
             return;
         }
+        let task = if t.used_tools() || t.error.is_some() {
+            to_task_transcript(t)
+        } else {
+            // Обычный разговор: копим и отдаём пачкой (каждые 5 реплик или сразу после «эмоции»).
+            let mut chat = self.chat.lock().unwrap_or_else(|e| e.into_inner());
+            chat.push(chat_line(t));
+            if chat.len() < CHAT_REFLECT_EVERY && !is_emotional(&t.notes) {
+                return;
+            }
+            let lines = std::mem::take(&mut *chat);
+            chat_transcript(&lines)
+        };
         let Some(choice) = self.models.reflection_choice() else { return };
-        let task = to_task_transcript(t);
         let mem = self.mem.clone();
         let brain = self.models.brain.clone();
         let task_end = Instant::now();
@@ -299,8 +339,10 @@ fn action_status(s: StepStatus) -> ActionStatus {
 
 /// Протокол агента → протокол рефлектора.
 pub fn to_task_transcript(t: &Transcript) -> TaskTranscript {
+    // Пометки хода ([голос: …], [речь: …]) — замеры, рефлектору они полезны для фактов о характере.
+    let marks: Vec<&str> = t.notes.iter().map(String::as_str).filter(|n| n.starts_with('[')).collect();
     TaskTranscript {
-        user_request: t.user_text.clone(),
+        user_request: if marks.is_empty() { t.user_text.clone() } else { format!("{} {}", t.user_text, marks.join(" ")) },
         steps: t
             .steps
             .iter()
@@ -323,6 +365,25 @@ pub fn to_task_transcript(t: &Transcript) -> TaskTranscript {
 mod tests {
     use super::*;
     use jarvis_core::CollectSink;
+
+    #[test]
+    fn chat_turns_go_to_reflector_with_marks() {
+        let t = Transcript {
+            user_text: "нахуй ты это открыл".into(),
+            final_text: "Сам просил.".into(),
+            notes: vec!["[голос: кричит (+14 дБ)]".into(), "цикл: служебное".into()],
+            ..Default::default()
+        };
+        assert!(is_emotional(&t.notes));
+        assert!(!is_emotional(&["цикл: служебное".to_string()]));
+        let line = chat_line(&t);
+        assert_eq!(line, "Пользователь: нахуй ты это открыл [голос: кричит (+14 дБ)]\nДжарвис: Сам просил.");
+        let task = chat_transcript(&[line]);
+        assert!(task.user_request.starts_with("Разговор без задач"));
+        assert!(task.steps.is_empty() && task.success.is_none());
+        // В протоколе задачи пометки тоже видны рефлектору.
+        assert!(to_task_transcript(&t).user_request.ends_with("[голос: кричит (+14 дБ)]"));
+    }
 
     #[test]
     fn spoken_confirm_is_human_not_raw_call() {

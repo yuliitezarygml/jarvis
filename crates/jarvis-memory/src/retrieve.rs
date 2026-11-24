@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::db::Memory;
 use crate::error::Result;
-use crate::facts::{important_facts_conn, search_facts_scored};
+use crate::facts::{important_facts_conn, search_facts_scored, style_facts_conn};
 use crate::lessons::{lessons_by_tool_or_app, search_lessons_scored};
 use crate::model::{Fact, Lesson, MemoryKind, MemoryRef, Playbook, category};
 use crate::playbooks::search_playbooks_scored;
@@ -17,14 +17,20 @@ pub const FACTS_K: usize = 6;
 pub const IMPORTANT_FACTS_K: usize = 5;
 pub const LESSONS_K: usize = 5;
 pub const PLAYBOOKS_K: usize = 3;
+/// Сколько фактов о манере общения (`style`) всегда идёт в контекст.
+pub const STYLE_FACTS_K: usize = 5;
 /// Записи с доверием ниже не попадают в контекст.
 const MIN_CONFIDENCE: f64 = 0.1;
 
 /// Что память предлагает агенту перед ходом.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MemoryContext {
-    /// Сначала всегда важные (предпочтения), затем релевантные запросу.
+    /// Сначала всегда важные (предпочтения), затем релевантные запросу. Без категории `style`.
     pub facts: Vec<Fact>,
+    /// Как пользователь общается (категория `style`, ≤ [`STYLE_FACTS_K`], свежие первыми) — всегда в
+    /// контексте, отдельным блоком «Как с ним общаться».
+    #[serde(default)]
+    pub style: Vec<Fact>,
     pub lessons: Vec<Lesson>,
     pub playbooks: Vec<Playbook>,
 }
@@ -34,8 +40,13 @@ pub fn estimate_tokens(s: &str) -> usize {
     s.chars().count().div_ceil(3)
 }
 
+fn is_style(f: &Fact) -> bool {
+    f.category == category::STYLE
+}
+
+/// Как в SQL `important_facts_conn`: `important` или `preference`, но не `style` (у тех свой блок).
 fn is_important(f: &Fact) -> bool {
-    f.important || f.category == category::PREFERENCE
+    !is_style(f) && (f.important || f.category == category::PREFERENCE)
 }
 
 fn normalize_scores<T>(items: &[(T, f64)]) -> f64 {
@@ -63,10 +74,18 @@ impl Memory {
 fn retrieve_conn(c: &rusqlite::Connection, query: &str, tool: Option<&str>, app: Option<&str>) -> Result<MemoryContext> {
     {
         // --- факты
+        // Факты `style` живут только в своём блоке: важные/релевантные их не дублируют (SQL важных их
+        // исключает, здесь — релевантные по запросу).
+        let style = style_facts_conn(c, STYLE_FACTS_K, MIN_CONFIDENCE)?;
         let mut facts = important_facts_conn(c, IMPORTANT_FACTS_K)?;
-        for (f, _) in search_facts_scored(c, query, FACTS_K)? {
-            if f.confidence >= MIN_CONFIDENCE && !facts.iter().any(|x| x.id == f.id) {
+        let mut relevant = 0;
+        for (f, _) in search_facts_scored(c, query, FACTS_K + STYLE_FACTS_K)? {
+            if relevant >= FACTS_K {
+                break;
+            }
+            if f.confidence >= MIN_CONFIDENCE && !is_style(&f) && !facts.iter().any(|x| x.id == f.id) {
                 facts.push(f);
+                relevant += 1;
             }
         }
 
@@ -115,13 +134,19 @@ fn retrieve_conn(c: &rusqlite::Connection, query: &str, tool: Option<&str>, app:
         playbooks.sort_by(|a, b| b.1.total_cmp(&a.1));
         let playbooks = playbooks.into_iter().take(PLAYBOOKS_K).map(|(p, _)| p).collect();
 
-        Ok(MemoryContext { facts, lessons, playbooks })
+        Ok(MemoryContext { facts, style, lessons, playbooks })
     }
 }
 
 const HEADER: &str = "Память:";
-const SECTIONS: [&str; 3] =
-    ["Факты о пользователе:", "Уроки из прошлых ошибок (не повторяй их):", "Проверенные сценарии (плейбуки):"];
+/// Заголовок блока фактов `style`.
+pub const STYLE_HEADING: &str = "Как с ним общаться (так пользователь говорит и вот что его раздражает — подстраивай тон и манеру под это):";
+const SECTIONS: [&str; 4] = [
+    STYLE_HEADING,
+    "Факты о пользователе:",
+    "Уроки из прошлых ошибок (не повторяй их):",
+    "Проверенные сценарии (плейбуки):",
+];
 const MAX_LINE_CHARS: usize = 420;
 /// Меньше этого остатка строку не обрезаем — только пропускаем.
 const MIN_TRUNCATED_TOKENS: usize = 12;
@@ -187,12 +212,21 @@ fn playbook_line(p: &Playbook) -> String {
 
 impl MemoryContext {
     pub fn is_empty(&self) -> bool {
-        self.facts.is_empty() && self.lessons.is_empty() && self.playbooks.is_empty()
+        self.facts.is_empty() && self.style.is_empty() && self.lessons.is_empty() && self.playbooks.is_empty()
+    }
+
+    /// Только блок «Как с ним общаться» (без «Память:»), не длиннее `budget_tokens`; пусто, если фактов нет.
+    /// Для промпта, который ставит его отдельно (сразу после характера) — тогда перед [`Self::render`]
+    /// очистите `style`, чтобы не повторять.
+    pub fn render_style(&self, budget_tokens: usize) -> String {
+        let only = MemoryContext { style: self.style.clone(), ..Default::default() };
+        let full = only.render(budget_tokens + estimate_tokens(HEADER) + 1);
+        full.strip_prefix(HEADER).map(|s| s.trim_start_matches('\n').to_string()).unwrap_or_default()
     }
 
     /// Ссылки на все записи — передать в [`Memory::mark_used`] после хода.
     pub fn refs(&self) -> Vec<MemoryRef> {
-        let f = self.facts.iter().map(|x| MemoryRef { kind: MemoryKind::Fact, id: x.id });
+        let f = self.style.iter().chain(&self.facts).map(|x| MemoryRef { kind: MemoryKind::Fact, id: x.id });
         let l = self.lessons.iter().map(|x| MemoryRef { kind: MemoryKind::Lesson, id: x.id });
         let p = self.playbooks.iter().map(|x| MemoryRef { kind: MemoryKind::Playbook, id: x.id });
         f.chain(l).chain(p).collect()
@@ -200,24 +234,35 @@ impl MemoryContext {
 
     /// Русский блок «Память:» не длиннее `budget_tokens` (по [`estimate_tokens`]).
     ///
-    /// Группы по приоритету: важные факты → уроки → остальные факты → плейбуки. Сначала каждая группа
-    /// получает свою долю бюджета (35/40/10/15 %) — так длинные факты не вытесняют уроки; затем
+    /// Группы по приоритету: манера общения (`style`, своя секция первой) → важные факты → уроки →
+    /// остальные факты → плейбуки. Сначала каждая группа получает свою долю бюджета (15 % на `style`,
+    /// если он есть; остальное — 35/40/10/15 %) — так длинные факты не вытесняют уроки; затем
     /// остаток заполняется по приоритету. Не влезающая строка обрезается по символам с «…»
     /// (если остаётся ≥12 токенов), иначе пропускается. Пустая память → пустая строка.
     pub fn render(&self, budget_tokens: usize) -> String {
         // (секция, группа, строка)
         let mut cands: Vec<(usize, usize, String)> = Vec::new();
-        cands.extend(self.facts.iter().filter(|f| is_important(f)).map(|f| (0, 0, fact_line(f))));
-        cands.extend(self.lessons.iter().map(|l| (1, 1, lesson_line(l))));
-        cands.extend(self.facts.iter().filter(|f| !is_important(f)).map(|f| (0, 2, fact_line(f))));
-        cands.extend(self.playbooks.iter().map(|p| (2, 3, playbook_line(p))));
+        // факты `style` в `facts` (если контекст собран вручную) тоже уходят в свою секцию, без дублей
+        let mut style: Vec<&Fact> = self.style.iter().take(STYLE_FACTS_K).collect();
+        for f in self.facts.iter().filter(|f| is_style(f)) {
+            if style.len() < STYLE_FACTS_K && !style.iter().any(|x| x.id == f.id) {
+                style.push(f);
+            }
+        }
+        cands.extend(style.iter().map(|f| (0, 0, fact_line(f))));
+        cands.extend(self.facts.iter().filter(|f| is_important(f)).map(|f| (1, 1, fact_line(f))));
+        cands.extend(self.lessons.iter().map(|l| (2, 2, lesson_line(l))));
+        cands.extend(self.facts.iter().filter(|f| !is_important(f) && !is_style(f)).map(|f| (1, 3, fact_line(f))));
+        cands.extend(self.playbooks.iter().map(|p| (3, 4, playbook_line(p))));
         for c in &mut cands {
             c.2 = truncate_chars(&c.2, MAX_LINE_CHARS);
         }
 
-        let mut st = RenderState { used: estimate_tokens(HEADER), open: [false; 3], picked: vec![None; cands.len()] };
+        let mut st = RenderState { used: estimate_tokens(HEADER), open: [false; 4], picked: vec![None; cands.len()] };
+        let style_share = if style.is_empty() { 0.0 } else { STYLE_SHARE };
+        let shares = std::iter::once(style_share).chain(GROUP_SHARES.iter().map(|s| s * (1.0 - style_share)));
         // проход 1: доли групп; обрезать строку можно только чтобы группа не осталась пустой
-        for (group, share) in GROUP_SHARES.iter().enumerate() {
+        for (group, share) in shares.enumerate() {
             let limit = (st.used + (budget_tokens as f64 * share) as usize).min(budget_tokens);
             let mut group_has = false;
             for (i, (sec, g, line)) in cands.iter().enumerate() {
@@ -256,10 +301,12 @@ impl MemoryContext {
 
 /// Доли бюджета групп в первом проходе: важные факты, уроки, остальные факты, плейбуки.
 const GROUP_SHARES: [f64; 4] = [0.35, 0.40, 0.10, 0.15];
+/// Доля блока `style` (остальные доли сжимаются пропорционально, если он не пуст).
+const STYLE_SHARE: f64 = 0.15;
 
 struct RenderState {
     used: usize,
-    open: [bool; 3],
+    open: [bool; 4],
     picked: Vec<Option<String>>,
 }
 

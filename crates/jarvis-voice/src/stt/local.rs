@@ -243,7 +243,7 @@ mod tests {
     fn read_wav(p: &Path) -> Vec<i16> {
         let b = std::fs::read(p).unwrap();
         let pos = b.windows(4).position(|w| w == b"data").expect("нет data") + 8;
-        b[pos..].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect()
+        b[pos..].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes(*c)).collect()
     }
 
     #[test]

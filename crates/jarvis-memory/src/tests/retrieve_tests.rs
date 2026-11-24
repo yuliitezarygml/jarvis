@@ -142,6 +142,7 @@ fn big_context(mem: &Memory) -> MemoryContext {
         .unwrap();
     }
     MemoryContext {
+        style: vec![],
         facts: mem.list_facts(100, 0).unwrap(),
         lessons: mem.list_lessons(100, 0).unwrap(),
         playbooks: (0..3)

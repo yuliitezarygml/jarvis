@@ -43,7 +43,7 @@ pub use reflect::{
     ApplyReport, REFLECT_SYSTEM_PROMPT, ReflectError, ReflectionResult, Reflector, TaskTranscript, TranscriptStep,
     extract_json, parse_reflection,
 };
-pub use retrieve::{DEFAULT_BUDGET_TOKENS, MemoryContext, estimate_tokens};
+pub use retrieve::{DEFAULT_BUDGET_TOKENS, MemoryContext, STYLE_FACTS_K, STYLE_HEADING, estimate_tokens};
 pub use schema::SCHEMA_VERSION;
 pub use signature::{ErrorSig, error_signature, normalize_error};
 pub use stubs::{is_correction, lesson_stub_from_correction, lesson_stub_from_tool_error, lesson_user_habit};

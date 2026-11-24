@@ -14,6 +14,7 @@
 
 pub mod bridges;
 pub mod models;
+pub mod persona;
 pub mod registry;
 pub mod services;
 pub mod speech;
@@ -123,6 +124,8 @@ pub struct Core {
     telemetry: Mutex<Option<CancellationToken>>,
     /// Последние отчёты «Проверить» по провайдерам (для «Выбрать лучшее автоматически»).
     pub reports: Mutex<HashMap<String, ProviderReport>>,
+    /// Характер: смена режима голосом, пометки к ходу.
+    pub persona: persona::PersonaRuntime,
     opts: CoreOptions,
     me: Weak<Core>,
 }
@@ -208,6 +211,7 @@ impl Core {
                 session,
                 handle: handle.clone(),
                 reflect: opts.reflect,
+                chat: Default::default(),
             }),
             None => Arc::new(NoopMemory),
         };
@@ -262,6 +266,7 @@ impl Core {
             mic: Mutex::new(MicState { wanted: listen_on_start, error: None, handle: None }),
             telemetry: Mutex::new(None),
             reports: Mutex::new(HashMap::new()),
+            persona: persona::PersonaRuntime::default(),
             opts,
             me: me.clone(),
         });
@@ -305,6 +310,11 @@ impl Core {
 
     /// Новая команда (голос или поле HUD). Предыдущая задача отменяется (барж-ин), речь обрывается.
     pub fn submit(&self, text: &str, from_voice: bool) -> Result<(), String> {
+        self.submit_with(text, from_voice, None)
+    }
+
+    /// То же, что `submit`, плюс тон голоса фразы (громкость/скорость относительно обычных) — для пометок к ходу.
+    pub fn submit_with(&self, text: &str, from_voice: bool, voice: Option<jarvis_voice::VoiceTone>) -> Result<(), String> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err("Пустая команда".into());
@@ -316,11 +326,26 @@ impl Core {
         if self.refuse_without_model() {
             return Ok(());
         }
+        let notes = self.persona.notes(&text, voice.as_ref(), std::time::Instant::now());
         let core = self.arc();
         self.handle.spawn(async move {
-            core.run_task(id, text, token).await;
+            core.run_task_with(id, text, notes, token).await;
         });
         Ok(())
+    }
+
+    /// Сменить характер (голосом, из трея, из настроек): сохранить в config.json через приложение
+    /// (или применить в памяти, если сохранять нечем) и ответить уже новым голосом.
+    pub fn set_persona_mode(&self, mode: jarvis_core::config::PersonaMode) {
+        if !self.persona.save(mode) {
+            let mut cfg = self.config();
+            cfg.persona.mode = mode;
+            self.apply_config(&cfg);
+        }
+        let phrase = persona::switched_phrase(mode);
+        tracing::info!(mode = mode.as_str(), "характер: режим изменён");
+        self.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: phrase.into(), is_final: true });
+        self.speech.say(phrase);
     }
 
     /// То же, что `submit`, но дождаться итога (тесты, отладка).
@@ -361,6 +386,11 @@ impl Core {
     }
 
     async fn run_task(&self, id: u64, text: String, token: CancellationToken) -> Option<TaskOutcome> {
+        let notes = self.persona.notes(&text, None, std::time::Instant::now());
+        self.run_task_with(id, text, notes, token).await
+    }
+
+    async fn run_task_with(&self, id: u64, text: String, notes: Vec<String>, token: CancellationToken) -> Option<TaskOutcome> {
         // Задачи строго по очереди: предыдущая уже отменена и завершится сама.
         let _serial = tokio::select! {
             biased;
@@ -376,8 +406,8 @@ impl Core {
         self.busy.store(true, Ordering::Release);
         self.glow_sink.begin_task();
         let t0 = std::time::Instant::now();
-        tracing::info!(text = %text, "агент: задача");
-        let outcome = self.agent.run(&text, token).await;
+        tracing::info!(text = %text, notes = ?notes, "агент: задача");
+        let outcome = self.agent.run_with(&text, &notes, token).await;
         tracing::info!(
             ms = t0.elapsed().as_millis() as u64,
             model = ?outcome.transcript.model,
@@ -614,8 +644,15 @@ impl Drop for Core {
 fn on_intent(core: &Weak<Core>, intent: Intent) {
     let Some(core) = core.upgrade() else { return };
     match intent {
-        Intent::Command(text) => {
-            let _ = core.submit(&text, true);
+        // Тон голоса (громче обычного, кричит, быстро) уходит модели пометкой к этому ходу.
+        Intent::Command { text, voice } => {
+            let _ = core.submit_with(&text, true, voice);
+        }
+        // «Джарвис, давай на ты» / «будь культурным» / «можешь материться».
+        Intent::Persona(mode) => {
+            let c = core.clone();
+            // Сохранение идёт через ConfigStore и after_save (перезапускает части ядра) — не в потоке голоса.
+            std::thread::spawn(move || c.set_persona_mode(mode));
         }
         Intent::Stop => core.stop_all("voice"),
         Intent::Confirm => {

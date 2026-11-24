@@ -14,3 +14,10 @@ out/
 server/**/model/
 server/**/bin/
 server/**/target/
+
+# приватные ключи (SSH и т.п.) — никогда не коммитить
+лун/
+*.key
+*.pem.key
+id_rsa*
+id_ed25519*

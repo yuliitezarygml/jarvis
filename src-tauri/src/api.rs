@@ -123,6 +123,10 @@ pub struct Fact {
     pub confidence: f32,
     pub source: String,
     pub updated: String,
+    /// Категория памяти: preference|personal|alias|habit|contact|general|style (пусто = не менять при правке).
+    pub category: String,
+    /// Всегда учитывать (важный факт).
+    pub important: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

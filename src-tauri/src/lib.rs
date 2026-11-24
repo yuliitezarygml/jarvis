@@ -81,6 +81,11 @@ pub fn run() {
             let rt = tauri::async_runtime::handle().inner().clone();
             let core = Core::start(initial.clone(), events, CoreOptions::app(root.clone()), rt);
             app.state::<AppHooks>().set(Arc::new(CoreHooks(Arc::downgrade(&core))));
+            // Смена характера голосом сохраняется так же, как из трея: config.json + after_save.
+            core.persona.set_saver({
+                let h = handle.clone();
+                Box::new(move |mode| tray::set_persona(&h, mode))
+            });
             let problems = core.startup_problems();
             app.manage(CoreState(core));
             // правки config.json снаружи — в ядро без перезапуска

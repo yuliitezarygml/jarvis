@@ -1942,3 +1942,220 @@ details.adv[open] > :not(summary) {
     animation: none;
   }
 }
+
+/* ───────────── характер: значок настроения ───────────── */
+
+.mood-badge {
+  --mood: var(--cyan);
+  --mood-rgb: var(--accent-rgb);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border: 1px solid rgba(var(--mood-rgb), 0.45);
+  background: rgba(var(--mood-rgb), 0.08);
+  color: var(--mood);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1.7;
+  white-space: nowrap;
+  cursor: default;
+}
+.mood-badge[data-mood='irritated'] {
+  --mood: var(--amber);
+  --mood-rgb: 255, 181, 71;
+}
+.mood-badge[data-mood='offended'] {
+  --mood: var(--red);
+  --mood-rgb: 255, 64, 88;
+}
+.mood-icon {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  text-shadow: 0 0 calc(8px * var(--glow-k)) var(--mood);
+}
+.mood-badge[data-compact] {
+  padding: 0 5px;
+  border-radius: 999px;
+}
+.hud-brand .mood-badge {
+  align-self: center;
+}
+.cc-mood {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 0 6px;
+}
+.corner-mood {
+  position: absolute;
+  top: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: rgba(var(--void-rgb), 0.8);
+}
+
+/* ───────────── характер: вкладка настроек ───────────── */
+
+.persona-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  max-width: 900px;
+}
+.persona-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: rgba(var(--abyss-rgb), 0.5);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.persona-card:hover {
+  border-color: var(--line-strong);
+}
+.persona-card[data-checked] {
+  border-color: var(--cyan);
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: 0 0 calc(12px * var(--glow-k)) rgba(var(--accent-rgb), 0.12);
+}
+.persona-card input {
+  margin-top: 4px;
+  accent-color: var(--cyan);
+  width: 16px;
+  height: 16px;
+}
+.persona-title {
+  font-weight: 600;
+  color: var(--ice);
+}
+.persona-warn {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--amber);
+  color: var(--amber);
+  font-size: var(--step--1);
+}
+.persona-hint {
+  margin: 12px 0 0;
+  max-width: 900px;
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  width: fit-content;
+  max-width: 100%;
+}
+.segmented-item {
+  position: relative;
+  padding: 6px 14px;
+  color: var(--muted);
+  cursor: pointer;
+  border-right: 1px solid var(--line);
+}
+.segmented-item:last-child {
+  border-right: none;
+}
+.segmented-item input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.segmented-item:hover {
+  color: var(--ice);
+}
+.segmented-item[data-checked] {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--ice);
+}
+.segmented-item:focus-within {
+  outline: 1px solid var(--cyan);
+  outline-offset: -1px;
+}
+
+.banned {
+  display: grid;
+  gap: 10px;
+  max-width: 640px;
+}
+.banned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.banned-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0.15em 0.3em 0.15em 0.7em;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: var(--step--1);
+  color: var(--ice);
+}
+.banned-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.banned-remove {
+  padding: 0 0.4em;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.banned-remove:hover,
+.banned-remove:focus-visible {
+  color: var(--red);
+  background: rgba(255, 64, 88, 0.12);
+}
+
+/* ───────────── характер: экран «Память» ───────────── */
+
+.mem-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.chip[aria-pressed='true'] {
+  border-color: var(--cyan);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--ice);
+}
+.mem-cat {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.mem-cat[data-cat='style'] {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.mem-cat[data-cat='important'] {
+  border-color: rgba(255, 181, 71, 0.55);
+  color: var(--amber);
+}

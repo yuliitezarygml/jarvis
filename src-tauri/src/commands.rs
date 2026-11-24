@@ -139,6 +139,7 @@ pub async fn config_set(
 /// Сохранённый конфиг → ядро, размер виджета, все окна (тема, панели HUD). Возвращает замаскированный.
 pub fn after_save<R: tauri::Runtime>(app: &AppHandle<R>, core: &Core, saved: &Config) -> Config {
     core.apply_config(saved);
+    crate::tray::sync_persona(app, saved.persona.mode);
     apply_corner_size(app, saved.appearance.corner_size);
     if saved.hud.wallpaper != windows_manager::wallpaper_on() {
         let (app, on) = (app.clone(), saved.hud.wallpaper);

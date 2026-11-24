@@ -1,0 +1,15 @@
+[package]
+name = "lexicon-build"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Сборщик словаря характера J.A.R.V.I.S.: Викисловарь (мат, брань) → config/persona/lexicon/wiktionary-ru.json; пост ЖЖ «Подъёбки» → data/persona/replies-lj.json (только локально)"
+
+[[bin]]
+name = "lexicon-build"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3"

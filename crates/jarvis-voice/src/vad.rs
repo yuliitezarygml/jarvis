@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::pcm::{FRAME_SAMPLES, STT_SAMPLE_RATE, rms_i16};
+use crate::tone::{FeatureAccumulator, VoiceFeatures};
 
 const FRAME_MS: u32 = (FRAME_SAMPLES as u32 * 1000) / STT_SAMPLE_RATE;
 
@@ -118,6 +119,8 @@ pub struct Utterance {
     pub ended_at: Instant,
     /// Длительность речевых кадров.
     pub speech_ms: u32,
+    /// Громкость, перегруз и фон фразы (по звучащим кадрам) — для оценки тона голоса.
+    pub features: VoiceFeatures,
 }
 
 impl Utterance {
@@ -154,6 +157,9 @@ pub struct Vad {
     /// всегда есть провалы, поэтому минимум — это фон, а не речь).
     noise_floor: f32,
     levels: VecDeque<f32>,
+    /// Замеры кадров-кандидатов (подтверждают начало фразы) и звучащих кадров текущей фразы.
+    cand_stats: FeatureAccumulator,
+    utt_stats: FeatureAccumulator,
 }
 
 /// Окно оценки фона: 188 кадров × 16 мс ≈ 3 с.
@@ -186,6 +192,8 @@ impl Vad {
             last_score: 0.0,
             noise_floor: NOISE_FLOOR_INIT,
             levels: VecDeque::with_capacity(NOISE_WINDOW_FRAMES + 1),
+            cand_stats: FeatureAccumulator::default(),
+            utt_stats: FeatureAccumulator::default(),
         }
     }
 
@@ -223,6 +231,8 @@ impl Vad {
         self.utt.clear();
         self.voiced_frames = 0;
         self.silence_frames = 0;
+        self.cand_stats.clear();
+        self.utt_stats.clear();
     }
 
     pub fn push(&mut self, frame: &[i16]) -> Option<VadEvent> {
@@ -253,6 +263,7 @@ impl Vad {
             if score >= self.cfg.threshold {
                 self.candidate.extend_from_slice(frame);
                 self.candidate_frames += 1;
+                self.cand_stats.push(frame, level);
                 if self.candidate_frames >= self.cfg.start_frames.max(1) {
                     let mut audio: Vec<i16> = self.preroll.drain(..).collect();
                     audio.append(&mut self.candidate);
@@ -261,12 +272,15 @@ impl Vad {
                     self.candidate_frames = 0;
                     self.silence_frames = 0;
                     self.utt = audio.clone();
+                    self.utt_stats.clear();
+                    self.utt_stats.append(&mut self.cand_stats);
                     self.active = true;
                     return Some(VadEvent::SpeechStart { audio, started_at: self.started_at });
                 }
             } else {
                 let cand = std::mem::take(&mut self.candidate);
                 self.candidate_frames = 0;
+                self.cand_stats.clear();
                 self.preroll.extend(cand);
                 self.preroll.extend(frame.iter().copied());
                 let cap = (self.cfg.pre_roll_ms * STT_SAMPLE_RATE / 1000) as usize;
@@ -281,6 +295,7 @@ impl Vad {
         if score >= self.cfg.release_threshold {
             self.voiced_frames += 1;
             self.silence_frames = 0;
+            self.utt_stats.push(frame, level);
         } else {
             self.silence_frames += 1;
         }
@@ -304,9 +319,12 @@ impl Vad {
         self.silence_frames = 0;
         self.preroll.clear();
         if speech_ms < self.cfg.min_speech_ms {
+            self.utt_stats.clear();
             return VadEvent::Discarded { speech_ms };
         }
-        VadEvent::SpeechEnd(Utterance { pcm16k: pcm, started_at: self.started_at, ended_at: now, speech_ms })
+        let duration_ms = (pcm.len() as u64 * 1000 / STT_SAMPLE_RATE as u64) as u32;
+        let features = self.utt_stats.finish(self.noise_floor, speech_ms, duration_ms);
+        VadEvent::SpeechEnd(Utterance { pcm16k: pcm, started_at: self.started_at, ended_at: now, speech_ms, features })
     }
 }
 
@@ -423,5 +441,63 @@ mod tests {
         assert_eq!(s.score(&[0; 10]), 0.0, "неверная длина кадра");
         assert!(dbfs(&frame) < -150.0);
         assert!((dbfs(&[i16::MAX; 256]) - 0.0).abs() < 0.01);
+    }
+    fn only_utterance(ev: &[VadEvent]) -> &Utterance {
+        let ends: Vec<&Utterance> = ev.iter().filter_map(|e| if let VadEvent::SpeechEnd(u) = e { Some(u) } else { None }).collect();
+        assert_eq!(ends.len(), 1, "{ev:?}");
+        ends[0]
+    }
+
+    /// dBFS синуса с амплитудой `amp` (доля полной шкалы): RMS = amp/√2.
+    fn sine_dbfs(amp: f32) -> f32 {
+        20.0 * (amp / std::f32::consts::SQRT_2).log10()
+    }
+
+    #[test]
+    fn features_of_sine_at_known_level() {
+        let mut vad = energy_vad(VadConfig::default());
+        let ev = run(&mut vad, &signal(&[(800, 0.0), (1000, 0.3), (1400, 0.0)]));
+        let f = only_utterance(&ev).features;
+        let want = sine_dbfs(0.3); // ≈ −13,5 dBFS
+        assert!((f.mean_dbfs - want).abs() < 0.5, "{f:?} / {want}");
+        assert!((f.p90_dbfs - want).abs() < 0.5, "{f:?}");
+        assert!((f.peak_dbfs - 20.0 * 0.3f32.log10()).abs() < 0.2, "пик — амплитуда синуса: {f:?}");
+        assert_eq!(f.clipped_ratio, 0.0);
+        assert!((980..=1020).contains(&f.speech_ms), "{f:?}");
+        assert_eq!(f.duration_ms as u64, only_utterance(&ev).duration_ms());
+        assert!(f.noise_floor_dbfs < -60.0, "фон — тихий шум: {f:?}");
+    }
+
+    #[test]
+    fn features_ignore_pauses_and_p90_tracks_loud_part() {
+        // Паузы внутри фразы не тянут громкость вниз: считаются только звучащие кадры.
+        let mut vad = energy_vad(VadConfig::default());
+        let ev = run(&mut vad, &signal(&[(500, 0.0), (400, 0.3), (500, 0.0), (400, 0.3), (1400, 0.0)]));
+        let f = only_utterance(&ev).features;
+        assert!((f.mean_dbfs - sine_dbfs(0.3)).abs() < 0.6, "{f:?}");
+        assert!((f.p90_dbfs - sine_dbfs(0.3)).abs() < 0.5, "{f:?}");
+        // Тихая и громкая половины: p90 — громкая часть, среднее по энергии — между ними, ближе к громкой.
+        let mut vad = energy_vad(VadConfig::default());
+        let ev = run(&mut vad, &signal(&[(500, 0.0), (600, 0.1), (600, 0.4), (1400, 0.0)]));
+        let f = only_utterance(&ev).features;
+        assert!((f.p90_dbfs - sine_dbfs(0.4)).abs() < 0.5, "{f:?}");
+        let mean = 10.0 * ((0.1f32.powi(2) / 2.0 + 0.4f32.powi(2) / 2.0) / 2.0).log10();
+        assert!((f.mean_dbfs - mean).abs() < 0.6, "{f:?} / {mean}");
+        assert!(f.mean_dbfs > sine_dbfs(0.1) + 5.0);
+    }
+
+    #[test]
+    fn features_detect_clipping() {
+        let mut vad = energy_vad(VadConfig::default());
+        // Амплитуда 1,5 — сэмплы упираются в i16::MAX/MIN.
+        let ev = run(&mut vad, &signal(&[(500, 0.0), (800, 1.5), (1400, 0.0)]));
+        let f = only_utterance(&ev).features;
+        assert!(f.clipped_ratio > 0.3, "{f:?}");
+        assert!(f.peak_dbfs > -0.1, "{f:?}");
+        // Отброшенный щелчок не оставляет замеров следующей фразе.
+        let ev = run(&mut vad, &signal(&[(300, 0.0), (100, 1.5), (1500, 0.0), (800, 0.2), (1400, 0.0)]));
+        let f = only_utterance(&ev).features;
+        assert_eq!(f.clipped_ratio, 0.0, "{f:?}");
+        assert!((f.p90_dbfs - sine_dbfs(0.2)).abs() < 0.5, "{f:?}");
     }
 }

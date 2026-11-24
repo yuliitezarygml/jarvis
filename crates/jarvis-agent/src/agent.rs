@@ -174,6 +174,13 @@ impl Agent {
 
     /// Выполнить задачу пользователя.
     pub async fn run(&self, user_text: &str, cancel: CancellationToken) -> TaskOutcome {
+        self.run_with(user_text, &[], cancel).await
+    }
+
+    /// Выполнить задачу с пометками к этому ходу (`голос: громче обычного на 11 дБ`, `речь: мат`, `настроение: …`).
+    /// Пометки видит модель только в текущем ходе (служебное сообщение `[…]`); в поиск инструментов и память
+    /// по тексту они не попадают, в протокол для рефлектора — попадают (`transcript.notes`).
+    pub async fn run_with(&self, user_text: &str, notes: &[String], cancel: CancellationToken) -> TaskOutcome {
         let _guard = tokio::select! {
             biased;
             g = self.run_lock.lock() => g,
@@ -194,6 +201,11 @@ impl Agent {
 
         let run_id = self.run_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let mut r = Run::new(self, user_text, cancel, run_id);
+        for n in notes.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+            let n = if n.starts_with('[') { n.to_string() } else { format!("[{n}]") };
+            r.entries.push(Entry::note(n.clone(), 0));
+            r.transcript.notes.push(n);
+        }
         let outcome = r.execute().await;
 
         let cfg_turns = r.cfg.max_history_turns;

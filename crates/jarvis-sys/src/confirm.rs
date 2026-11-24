@@ -312,6 +312,17 @@ mod tests {
     }
 
     #[test]
+    fn swearing_is_never_approval() {
+        // Характер «Без цензуры»: ругань и посылания — не «да», даже если начинаются с «да».
+        for p in ["да пошёл ты", "да пошел ты нахуй", "да иди ты", "да блять", "да похуй", "делай что хочешь", "мне похер", "ну давай уже, бля"] {
+            let (g, _) = gate();
+            let _t = g.request("x", RiskTier::T3, Duration::from_secs(5));
+            assert!(!matches!(g.on_transcript(p, AudioSource::Mic, after_tts()), TranscriptVerdict::Approved { .. }), "{p}");
+            assert!(g.awaiting(), "{p}: запрос должен ждать ясного «да»");
+        }
+    }
+
+    #[test]
     fn self_confirmation_from_tts_is_ignored() {
         let (g, _) = gate();
         let _t = g.request(SUMMARY, RiskTier::T3, Duration::from_secs(5));

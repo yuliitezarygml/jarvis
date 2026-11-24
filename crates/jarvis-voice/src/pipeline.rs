@@ -7,7 +7,7 @@
 //! пока играет текущая) → AudioOutput (очередь ≤5 буферов). Барж-ин отменяет всё и шлёт `DELETE /tts/{id}`.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -27,6 +27,7 @@ use crate::pcm::S16Decoder;
 use crate::player::{AudioOutput, Player, PlayerConfig};
 use crate::stt::{SttEngine, SttEvent, SttStream};
 use crate::tts::{TtsClient, TtsEngine};
+use crate::tone::{VoiceFeatures, VoiceProfile, VoiceTone};
 use crate::vad::{EnergyScorer, Utterance, Vad, VadConfig, VadEvent};
 use crate::wake::{Intent, WakeContext, WakeFilter};
 
@@ -51,6 +52,21 @@ pub struct VoiceConfig {
     pub buffer_ms: u32,
     /// Сколько фраз синтезировать заранее, пока играет текущая.
     pub prefetch_phrases: usize,
+    /// Тон голоса (громкость/темп относительно обычного).
+    pub tone: ToneConfig,
+}
+
+/// Оценка тона голоса: где профиль обычного голоса, какой микрофон, какое усиление.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ToneConfig {
+    /// Файл профиля обычного голоса (`data/voice-profile.json`). `None` — тон не оценивается (замеры
+    /// фразы всё равно пишутся в журнал). `from_config` по умолчанию ставит `<root>/<data_dir>/voice-profile.json`.
+    pub profile_path: Option<PathBuf>,
+    /// Ключ микрофона в профиле. `None` — имя открытого устройства (`start_listening`) или
+    /// `capture.device` / «default» (`listen_frames`).
+    pub device_key: Option<String>,
+    /// Усиление микрофона: при смене профиль микрофона собирается заново. `None` — неизвестно.
+    pub input_gain: Option<f32>,
 }
 
 impl Default for VoiceConfig {
@@ -68,6 +84,7 @@ impl Default for VoiceConfig {
             barge_in_while_speaking: true,
             buffer_ms: 100,
             prefetch_phrases: 2,
+            tone: ToneConfig::default(),
         }
     }
 }
@@ -104,6 +121,8 @@ struct Inner {
     /// Окно после явного «Джарвис» без команды: команда принимается даже поверх его «Слушаю, сэр»
     /// (люди начинают говорить сразу; собственный голос отсекает проверка эха по словам).
     addressed_until: Mutex<Option<Instant>>,
+    /// Профиль обычного голоса (`None` — оценка тона выключена).
+    profile: Option<Mutex<VoiceProfile>>,
 }
 
 #[derive(Clone)]
@@ -143,6 +162,7 @@ impl VoicePipeline {
         events: Arc<dyn EventSink>,
     ) -> Self {
         let echo = Arc::new(EchoGuard::new(cfg.echo.clone(), out.monitor()));
+        let profile = cfg.tone.profile_path.clone().map(|p| Mutex::new(VoiceProfile::load(p)));
         Self {
             inner: Arc::new(Inner {
                 cfg,
@@ -158,6 +178,7 @@ impl VoicePipeline {
                 awaiting_confirm: AtomicBool::new(false),
                 follow_up_until: Mutex::new(None),
                 addressed_until: Mutex::new(None),
+                profile,
             }),
         }
     }
@@ -178,6 +199,9 @@ impl VoicePipeline {
         }
         if explicit.1.is_some() {
             cfg.player.device = explicit.1;
+        }
+        if cfg.tone.profile_path.is_none() {
+            cfg.tone.profile_path = Some(project_root.join(&app.data_dir).join("voice-profile.json"));
         }
         let tts = Arc::new(TtsClient::new(&app.tts, project_root)?);
         let stt = crate::stt::engine_from_config(app, project_root)?;
@@ -206,15 +230,27 @@ impl VoicePipeline {
     /// Открыть микрофон и слушать.
     pub fn start_listening(&self, on_intent: impl Fn(Intent) + Send + Sync + 'static) -> Result<ListenHandle> {
         let (capture, frames) = Capture::start(self.inner.cfg.capture.clone(), self.inner.events.clone())?;
-        let mut h = self.listen_frames(frames, on_intent);
+        let device = self.inner.cfg.tone.device_key.clone().unwrap_or_else(|| capture.device_name().to_string());
+        let mut h = self.listen_with(frames, device, on_intent);
         h._capture = Some(capture);
         Ok(h)
     }
 
     /// Слушать готовый поток кадров (256 сэмплов 16 кГц) — без устройства.
     pub fn listen_frames(&self, frames: mpsc::Receiver<Vec<i16>>, on_intent: impl Fn(Intent) + Send + Sync + 'static) -> ListenHandle {
+        let cfg = &self.inner.cfg;
+        let device = cfg.tone.device_key.clone().or_else(|| cfg.capture.device.clone()).unwrap_or_else(|| "default".into());
+        self.listen_with(frames, device, on_intent)
+    }
+
+    fn listen_with(
+        &self,
+        frames: mpsc::Receiver<Vec<i16>>,
+        device: String,
+        on_intent: impl Fn(Intent) + Send + Sync + 'static,
+    ) -> ListenHandle {
         let token = CancellationToken::new();
-        let task = tokio::spawn(listen_loop(self.inner.clone(), frames, Arc::new(on_intent), token.clone()));
+        let task = tokio::spawn(listen_loop(self.inner.clone(), frames, device, Arc::new(on_intent), token.clone()));
         ListenHandle { token, task: Some(task), _capture: None }
     }
 
@@ -395,8 +431,54 @@ impl Inner {
         }
     }
 
-    /// Что делать с распознанным текстом.
-    fn handle_transcript(&self, text: &str, started_at: Instant, on_intent: &(dyn Fn(Intent) + Send + Sync)) {
+    /// Тон фразы относительно обычного голоса на `device` (`None` — оценка выключена или нет замеров).
+    /// Пишет замеры и вывод в журнал. Профиль не меняет.
+    fn judge_voice(&self, text: &str, features: Option<&VoiceFeatures>, device: &str) -> Option<VoiceTone> {
+        let f = features?;
+        let tone = self.profile.as_ref().map(|p| p.lock().unwrap().judge(device, self.cfg.tone.input_gain, f, text));
+        let t = tone.unwrap_or_default();
+        tracing::info!(
+            device,
+            mean_dbfs = f.mean_dbfs,
+            p90_dbfs = f.p90_dbfs,
+            peak_dbfs = f.peak_dbfs,
+            noise_dbfs = f.noise_floor_dbfs,
+            speech_ms = f.speech_ms,
+            duration_ms = f.duration_ms,
+            clipped = f.clipped_ratio,
+            syllables_per_sec = ?t.syllables_per_sec,
+            db_vs_normal = t.loudness_db_vs_normal,
+            loud = t.loud,
+            shouting = t.shouting,
+            fast = t.fast,
+            slow = t.slow,
+            calibrated = t.calibrated,
+            "голос: {}",
+            if tone.is_some() { t.summary_ru() } else { "оценка тона выключена".to_string() }
+        );
+        tone
+    }
+
+    /// Учесть фразу пользователя в профиле обычного голоса (и сохранить, не чаще `tone::SAVE_INTERVAL`).
+    fn learn_voice(&self, text: &str, features: Option<&VoiceFeatures>, device: &str) {
+        let (Some(f), Some(p)) = (features, &self.profile) else { return };
+        let mut p = p.lock().unwrap();
+        p.observe(device, self.cfg.tone.input_gain, f, text);
+        if let Err(e) = p.save() {
+            tracing::warn!(error = %e, path = ?p.path(), "профиль голоса не сохранён");
+        }
+    }
+
+    /// Что делать с распознанным текстом. `features` — замеры фразы из VAD (нет — тон не оценивается),
+    /// `device` — ключ микрофона в профиле голоса.
+    fn handle_transcript(
+        &self,
+        text: &str,
+        started_at: Instant,
+        features: Option<&VoiceFeatures>,
+        device: &str,
+        on_intent: &(dyn Fn(Intent) + Send + Sync),
+    ) {
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -405,6 +487,7 @@ impl Inner {
             tracing::debug!(text, "эхо TTS отброшено");
             return;
         }
+        let tone = self.judge_voice(text, features, device);
         let during_speech = self.speaking.load(Ordering::Acquire) || self.echo.in_echo_zone(started_at);
         let ctx = WakeContext {
             awaiting_confirm: self.awaiting_confirm.load(Ordering::Acquire),
@@ -412,14 +495,23 @@ impl Inner {
             // после явного «Джарвис»: человек начинает говорить, пока звучит «Слушаю, сэр».
             follow_up: self.in_follow_up() && (!during_speech || self.addressed()),
         };
-        let intent = self.wake.classify(text, ctx);
+        let mut intent = self.wake.classify(text, ctx);
         tracing::info!(?intent, follow_up = ctx.follow_up, awaiting_confirm = ctx.awaiting_confirm, "голос: реплика разобрана");
         match &intent {
+            // Не к Джарвису (разговоры рядом, ТВ) — обычный голос пользователя по ним не учим.
             Intent::Ignored => return,
             // «Да» засчитывается только после окончания речи Джарвиса — защита от самоподтверждения.
             Intent::Confirm if !self.echo.is_clean_confirmation(started_at) => return,
+            _ => {}
+        }
+        self.learn_voice(text, features, device);
+        if let Intent::Command { voice, .. } = &mut intent {
+            *voice = tone;
+        }
+        match &intent {
+            Intent::Ignored => {}
             Intent::Stop => self.barge_in(),
-            Intent::Command(_) => {
+            Intent::Command { .. } | Intent::Persona(_) => {
                 if self.speaking.load(Ordering::Acquire) {
                     self.barge_in();
                 }
@@ -452,6 +544,7 @@ struct Pending {
 async fn listen_loop(
     inner: Arc<Inner>,
     mut frames: mpsc::Receiver<Vec<i16>>,
+    device: String,
     on_intent: Arc<dyn Fn(Intent) + Send + Sync>,
     token: CancellationToken,
 ) {
@@ -465,7 +558,7 @@ async fn listen_loop(
     // Фразы, ушедшие в POST по таймауту: их запоздалый потоковый final отбрасываем (иначе команда выполнится дважды).
     let mut late_finals_to_skip: usize = 0;
     let mut was_muted = false;
-    let (tr_tx, mut tr_rx) = mpsc::channel::<(String, Instant)>(8);
+    let (tr_tx, mut tr_rx) = mpsc::channel::<(String, Instant, VoiceFeatures)>(8);
     let transcribe = |utt: Utterance, ended: Instant| {
         let (stt, tx, t) = (inner.stt.clone(), tr_tx.clone(), token.clone());
         tokio::spawn(async move {
@@ -478,7 +571,7 @@ async fn listen_loop(
                         text = %r.text,
                         "STT (POST): фраза распознана"
                     );
-                    let _ = tx.send((r.text, utt.started_at)).await;
+                    let _ = tx.send((r.text, utt.started_at, utt.features)).await;
                 }
                 Err(e) => tracing::warn!(error = %e, audio_ms, "STT: фраза не распознана"),
             }
@@ -539,8 +632,9 @@ async fn listen_loop(
                         text = %text,
                         "STT: фраза распознана"
                     );
-                    let started = p.map(|p| p.utt.started_at).unwrap_or_else(Instant::now);
-                    inner.handle_transcript(&text, started, on_intent.as_ref());
+                    let started = p.as_ref().map_or_else(Instant::now, |p| p.utt.started_at);
+                    let features = p.as_ref().map(|p| p.utt.features);
+                    inner.handle_transcript(&text, started, features.as_ref(), &device, on_intent.as_ref());
                 }
                 Some(SttEvent::Partial { text }) => {
                     if inner.wake.has_wake_prefix(&text) || inner.in_follow_up() {
@@ -552,8 +646,8 @@ async fn listen_loop(
                 Some(SttEvent::Ready { model }) => tracing::info!(%model, "STT готов"),
                 None => {}
             },
-            r = tr_rx.recv() => if let Some((text, started)) = r {
-                inner.handle_transcript(&text, started, on_intent.as_ref());
+            r = tr_rx.recv() => if let Some((text, started, features)) = r {
+                inner.handle_transcript(&text, started, Some(&features), &device, on_intent.as_ref());
             },
             _ = sleep_until(deadline), if deadline.is_some() => {
                 // Потоковый STT молчит — та же фраза через `transcribe` (POST /stt).
@@ -716,7 +810,7 @@ mod tests {
     #[tokio::test]
     async fn listen_detects_command() {
         let got = listen("Джарвис, открой браузер", |_, _| {}).await;
-        assert_eq!(got, vec![Intent::Command("открой браузер".into())]);
+        assert_eq!(got, vec![Intent::command("открой браузер")]);
         let got = listen("просто разговор", |_, _| {}).await;
         assert!(got.is_empty());
     }
@@ -739,5 +833,124 @@ mod tests {
         assert!(got.is_empty(), "{got:?}");
         let got = listen("да, сэр", |p, _| p.set_awaiting_confirm(true)).await;
         assert_eq!(got, vec![Intent::Confirm]);
+    }
+    /// Потоковый STT: на `end()` отвечает `Final` с заданным текстом.
+    struct FakeStreamStt(&'static str);
+
+    #[async_trait]
+    impl SttEngine for FakeStreamStt {
+        fn name(&self) -> &str {
+            "fake-stream"
+        }
+        async fn transcribe(&self, _pcm: &[i16], _c: &CancellationToken) -> Result<SttResult> {
+            panic!("должен сработать потоковый путь");
+        }
+        fn open_stream(&self, events: mpsc::Sender<SttEvent>) -> Option<SttStream> {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let text = self.0;
+            let task = tokio::spawn(async move {
+                while let Some(cmd) = rx.recv().await {
+                    if matches!(cmd, crate::stt::StreamCmd::End) {
+                        let _ = events.send(SttEvent::Final { text: text.into(), duration_ms: 0 }).await;
+                    }
+                }
+            });
+            Some(SttStream::new(tx, task))
+        }
+    }
+
+    /// Синус `amp` (доля шкалы) длительностью `ms` между паузами.
+    fn tone_burst(amp: f32, ms: u32) -> Vec<Vec<i16>> {
+        let mut pcm = vec![0i16; 16_000 / 2];
+        pcm.extend((0..16 * ms).map(|i| ((i as f32 * 440.0 / 16_000.0 * std::f32::consts::TAU).sin() * amp * 32767.0) as i16));
+        pcm.extend(vec![0i16; 16_000 * 3 / 2]);
+        pcm.as_chunks::<256>().0.iter().map(|c| c.to_vec()).collect()
+    }
+
+    fn temp_profile() -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("jarvis-voice-pipe-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("voice-profile.json");
+        (dir, path)
+    }
+
+    /// Профиль «default»: обычный голос −30 dBFS (p90), 5 слогов/с, знакомство пройдено.
+    fn write_calibrated_profile(path: &std::path::Path) {
+        let mut p = VoiceProfile::load(path);
+        let f = VoiceFeatures { mean_dbfs: -33.0, p90_dbfs: -30.0, peak_dbfs: -24.0, noise_floor_dbfs: -70.0, speech_ms: 2000, duration_ms: 2400, clipped_ratio: 0.0 };
+        for _ in 0..crate::tone::WARMUP_UTTERANCES {
+            assert!(p.observe("default", None, &f, "открой мне пожалуйста браузер"));
+        }
+        p.save_now().unwrap();
+    }
+
+    async fn listen_cfg(stt: Arc<dyn SttEngine>, tone: ToneConfig, frames: Vec<Vec<i16>>) -> (Vec<Intent>, VoicePipeline) {
+        let (tts, out) = (Arc::new(FakeTts::default()), Arc::new(FakeOut::default()));
+        let cfg = VoiceConfig { energy_vad_dbfs: Some(-40.0), tone, ..Default::default() };
+        let p = VoicePipeline::new(cfg, tts, stt, out, Arc::new(CollectSink::default()));
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let g = got.clone();
+        let (tx, rx) = mpsc::channel(4096);
+        let _h = p.listen_frames(rx, move |i| g.lock().unwrap().push(i));
+        for f in frames {
+            tx.send(f).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let got = got.lock().unwrap().clone();
+        (got, p)
+    }
+
+    #[tokio::test]
+    async fn command_carries_voice_tone_on_both_stt_paths() {
+        let (dir, path) = temp_profile();
+        write_calibrated_profile(&path);
+        let tone_cfg = ToneConfig { profile_path: Some(path.clone()), ..Default::default() };
+        // Синус с RMS −20 dBFS (на 10 дБ громче обычного), 1 с речи на 7 слогов = 7 слогов/с (×1,4).
+        let amp = 0.1 * std::f32::consts::SQRT_2;
+        let stts: [Arc<dyn SttEngine>; 2] = [Arc::new(FakeStt("Джарвис, открой браузер")), Arc::new(FakeStreamStt("Джарвис, открой браузер"))];
+        for stt in stts {
+            let name = stt.name().to_string();
+            let (got, _p) = listen_cfg(stt, tone_cfg.clone(), tone_burst(amp, 1000)).await;
+            let [Intent::Command { text, voice: Some(v) }] = got.as_slice() else { panic!("{name}: {got:?}") };
+            assert_eq!(text, "открой браузер");
+            assert!(v.calibrated && v.loud && !v.shouting && v.fast, "{name}: {v:?}");
+            assert!((v.loudness_db_vs_normal - 10.0).abs() < 1.0, "{name}: {v:?}");
+            assert_eq!(v.note_ru().as_deref(), Some("голос: громче обычного на 10 дБ, быстро"), "{name}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn pipeline_learns_profile_and_tone_disabled_without_path() {
+        // Без файла профиля оценки нет.
+        let (got, _p) = listen_cfg(Arc::new(FakeStt("Джарвис, открой браузер")), ToneConfig::default(), tone_burst(0.2, 1000)).await;
+        assert_eq!(got, vec![Intent::command("открой браузер")]);
+        // Новый профиль: знакомство, фраза учтена и сохранена под ключом микрофона.
+        let (dir, path) = temp_profile();
+        let tone_cfg = ToneConfig { profile_path: Some(path.clone()), device_key: Some("Микрофон (USB)".into()), input_gain: Some(0.7) };
+        let (got, p) = listen_cfg(Arc::new(FakeStt("Джарвис, открой браузер")), tone_cfg, tone_burst(0.2, 1000)).await;
+        let [Intent::Command { voice: Some(v), .. }] = got.as_slice() else { panic!("{got:?}") };
+        assert!(!v.calibrated && v.note_ru().is_none(), "{v:?}");
+        drop(p);
+        let saved = VoiceProfile::load(&path);
+        let b = saved.baseline("Микрофон (USB)").expect("профиль сохранён");
+        assert_eq!((b.samples, b.gain), (1, Some(0.7)));
+        // Разговор не к Джарвису профиль не учит.
+        let (got, _p) = listen_cfg(
+            Arc::new(FakeStt("просто разговор рядом с микрофоном")),
+            ToneConfig { profile_path: Some(path.clone()), device_key: Some("Микрофон (USB)".into()), input_gain: Some(0.7) },
+            tone_burst(0.2, 1000),
+        )
+        .await;
+        assert!(got.is_empty());
+        assert_eq!(VoiceProfile::load(&path).baseline("Микрофон (USB)").unwrap().samples, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn listen_detects_persona_switch() {
+        let got = listen("Джарвис, давай на ты", |_, _| {}).await;
+        assert_eq!(got, vec![Intent::Persona(jarvis_core::config::PersonaMode::Buddy)]);
+        let got = listen("Джарвис, напиши в блокноте будь вежливым", |_, _| {}).await;
+        assert_eq!(got, vec![Intent::command("напиши в блокноте будь вежливым")]);
     }
 }
