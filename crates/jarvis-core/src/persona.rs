@@ -513,18 +513,19 @@ impl Lexicon {
             }
             let plural = self.go_plural.contains(t);
             for j in i + 1..toks.len().min(i + 4) {
-                if let Some((_, weak)) = self.dest_at(toks, j) {
-                    if !weak || !plural {
-                        return true;
-                    }
+                if let Some((_, weak)) = self.dest_at(toks, j)
+                    && (!weak || !plural)
+                {
+                    return true;
                 }
             }
             // «нахуй иди», «в жопу пошёл»
             for j in i.saturating_sub(3)..i {
-                if let Some((len, weak)) = self.dest_at(toks, j) {
-                    if j + len == i && !weak {
-                        return true;
-                    }
+                if let Some((len, weak)) = self.dest_at(toks, j)
+                    && j + len == i
+                    && !weak
+                {
+                    return true;
                 }
             }
             // «да пошёл ты», «иди ты, бля»
@@ -913,7 +914,14 @@ pub fn render(template: &str, vars: &Vars) -> String {
     for name in placeholders(&s) {
         let ph = format!("{{{name}}}");
         let v = vars.get(&name).unwrap_or("…").to_string();
-        s = s.replace(&ph, &v);
+        // В начале предложения значение с заглавной: «Уверен? {action}.» → «Уверен? Удалить файл.»
+        let mut from = 0;
+        while let Some(off) = s[from..].find(&ph) {
+            let i = from + off;
+            let val = if sentence_start(&s, i) { upper_first(&v) } else { v.clone() };
+            s.replace_range(i..i + ph.len(), &val);
+            from = i + val.len();
+        }
     }
     let mut s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     for (a, b) in [(" ,", ","), (" .", "."), (" !", "!"), (" ?", "?"), (",.", "."), (",!", "!"), (",?", "?"), (",,", ",")] {
@@ -1253,10 +1261,10 @@ impl Persona {
         let mut replies = Replies::load(persona_dir, &lexicon)?;
         if let Some(d) = local_dir {
             let p = d.join("replies-lj.json");
-            if p.exists() {
-                if let Err(e) = replies.add_local_file(&p, &lexicon) {
-                    replies.warnings.push(e.to_string());
-                }
+            if p.exists()
+                && let Err(e) = replies.add_local_file(&p, &lexicon)
+            {
+                replies.warnings.push(e.to_string());
             }
         }
         Ok(Persona { lexicon, replies })

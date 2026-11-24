@@ -181,6 +181,9 @@ fn render_address() {
     let v = Vars::new().set("action", "удалить папку").address(Some("Юлиан"));
     assert_eq!(render("{address}, {action}? Да или нет?", &v), "Юлиан, удалить папку? Да или нет?");
     assert_eq!(render("{action}, точно?", &v), "Удалить папку, точно?");
+    // Подстановка в начале предложения — с заглавной, в середине — как есть.
+    assert_eq!(render("Сношу, уверен? {action}. Да или нет?", &v), "Сношу, уверен? Удалить папку. Да или нет?");
+    assert_eq!(render("Собираюсь {action}. {action}?", &v), "Собираюсь удалить папку. Удалить папку?");
     assert_eq!(render("Ошибка: {err}.", &Vars::new()), "Ошибка: ….");
     assert_eq!(placeholders("{a} и {b_1}, {a} {не}"), vec!["a", "b_1"]);
 }
@@ -329,43 +332,48 @@ fn real_config_files_are_valid() {
     assert!(p.lexicon.len() > 1500, "записей {}", p.lexicon.len());
     assert!(p.replies.warnings().is_empty(), "предупреждения загрузки:\n{}", p.replies.warnings().join("\n"));
     let mut total = 0;
+    let mut bad: Vec<String> = Vec::new();
+    macro_rules! check { ($c:expr, $($m:tt)*) => { if !$c { bad.push(format!($($m)*)); } } }
     for mode in PersonaMode::ALL {
         for sit in Situation::ALL {
             let lines = p.replies.lines(mode, sit);
             let what = format!("{}/{}", mode.as_str(), sit.key());
-            assert!(lines.len() >= 10, "{what}: {} фраз (< 10)", lines.len());
+            check!(lines.len() >= 10, "{what}: {} фраз (< 10)", lines.len());
             total += lines.len();
             for l in lines {
                 let t = &l.text;
-                assert!(!t.contains('*'), "{what}: звёздочка в «{t}»");
-                assert!(t.chars().count() <= 220, "{what}: слишком длинно «{t}»");
-                assert!(p.lexicon.never_say_hits(t).is_empty(), "{what}: never_say в «{t}»");
+                check!(!t.contains('*'), "{what}: звёздочка в «{t}»");
+                check!(t.chars().count() <= 220, "{what}: слишком длинно «{t}»");
+                check!(p.lexicon.never_say_hits(t).is_empty(), "{what}: never_say в «{t}»");
                 for ph in placeholders(t) {
-                    assert!(sit.allows(&ph), "{what}: недопустимая подстановка {{{ph}}} в «{t}»");
+                    check!(sit.allows(&ph), "{what}: недопустимая подстановка {{{ph}}} в «{t}»");
                 }
                 for req in sit.required() {
-                    assert!(t.contains(&format!("{{{req}}}")), "{what}: нет {{{req}}} в «{t}»");
+                    check!(t.contains(&format!("{{{req}}}")), "{what}: нет {{{req}}} в «{t}»");
                 }
                 match mode {
-                    Butler => assert_eq!(l.level, SwearLevel::None, "{what}: дворецкий грубит: «{t}» {:?}", p.lexicon.hits(t)),
-                    Buddy => assert!(l.level <= SwearLevel::Soft, "{what}: мат у «своего парня»: «{t}» {:?}", p.lexicon.hits(t)),
+                    Butler => check!(l.level == SwearLevel::None, "{what}: дворецкий грубит: «{t}» {:?}", p.lexicon.hits(t)),
+                    Buddy => check!(l.level <= SwearLevel::Soft, "{what}: мат у «своего парня»: «{t}» {:?}", p.lexicon.hits(t)),
                     Uncensored => {}
                 }
                 if matches!(sit, Situation::ConfirmDangerous | Situation::ProtectedPath) {
                     let toks = tokenize(t);
-                    assert!(toks.contains(&"да".into()) && toks.contains(&"нет".into()), "{what}: нет вопроса «да или нет»: «{t}»");
+                    check!(toks.contains(&"да".into()) && toks.contains(&"нет".into()), "{what}: нет вопроса «да или нет»: «{t}»");
                 }
             }
             // Без разрешённого мата в «Без цензуры» тоже есть из чего выбрать.
             let clean = lines.iter().filter(|l| !l.needs_profanity()).count();
-            assert!(clean >= 3, "{what}: чистых фраз {clean} (< 3)");
+            check!(clean >= 3, "{what}: чистых фраз {clean} (< 3)");
             // Необязательные подстановки: есть фразы и без них.
             if !sit.optional().is_empty() {
                 let bare = lines.iter().filter(|l| sit.optional().iter().all(|o| !l.text.contains(&format!("{{{o}}}")))).count();
-                assert!(bare >= 3, "{what}: фраз без необязательных подстановок {bare} (< 3)");
+                check!(bare >= 3, "{what}: фраз без необязательных подстановок {bare} (< 3)");
             }
         }
     }
+    assert!(bad.is_empty(), "проблемы в config/persona ({}):
+{}", bad.len(), bad.join("
+"));
     assert!(total >= 900, "всего фраз {total}");
     // В «Без цензуры» мат реально есть (иначе зеркалить нечем).
     let mat = Situation::ALL.iter().map(|s| p.replies.lines(Uncensored, *s).iter().filter(|l| l.level == SwearLevel::Mat).count()).sum::<usize>();
@@ -409,4 +417,47 @@ fn analyze_is_fast() {
     }
     let per = t0.elapsed() / 200;
     assert!(per < Duration::from_millis(5), "analyze: {per:?} на реплику");
+}
+
+#[test]
+fn everyday_commands_are_neutral() {
+    let cmds = [
+        "открой хром", "поставь музыку погромче", "выключи компьютер через час", "сделай скриншот экрана", "найди файл отчёт",
+        "удали временные файлы", "какая сегодня погода", "запусти игру", "сверни все окна", "открой диск це",
+        "сколько свободного места на диске", "покажи загрузку процессора", "закрой браузер", "перезагрузи компьютер",
+        "напиши письмо начальнику", "включи ночной режим", "открой папку загрузки", "переименуй файл", "скачай обновления",
+        "поставь будильник на семь утра", "что нового в новостях", "переведи текст на английский", "открой ютуб",
+        "вруби что-нибудь бодрое", "отключи звук", "сделай потише", "мышка не работает", "ядро процессора греется",
+        "почисти корзину", "кто такой Глеб Жеглов", "расскажи анекдот", "найди рецепт борща", "собери статистику",
+        "запусти командную строку", "открой диспетчер задач", "убей процесс хром", "останови службу печати",
+        "проверь обновления драйверов", "сколько стоит биткоин", "напомни купить хлеб", "в чём смысл жизни",
+        "открой настройки", "давай поиграем", "мне скучно", "я устал", "работай быстрее", "ты где", "ну что там",
+        "полный экран", "свернуть", "бабушка звонила", "начальник опять ругается", "кот наступил на клавиатуру",
+    ];
+    let mut bad = Vec::new();
+    for c in cmds {
+        let t = analyze(lex(), c);
+        if t.swear_level > SwearLevel::None || t.sendoff || t.insult_to_jarvis {
+            bad.push(format!("«{c}»: {:?} {:?}", t.swear_level, lex().hits(c).iter().map(|h| (&h.surface, &h.entry)).collect::<Vec<_>>()));
+        }
+    }
+    assert!(bad.is_empty(), "обычные команды сработали:\n{}", bad.join("\n"));
+}
+
+#[test]
+fn local_lj_file_if_present() {
+    let local = real_dir().join("..").join("..").join("data").join("persona");
+    if !local.join("replies-lj.json").exists() {
+        return; // локальный файл есть только на машине владельца (не в git)
+    }
+    let p = Persona::load(&real_dir(), Some(&local)).unwrap();
+    assert!(p.replies.warnings().iter().all(|w| !w.contains("replies-lj")), "{:?}", p.replies.warnings());
+    let harsh = p.replies.lines(Uncensored, Situation::InsultReply).iter().filter(|l| l.harsh).count();
+    assert!(harsh > 0);
+    assert!(p.replies.lines(Buddy, Situation::InsultReply).iter().all(|l| !l.harsh), "жёсткие — только «Без цензуры»");
+    let mut st = PickState::with_seed(5);
+    for _ in 0..40 {
+        let l = p.replies.pick(Uncensored, Situation::InsultReply, &mut st, &Vars::new()).unwrap();
+        assert!(p.replies.lines(Uncensored, Situation::InsultReply).iter().any(|x| x.text == l && !x.harsh), "без мата жёсткие не выбираются: {l}");
+    }
 }

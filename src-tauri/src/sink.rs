@@ -21,6 +21,9 @@ pub const HUD_MODE_EVENT: &str = "jarvis://hud_mode";
 pub const EMERGENCY_EVENT: &str = "jarvis://emergency_stop";
 /// Открыть вкладку в окне настроек: payload — id вкладки.
 pub const SETTINGS_TAB_EVENT: &str = "jarvis://settings_tab";
+/// Настроение Джарвиса (`Event::PersonaMood`): payload `{mood: "calm"|"irritated"|"offended", reason}`
+/// (`PERSONA_MOOD_EVENT` в `src/lib/types.ts`).
+pub const PERSONA_MOOD_EVENT: &str = "persona:mood";
 
 const MAX_ACTIONS: usize = 50;
 
@@ -68,8 +71,8 @@ impl EventCache {
                     }
                 }
             }
-            // Субтитры, уровни звука и ошибки — мгновенные, в снимок не входят.
-            Event::Subtitle { .. } | Event::AudioLevel { .. } | Event::Error { .. } => {}
+            // Субтитры, уровни звука, ошибки и настроение (своё событие) в снимок не входят.
+            Event::Subtitle { .. } | Event::AudioLevel { .. } | Event::Error { .. } | Event::PersonaMood { .. } => {}
         }
     }
 
@@ -161,6 +164,13 @@ impl<R: Runtime> EventSink for TauriSink<R> {
         for fx in &self.effects {
             fx.on_event(&self.app, &event);
         }
+        if let Event::PersonaMood { mood, reason } = &event {
+            let payload = serde_json::json!({ "mood": mood, "reason": reason });
+            if let Err(e) = self.app.emit(PERSONA_MOOD_EVENT, payload) {
+                eprintln!("[jarvis] не удалось отправить настроение во фронтенд: {e}");
+            }
+            return;
+        }
         if let Err(e) = self.app.emit(EVENT_NAME, &event) {
             eprintln!("[jarvis] не удалось отправить событие во фронтенд: {e}");
         }
@@ -236,6 +246,32 @@ mod tests {
         // и обратно: фронтенд/интегратор может прислать то же JSON
         let back: Event = serde_json::from_value(got[4].clone()).unwrap();
         assert_eq!(back, all_events()[4]);
+    }
+
+    #[test]
+    fn persona_mood_goes_to_its_own_event() {
+        let app = tauri::test::mock_app();
+        let (tx, rx) = mpsc::channel::<(String, String)>();
+        let t2 = tx.clone();
+        app.listen_any(PERSONA_MOOD_EVENT, move |e| {
+            tx.send(("mood".into(), e.payload().to_string())).unwrap();
+        });
+        app.listen_any(EVENT_NAME, move |e| {
+            t2.send(("event".into(), e.payload().to_string())).unwrap();
+        });
+        let sink = TauriSink::new(app.handle().clone());
+        sink.emit(Event::PersonaMood { mood: jarvis_core::MoodLabel::Offended, reason: Some("его дважды послали".into()) });
+        let (name, payload) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(name, "mood");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v, serde_json::json!({"mood": "offended", "reason": "его дважды послали"}));
+        sink.emit(Event::PersonaMood { mood: jarvis_core::MoodLabel::Calm, reason: None });
+        let (_, payload) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v, serde_json::json!({"mood": "calm", "reason": null}));
+        // В общий поток `jarvis://event` настроение не дублируется и в снимок не входит.
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+        assert!(sink.replay().is_empty());
     }
 
     #[test]

@@ -236,8 +236,7 @@ pub fn strip_markup(s: &str) -> String {
         let b = s[a..].find("-->").map(|b| a + b + 3).unwrap_or(s.len());
         s.replace_range(a..b, "");
     }
-    loop {
-        let Some(a) = s.find("<ref") else { break };
+    while let Some(a) = s.find("<ref") {
         let rest = &s[a..];
         let end = if let Some(sc) = rest.find("/>").filter(|sc| !rest[..*sc].contains('>')) {
             a + sc + 2

@@ -677,3 +677,64 @@ fn run_future_is_send() {
     let fut = agent.run("x", token());
     assert_send(&fut);
 }
+
+/// Готовые фразы по характеру: агент берёт их из `Phrases` с подстановками, без них — тексты по умолчанию.
+struct BuddyPhrases(std::sync::Mutex<Vec<jarvis_core::Situation>>);
+
+impl jarvis_agent::Phrases for BuddyPhrases {
+    fn phrase(&self, s: jarvis_core::Situation, vars: &jarvis_core::Vars) -> Option<String> {
+        use jarvis_core::Situation as S;
+        self.0.lock().unwrap().push(s);
+        match s {
+            S::Done => Some("Готово.".into()),
+            S::Cancelled => Some("Ок, стоп.".into()),
+            S::NoAnswer => Some("Модель промолчала.".into()),
+            S::ModelError => Some(format!("Сломалось: {}.", vars.get("err")?)),
+            S::LimitReached => Some(format!("Упёрся в лимит ({} шагов).", vars.get("n")?)),
+            _ => None,
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn phrases_trait_replaces_fixed_texts() {
+    use jarvis_core::Situation as S;
+    let p = Arc::new(BuddyPhrases(Default::default()));
+
+    let h = default_harness(ScriptModel::new(vec![call("read", json!({})), text("")]), [FakeTool::ok("read", RiskTier::T0)]);
+    h.agent.set_phrases(p.clone());
+    assert_eq!(h.agent.run("сделай", token()).await.final_text, "Готово.");
+    assert!(h.speech.text().contains("Готово.") && !h.speech.text().contains("сэр"));
+
+    let h = default_harness(ScriptModel::new(vec![text("")]), []);
+    h.agent.set_phrases(p.clone());
+    assert_eq!(h.agent.run("привет", token()).await.final_text, "Модель промолчала.");
+
+    let h = default_harness(ScriptModel::new(vec![Reply::Error(LlmError::Network("dns".into()))]), []);
+    h.agent.set_phrases(p.clone());
+    assert_eq!(h.agent.run("привет", token()).await.final_text, "Сломалось: нет связи с провайдером модели.");
+
+    let config = AgentConfig { max_steps: 2, ..Default::default() };
+    let h = harness(ScriptModel::endless(|i| call("read", json!({"i": i}))), [FakeTool::ok("read", RiskTier::T0)], Opts {
+        config,
+        ..Default::default()
+    });
+    h.agent.set_phrases(p.clone());
+    assert_eq!(h.agent.run("бесконечно", token()).await.final_text, "Упёрся в лимит (2 шагов).");
+
+    let h = default_harness(ScriptModel::new(vec![Reply::Hang]), []);
+    h.agent.set_phrases(p.clone());
+    let tok = token();
+    let c = tok.clone();
+    let (out, _) = tokio::join!(h.agent.run("думай", tok), async move {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        c.cancel();
+    });
+    assert_eq!(out.final_text, "Ок, стоп.");
+    assert!(h.sink.take().iter().any(|e| matches!(e, Event::Subtitle { text, .. } if text == "Ок, стоп.")));
+
+    let seen = p.0.lock().unwrap().clone();
+    for s in [S::Done, S::NoAnswer, S::ModelError, S::LimitReached, S::Cancelled] {
+        assert!(seen.contains(&s), "{s:?} не спрошена: {seen:?}");
+    }
+}

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
+use crate::persona::MoodLabel;
 use crate::risk::RiskTier;
 
 /// Состояние ассистента — по нему HUD выбирает анимацию реактора.
@@ -73,6 +74,9 @@ pub enum Event {
     Telemetry { cpu: f32, ram_used_mb: u64, ram_total_mb: u64, gpu: Option<f32> },
     Sources { items: Vec<SourceLink> },
     Error { message: String },
+    /// Настроение Джарвиса сменилось (спокоен / раздражён / обижен). В приложении уходит отдельным
+    /// Tauri-событием `persona:mood` с payload `{mood, reason}` (значок настроения в HUD и в углу).
+    PersonaMood { mood: MoodLabel, reason: Option<String> },
 }
 
 /// Куда модули отправляют события. Реализует Tauri-слой; в тестах — `CollectSink`.

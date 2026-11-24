@@ -448,7 +448,8 @@ pub fn audio_mic_test_stop() {
 pub async fn audio_sound_test(core: State<'_, CoreState>, device: Option<String>, volume: Option<f32>) -> CmdResult<api::ServiceCheck> {
     let c = core.0.clone();
     let cfg = c.config();
-    Ok(services::sound_test(&cfg, &c.root, device, volume.unwrap_or_else(|| cfg.audio.gain())).await)
+    let phrase = c.persona.say(jarvis_core::Situation::SoundTest, jarvis_core::Vars::new(), services::SOUND_TEST_PHRASE);
+    Ok(services::sound_test(&cfg, &c.root, device, volume.unwrap_or_else(|| cfg.audio.gain()), &phrase).await)
 }
 
 // ───────────────────────────── память, KB, история ─────────────────────────────

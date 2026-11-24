@@ -465,8 +465,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("jarvis-core-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("config.json");
-        let mut c = Config::default();
-        c.autonomy = Autonomy::Never;
+        let c = Config { autonomy: Autonomy::Never, ..Config::default() };
         c.save(&p).unwrap();
         assert_eq!(Config::load(&p).unwrap(), c);
 

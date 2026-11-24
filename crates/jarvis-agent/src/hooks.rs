@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use jarvis_core::RiskTier;
+use jarvis_core::{RiskTier, Situation, Vars};
 use serde_json::Value;
 
 use crate::transcript::Transcript;
@@ -80,6 +80,14 @@ pub struct NullSpeech;
 impl SpeechSink for NullSpeech {
     fn delta(&self, _text: &str) {}
     fn flush(&self) {}
+}
+
+/// Готовые фразы агента вне модели («Остановлено», «Готово», ошибка модели, лимит шагов) — по характеру.
+/// Интегратор берёт их из банка реплик (`jarvis_core::persona::Replies`) с обращением и «зеркалом» мата.
+/// `None` — фразы нет: агент говорит свой текст по умолчанию (дворецкий).
+pub trait Phrases: Send + Sync {
+    /// `vars` — подстановки ситуации (`err`, `n`); обращение и разрешение мата интегратор добавляет сам.
+    fn phrase(&self, situation: Situation, vars: &Vars) -> Option<String>;
 }
 
 /// Вырезание секретов из недоверенного текста перед отправкой в облачную модель

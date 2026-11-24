@@ -16,6 +16,7 @@ use jarvis_sys::ConfirmGate;
 use serde_json::Value;
 
 use super::models::{Models, SHARED_REFLECT_DELAY, SHARED_REFLECT_MAX_TOKENS, shared_reflection_allowed};
+use super::persona::{PersonaRuntime, is_model_only_note};
 use super::speech::SpeechQueue;
 
 // ───────────────────────────── свечение ─────────────────────────────
@@ -83,6 +84,8 @@ pub struct GateConfirmer {
     pub speech: Arc<SpeechQueue>,
     pub events: Arc<dyn EventSink>,
     pub timeout: Duration,
+    /// Обёртка вопроса — по характеру («Сэр, …? Скажите «да» или «нет».» / «…, точно? Да или нет?»).
+    pub persona: Arc<PersonaRuntime>,
 }
 
 /// Если future подтверждения бросили (отмена задачи), запрос закрывается отказом, а голосовой фильтр
@@ -111,9 +114,14 @@ impl GateConfirmer {
     }
 }
 
+/// Вопрос подтверждения дворецкого (как было до характеров; в приложении обёртку даёт [`PersonaRuntime`]).
+pub fn spoken_confirm(summary: &str) -> String {
+    format!("Сэр, {}? Скажите «да» или «нет».", confirm_action(summary))
+}
+
 /// Что сказать голосом при подтверждении. Сырой вызов («powershell_run: command=$text=…») вслух не читаем —
 /// только действие по-русски и короткое имя объекта; подробности видны в окне подтверждения.
-pub fn spoken_confirm(summary: &str) -> String {
+pub fn confirm_action(summary: &str) -> String {
     let tool = summary.split(':').next().unwrap_or(summary).trim();
     let arg = |key: &str| -> Option<String> {
         let rest = summary.split_once(':')?.1;
@@ -131,7 +139,7 @@ pub fn spoken_confirm(summary: &str) -> String {
         Some(n) => format!("{what} {n}"),
         None => what.to_string(),
     };
-    let action = match tool {
+    match tool {
         "powershell_run" => "выполнить команду PowerShell".to_string(),
         "cmd_run" => "выполнить команду в командной строке".to_string(),
         "terminal_run" | "terminal_type" => "выполнить команду в терминале".to_string(),
@@ -152,21 +160,21 @@ pub fn spoken_confirm(summary: &str) -> String {
         "shell_hook_install" => "подключить терминал".to_string(),
         "undo_last" => "отменить последнее действие".to_string(),
         _ => "выполнить это действие".to_string(),
-    };
-    format!("Сэр, {action}? Скажите «да» или «нет».")
+    }
 }
 
 #[async_trait]
 impl Confirmer for GateConfirmer {
     async fn confirm(&self, summary: &str, tier: RiskTier, protected_path: bool) -> bool {
-        let first = self.ask(summary.to_string(), tier, spoken_confirm(summary)).await;
+        let action = confirm_action(summary);
+        let first = self.ask(summary.to_string(), tier, self.persona.confirm_phrase(&action)).await;
         if !first || !protected_path {
             return first;
         }
         self.ask(
             format!("Повторно (защищённая системная папка): {summary}"),
             RiskTier::T3,
-            "Сэр, это защищённая системная папка. Подтвердите ещё раз: да или нет?".into(),
+            self.persona.protected_phrase(&action),
         )
         .await
     }
@@ -188,6 +196,8 @@ pub struct MemoryBridge {
     pub reflect: bool,
     /// Обычные разговоры без инструментов (копятся для рефлектора: так он узнаёт характер пользователя).
     pub chat: std::sync::Mutex<Vec<String>>,
+    /// Любимые словечки из рефлексии → `config/persona/lexicon/user.json`.
+    pub persona: Arc<PersonaRuntime>,
 }
 
 /// Сколько реплик разговора копить, прежде чем отдать рефлектору.
@@ -200,7 +210,8 @@ pub fn is_emotional(notes: &[String]) -> bool {
 
 /// Строка разговора для рефлектора: реплика пользователя с пометками и ответ Джарвиса.
 pub fn chat_line(t: &Transcript) -> String {
-    let notes = t.notes.iter().filter(|n| n.starts_with('[')).cloned().collect::<Vec<_>>().join(" ");
+    let notes =
+        t.notes.iter().filter(|n| n.starts_with('[') && !is_model_only_note(n)).cloned().collect::<Vec<_>>().join(" ");
     let user = if notes.is_empty() { t.user_text.clone() } else { format!("{} {notes}", t.user_text) };
     format!("Пользователь: {user}\nДжарвис: {}", t.final_text.trim())
 }
@@ -299,6 +310,7 @@ impl MemoryHooks for MemoryBridge {
         let Some(choice) = self.models.reflection_choice() else { return };
         let mem = self.mem.clone();
         let brain = self.models.brain.clone();
+        let persona = self.persona.clone();
         let task_end = Instant::now();
         self.handle.spawn(async move {
             // Без своей цепочки рефлексия идёт в модель «мозга» и съедает тот же лимит (Groq: 8000 токенов
@@ -318,6 +330,15 @@ impl MemoryHooks for MemoryBridge {
             }
             let run = reflector.reflect_and_apply(&mem, &task, cancel.clone());
             match tokio::time::timeout(Duration::from_secs(90), run).await {
+                Ok(Ok((result, _))) if !result.slang.is_empty() => {
+                    // Словечки пользователя — в его словарь, Джарвис начинает их понимать сразу.
+                    let slang = result.slang;
+                    match tokio::task::spawn_blocking(move || persona.add_slang(&slang)).await {
+                        Ok(Err(e)) => eprintln!("[jarvis] рефлектор: словечки не записаны: {e}"),
+                        Err(e) => eprintln!("[jarvis] рефлектор: словечки не записаны: {e}"),
+                        Ok(Ok(_)) => {}
+                    }
+                }
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => eprintln!("[jarvis] рефлектор: {e}"),
                 Err(_) => {
@@ -340,7 +361,8 @@ fn action_status(s: StepStatus) -> ActionStatus {
 /// Протокол агента → протокол рефлектора.
 pub fn to_task_transcript(t: &Transcript) -> TaskTranscript {
     // Пометки хода ([голос: …], [речь: …]) — замеры, рефлектору они полезны для фактов о характере.
-    let marks: Vec<&str> = t.notes.iter().map(String::as_str).filter(|n| n.starts_with('[')).collect();
+    let marks: Vec<&str> =
+        t.notes.iter().map(String::as_str).filter(|n| n.starts_with('[') && !is_model_only_note(n)).collect();
     TaskTranscript {
         user_request: if marks.is_empty() { t.user_text.clone() } else { format!("{} {}", t.user_text, marks.join(" ")) },
         steps: t
@@ -383,6 +405,58 @@ mod tests {
         assert!(task.steps.is_empty() && task.success.is_none());
         // В протоколе задачи пометки тоже видны рефлектору.
         assert!(to_task_transcript(&t).user_request.ends_with("[голос: кричит (+14 дБ)]"));
+    }
+
+    #[test]
+    fn model_only_notes_skip_reflector() {
+        let t = Transcript {
+            user_text: "пошёл нахуй".into(),
+            final_text: "Сам иди.".into(),
+            notes: vec![
+                "[речь: мат (нахуй), посылание]".into(),
+                "[можно материться: да]".into(),
+                "[примеры твоих реплик в такой ситуации (это примеры манеры, не повторяй дословно): «Сам иди.»]".into(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(chat_line(&t), "Пользователь: пошёл нахуй [речь: мат (нахуй), посылание]\nДжарвис: Сам иди.");
+        assert_eq!(to_task_transcript(&t).user_request, "пошёл нахуй [речь: мат (нахуй), посылание]");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn confirm_wrapper_follows_persona_and_keeps_yes_no() {
+        use jarvis_core::config::{PersonaConfig, PersonaMode};
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        for mode in PersonaMode::ALL {
+            let cfg = PersonaConfig { mode, ..Default::default() };
+            let persona = Arc::new(PersonaRuntime::new(&cfg, Arc::new(jarvis_core::NullSink)));
+            persona.load(&root.join("config/persona"), None).unwrap();
+            let sink = Arc::new(CollectSink::default());
+            let c = GateConfirmer {
+                gate: ConfirmGate::new(sink.clone()),
+                speech: SpeechQueue::new(&tokio::runtime::Handle::current()),
+                events: sink.clone(),
+                timeout: Duration::from_millis(50),
+                persona,
+            };
+            // Таймаут — отказ; вопрос уже прозвучал.
+            assert!(!c.confirm("service_stop: name=Spooler", RiskTier::T3, false).await);
+            let asked: Vec<String> = sink
+                .take()
+                .into_iter()
+                .filter_map(|e| match e {
+                    Event::Subtitle { speaker: Speaker::Jarvis, text, .. } => Some(text),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(asked.len(), 1, "{asked:?}");
+            let q = asked[0].to_lowercase();
+            assert!(q.contains("службу spooler"), "{mode:?}: {q}");
+            assert!(q.contains("да") && q.contains("нет"), "{mode:?}: {q}");
+            if mode != PersonaMode::Butler {
+                assert!(!q.contains("сэр"), "{mode:?}: {q}");
+            }
+        }
     }
 
     #[test]
