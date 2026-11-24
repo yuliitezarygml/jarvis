@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 
 import ConfirmDialog from '@/components/hud/ConfirmDialog';
-import MoodBadge, { usePersonaMood } from '@/components/hud/MoodBadge';
 import Reactor from '@/components/reactor/Reactor';
 import RichText from '@/components/RichText';
 import { call, inTauri, startDragging } from '@/lib/bridge';
@@ -48,7 +47,6 @@ export default function CornerPage() {
   const history = useJarvis((s) => s.subtitleHistory);
   const actions = useJarvis((s) => s.actions);
   const lastError = useJarvis((s) => s.lastError);
-  const mood = usePersonaMood();
   const now = useNow(500);
   const down = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
   const [side, setSide] = useState<Side>('none');
@@ -100,7 +98,6 @@ export default function CornerPage() {
           <div className="cc-state">
             <span className="state-dot" aria-hidden="true" />
             {STATE_LABEL[assistant]}
-            {mood && <MoodBadge mood={mood.mood} reason={mood.reason} className="cc-mood" />}
           </div>
           {u && (
             <p className="cc-line cc-user" data-final={u.final}>
@@ -153,7 +150,6 @@ export default function CornerPage() {
         }}
       >
         <Reactor variant="corner" className="reactor reactor-corner" />
-        {mood && mood.mood !== 'calm' && <MoodBadge mood={mood.mood} reason={mood.reason} compact className="corner-mood" />}
         <span className="corner-state">{STATE_LABEL[assistant]}</span>
       </div>
       {confirm && (

@@ -282,7 +282,7 @@ mod tests {
     }
 
     /// Ручная проверка распознавания папки WAV (любой частоты): `JARVIS_STT_WAV_DIR=<папка>`. Печатает
-    /// «файл → текст» — так проверяли, как GigaAM пишет мат (фразы синтезировал голос Джарвиса).
+    /// «файл → текст» (например, фразы, синтезированные голосом Джарвиса).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "нужны DLL sherpa-onnx рядом с тестовым exe и JARVIS_STT_WAV_DIR"]
     async fn transcribe_wav_dir() {

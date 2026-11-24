@@ -8,7 +8,6 @@ import CommandBar from '@/components/hud/CommandBar';
 import ConfirmDialog from '@/components/hud/ConfirmDialog';
 import ErrorToast from '@/components/hud/ErrorToast';
 import HudBackground from '@/components/hud/HudBackground';
-import MoodBadge, { usePersonaMood } from '@/components/hud/MoodBadge';
 import SourcesPanel from '@/components/hud/SourcesPanel';
 import Subtitles from '@/components/hud/Subtitles';
 import Telemetry from '@/components/hud/Telemetry';
@@ -28,7 +27,6 @@ function Clock() {
 export default function HudPage() {
   const assistant = useJarvis((s) => s.assistant);
   const control = useJarvis((s) => s.control);
-  const mood = usePersonaMood();
   const [stopped, setStopped] = useState<number | null>(null);
 
   useTauriEvent(EMERGENCY_EVENT, () => setStopped(Date.now()));
@@ -102,7 +100,6 @@ export default function HudPage() {
             {STATE_LABEL[assistant]}
             {control.active && control.tier && <span className="hud-tier"> · {TIER_LABEL[control.tier]}</span>}
           </span>
-          {mood && <MoodBadge mood={mood.mood} reason={mood.reason} />}
         </div>
         <Clock />
         <nav className="hud-actions" aria-label="Управление окном">

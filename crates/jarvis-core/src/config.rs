@@ -182,93 +182,6 @@ pub struct HudConfig {
     pub wallpaper: bool,
 }
 
-/// Характер Джарвиса (см. `PERSONALITY-PLAN.md`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PersonaMode {
-    /// Вежливый дворецкий: «сэр», без мата (как раньше; для презентаций).
-    #[default]
-    Butler,
-    /// «Свой парень»: на «ты», дружеский стёб, без мата.
-    Buddy,
-    /// «Без цензуры»: на «ты», мат зеркалит пользователя, может послать в ответ.
-    Uncensored,
-}
-
-impl PersonaMode {
-    pub const ALL: [PersonaMode; 3] = [PersonaMode::Butler, PersonaMode::Buddy, PersonaMode::Uncensored];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PersonaMode::Butler => "butler",
-            PersonaMode::Buddy => "buddy",
-            PersonaMode::Uncensored => "uncensored",
-        }
-    }
-
-    /// Название для людей.
-    pub fn title(self) -> &'static str {
-        match self {
-            PersonaMode::Butler => "Дворецкий",
-            PersonaMode::Buddy => "Свой парень",
-            PersonaMode::Uncensored => "Без цензуры",
-        }
-    }
-
-    pub fn allows_profanity(self) -> bool {
-        self == PersonaMode::Uncensored
-    }
-}
-
-/// Как часто подкалывать.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TeaseLevel {
-    Rare,
-    #[default]
-    Sometimes,
-    Often,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PersonaConfig {
-    pub mode: PersonaMode,
-    pub tease: TeaseLevel,
-    /// Как обращаться к пользователю. Пусто — по режиму («сэр» у дворецкого, без обращения у остальных).
-    pub address: String,
-    /// Подстраиваться под тон пользователя (громкость, мат, сарказм).
-    pub adaptive: bool,
-    /// Своё настроение: «обижается», если его посылают, отходит со временем.
-    pub mood: bool,
-    /// Слова, которые Джарвис не говорит никогда (в любом режиме).
-    pub banned_words: Vec<String>,
-}
-
-impl Default for PersonaConfig {
-    fn default() -> Self {
-        Self {
-            mode: PersonaMode::Butler,
-            tease: TeaseLevel::Sometimes,
-            address: String::new(),
-            adaptive: true,
-            mood: true,
-            banned_words: Vec::new(),
-        }
-    }
-}
-
-impl PersonaConfig {
-    /// Обращение: своё, иначе «сэр» для дворецкого и ничего для остальных режимов.
-    pub fn address(&self) -> Option<&str> {
-        match self.address.trim() {
-            "" if self.mode == PersonaMode::Butler => Some("сэр"),
-            "" => None,
-            a => Some(a),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -291,8 +204,6 @@ pub struct Config {
     pub hud: HudConfig,
     pub audio: AudioConfig,
     pub appearance: AppearanceConfig,
-    /// Характер: режим, подколы, обращение, настроение.
-    pub persona: PersonaConfig,
 }
 
 /// Размер виджета в углу.
@@ -386,7 +297,6 @@ impl Default for Config {
             hud: HudConfig::default(),
             audio: AudioConfig::default(),
             appearance: AppearanceConfig::default(),
-            persona: PersonaConfig::default(),
         }
     }
 }
@@ -439,17 +349,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn persona_defaults_and_old_configs() {
-        // Старый config.json без секции persona — дворецкий, как раньше.
-        let c: Config = serde_json::from_str("{}").unwrap();
-        assert_eq!(c.persona.mode, PersonaMode::Butler);
-        assert_eq!(c.persona.address(), Some("сэр"));
-        let p: PersonaConfig = serde_json::from_str(r#"{"mode":"uncensored","tease":"often"}"#).unwrap();
-        assert_eq!((p.mode, p.tease), (PersonaMode::Uncensored, TeaseLevel::Often));
-        assert!(p.mode.allows_profanity() && p.adaptive && p.mood);
-        assert_eq!(p.address(), None, "вне режима дворецкого без «сэр»");
-        let p = PersonaConfig { address: " Юлиан ".into(), ..p };
-        assert_eq!(p.address(), Some("Юлиан"));
+    fn old_config_with_removed_persona_section_loads() {
+        // Секция `persona` из прежних config.json (функция удалена) молча игнорируется.
+        let c: Config = serde_json::from_str(
+            r#"{"autonomy":"never","persona":{"mode":"buddy","tease":"often","swear_always":true,"banned_words":[]}}"#,
+        )
+        .unwrap();
+        assert_eq!(c, Config { autonomy: Autonomy::Never, ..Config::default() });
+        assert!(!serde_json::to_string(&c).unwrap().contains("persona"), "при сохранении секция пропадает");
     }
 
     #[test]

@@ -205,7 +205,7 @@ async fn empty_reply_is_retried_once_with_bigger_budget() {
     // gpt-oss тратит бюджет на рассуждения и отдаёт пустой текст — один повтор с бюджетом ×2.
     let model = Arc::new(MockModel::ok("   "));
     let r = Reflector::new(model.clone());
-    let t = TaskTranscript { user_request: "Разговор без задач:\nПользователь: да пошёл ты".into(), ..Default::default() };
+    let t = TaskTranscript { user_request: "Открой блокнот".into(), ..Default::default() };
     let e = r.reflect(&t).await.unwrap_err();
     assert!(e.to_string().contains("пустой ответ"), "{e}");
     assert_eq!(model.calls(), 2);

@@ -68,8 +68,6 @@ pub struct GuardAlert {
     pub value_pct: f32,
     /// Кто больше всего потребляет (для RAM/CPU).
     pub top: Option<String>,
-    /// Свободно на диске по-человечески («12.3 ГБ») — для алерта диска.
-    pub free: Option<String>,
     /// Готовая фраза для TTS.
     pub message: String,
 }
@@ -108,7 +106,7 @@ impl ResourceGuard {
                     Some(w) => format!("Сэр, оперативная память заполнена на {ram:.0} %, больше всего берёт {w}."),
                     None => format!("Сэр, оперативная память заполнена на {ram:.0} %."),
                 };
-                out.push(GuardAlert { kind: AlertKind::Ram, value_pct: ram, top: who, free: None, message });
+                out.push(GuardAlert { kind: AlertKind::Ram, value_pct: ram, top: who, message });
                 self.last.insert(AlertKind::Ram, now);
                 self.ram_since = None;
             }
@@ -125,7 +123,7 @@ impl ResourceGuard {
                     Some(w) => format!("Сэр, процессор загружен на {cpu:.0} % уже больше минуты, больше всего — {w}."),
                     None => format!("Сэр, процессор загружен на {cpu:.0} % уже больше минуты."),
                 };
-                out.push(GuardAlert { kind: AlertKind::Cpu, value_pct: cpu, top: who, free: None, message });
+                out.push(GuardAlert { kind: AlertKind::Cpu, value_pct: cpu, top: who, message });
                 self.last.insert(AlertKind::Cpu, now);
                 self.cpu_since = None;
             }
@@ -141,9 +139,8 @@ impl ResourceGuard {
             let k = AlertKind::Disk(d.mount.clone());
             if free < self.cfg.disk_free_pct && self.cooled(&k, now) {
                 let name = d.mount.trim_end_matches('\\');
-                let bytes = fmt_bytes(d.free);
-                let message = format!("Сэр, на диске {name} осталось всего {free:.0} % свободного места ({bytes}).");
-                out.push(GuardAlert { kind: k.clone(), value_pct: free, top: None, free: Some(bytes), message });
+                let message = format!("Сэр, на диске {name} осталось всего {free:.0} % свободного места ({}).", fmt_bytes(d.free));
+                out.push(GuardAlert { kind: k.clone(), value_pct: free, top: None, message });
                 self.last.insert(k, now);
             }
         }

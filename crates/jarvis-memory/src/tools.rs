@@ -43,8 +43,7 @@ impl Tool for RememberTool {
             name: "memory_remember".into(),
             description: "Запомнить факт о пользователе, когда он явно просит («запомни, что…»). \
                           text — сам факт коротко (например «Пьёт чёрный кофе без сахара»); \
-                          category — preference|personal|alias|habit|contact|general|style \
-                          (style — как пользователь общается: мат, юмор, что злит, обращение); \
+                          category — preference|personal|alias|habit|contact|general; \
                           important — учитывать всегда."
                 .into(),
             parameters: json!({

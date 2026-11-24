@@ -298,7 +298,7 @@ export function PermissionsTab({ draft, update }: TabProps) {
           checked={draft.terminal_autorun}
           onChange={(v) => update((c) => ({ ...c, terminal_autorun: v }))}
           title="Сам вводить исправленную команду в терминал"
-          desc="Для безопасных команд (T0–T2). Опасные — только после вашего «да». Выключено — Джарвис только подсказывает."
+          desc="Для безопасных команд (T0–T2). Опасные — только после «да, сэр». Выключено — Джарвис только подсказывает."
         />
         <Toggle
           checked={draft.resource_guard}

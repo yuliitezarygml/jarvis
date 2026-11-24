@@ -17,10 +17,9 @@ use tokio::sync::mpsc;
 use crate::config::AgentConfig;
 use crate::history::{Entry, EntryKind, History, Turn, assemble};
 use crate::hooks::{
-    Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, Phrases, ProtectedPathCheck, Redactor, SpeechSink,
+    Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, ProtectedPathCheck, Redactor, SpeechSink,
     identity_redactor, no_protected_paths,
 };
-use jarvis_core::{Situation, Vars};
 use crate::prompt::{TOOLS_LOAD_NOTE, build_system_prompt};
 use crate::text::{canonical_json, normalize_args, preview, redact_value, summarize_call, truncate_output};
 use crate::toolsets::{CORE, GROUPS, TOOLS_LOAD, group_of, parse_load_args, route, tools_load_spec};
@@ -63,8 +62,6 @@ pub struct Agent {
     speech: Arc<dyn SpeechSink>,
     redactor: Redactor,
     protected: ProtectedPathCheck,
-    /// Готовые фразы по характеру (`None` — тексты по умолчанию).
-    phrases: RwLock<Option<Arc<dyn Phrases>>>,
     history: Mutex<History>,
     /// Группы инструментов, использованные в прошлом ходе (для «закрой его» и прочих продолжений).
     sticky_groups: Mutex<BTreeSet<&'static str>>,
@@ -85,7 +82,6 @@ pub struct AgentBuilder {
     speech: Arc<dyn SpeechSink>,
     redactor: Redactor,
     protected: ProtectedPathCheck,
-    phrases: Option<Arc<dyn Phrases>>,
 }
 
 impl AgentBuilder {
@@ -117,11 +113,6 @@ impl AgentBuilder {
         self.protected = check;
         self
     }
-    /// Готовые фразы по характеру (см. [`Phrases`]).
-    pub fn phrases(mut self, phrases: Arc<dyn Phrases>) -> Self {
-        self.phrases = Some(phrases);
-        self
-    }
     pub fn build(self) -> Agent {
         Agent {
             model: self.model,
@@ -133,7 +124,6 @@ impl AgentBuilder {
             speech: self.speech,
             redactor: self.redactor,
             protected: self.protected,
-            phrases: RwLock::new(self.phrases),
             history: Mutex::new(History::default()),
             sticky_groups: Mutex::new(BTreeSet::new()),
             run_lock: tokio::sync::Mutex::new(()),
@@ -154,7 +144,6 @@ impl Agent {
             speech: Arc::new(NullSpeech),
             redactor: identity_redactor(),
             protected: no_protected_paths(),
-            phrases: None,
         }
     }
 
@@ -172,17 +161,6 @@ impl Agent {
         &self.tools
     }
 
-    /// Подключить (или заменить) готовые фразы по характеру.
-    pub fn set_phrases(&self, phrases: Arc<dyn Phrases>) {
-        *self.phrases.write().unwrap_or_else(|e| e.into_inner()) = Some(phrases);
-    }
-
-    /// Фраза ситуации из [`Phrases`] или `fallback`.
-    fn phrase(&self, situation: Situation, vars: &Vars, fallback: impl FnOnce() -> String) -> String {
-        let p = self.phrases.read().unwrap_or_else(|e| e.into_inner()).clone();
-        p.and_then(|p| p.phrase(situation, vars)).filter(|t| !t.trim().is_empty()).unwrap_or_else(fallback)
-    }
-
     /// Забыть диалог («новый разговор»).
     pub fn clear_history(&self) {
         self.history.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -196,40 +174,26 @@ impl Agent {
 
     /// Выполнить задачу пользователя.
     pub async fn run(&self, user_text: &str, cancel: CancellationToken) -> TaskOutcome {
-        self.run_with(user_text, &[], cancel).await
-    }
-
-    /// Выполнить задачу с пометками к этому ходу (`голос: громче обычного на 11 дБ`, `речь: мат`, `настроение: …`).
-    /// Пометки видит модель только в текущем ходе (служебное сообщение `[…]`); в поиск инструментов и память
-    /// по тексту они не попадают, в протокол для рефлектора — попадают (`transcript.notes`).
-    pub async fn run_with(&self, user_text: &str, notes: &[String], cancel: CancellationToken) -> TaskOutcome {
         let _guard = tokio::select! {
             biased;
             g = self.run_lock.lock() => g,
             // Отменили, пока ждали предыдущую задачу: ничего не делаем и не трогаем HUD.
-            _ = cancel.cancelled() => {
-                let text = self.phrase(Situation::Cancelled, &Vars::new(), || CANCELLED_TEXT.into());
-                return TaskOutcome {
-                final_text: text.clone(),
+            _ = cancel.cancelled() => return TaskOutcome {
+                final_text: CANCELLED_TEXT.into(),
                 steps: 0,
                 transcript: Transcript {
                     user_text: user_text.into(),
-                    final_text: text,
+                    final_text: CANCELLED_TEXT.into(),
                     stop_reason: StopReason::Cancelled,
                     ..Default::default()
                 },
                 error: None,
                 stop_reason: StopReason::Cancelled,
-            }},
+            },
         };
 
         let run_id = self.run_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let mut r = Run::new(self, user_text, cancel, run_id);
-        for n in notes.iter().map(|n| n.trim()).filter(|n| !n.is_empty()) {
-            let n = if n.starts_with('[') { n.to_string() } else { format!("[{n}]") };
-            r.entries.push(Entry::note(n.clone(), 0));
-            r.transcript.notes.push(n);
-        }
         let outcome = r.execute().await;
 
         let cfg_turns = r.cfg.max_history_turns;
@@ -830,15 +794,15 @@ impl<'a> Run<'a> {
     fn finish_completed(&mut self, text: String) -> TaskOutcome {
         let final_text = if text.trim().is_empty() {
             let t = if self.transcript.steps.is_empty() {
-                self.agent.phrase(Situation::NoAnswer, &Vars::new(), || "Прошу прощения, сэр, модель не дала ответа.".into())
+                "Прошу прощения, сэр, модель не дала ответа."
             } else {
-                self.agent.phrase(Situation::Done, &Vars::new(), || "Готово, сэр.".into())
+                "Готово, сэр."
             };
-            self.say(&t);
+            self.say(t);
             if let Some(last) = self.entries.last_mut() {
-                last.msg.content = t.clone();
+                last.msg.content = t.to_string();
             }
-            t
+            t.to_string()
         } else {
             text
         };
@@ -850,18 +814,15 @@ impl<'a> Run<'a> {
         self.agent.speech.cancel();
         self.emit(Event::ControlStop);
         self.close_open_calls();
-        let text = self.agent.phrase(Situation::Cancelled, &Vars::new(), || CANCELLED_TEXT.into());
-        self.entries.push(Entry::assistant(ChatMessage::assistant(text.clone()), self.transcript.model_calls));
-        self.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: text.clone(), is_final: true });
+        self.entries.push(Entry::assistant(ChatMessage::assistant(CANCELLED_TEXT), self.transcript.model_calls));
+        self.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: CANCELLED_TEXT.into(), is_final: true });
         self.set_state(AssistantState::Idle);
-        self.outcome(text, StopReason::Cancelled, None)
+        self.outcome(CANCELLED_TEXT.into(), StopReason::Cancelled, None)
     }
 
     fn finish_model_error(&mut self, e: LlmError) -> TaskOutcome {
         let msg = e.to_string();
-        let human = humanize_llm_error(&e);
-        let final_text =
-            self.agent.phrase(Situation::ModelError, &Vars::new().set("err", human), || format!("Прошу прощения, сэр: {human}."));
+        let final_text = format!("Прошу прощения, сэр: {}.", humanize_llm_error(&e));
         self.emit(Event::Error { message: format!("Ошибка модели: {msg}") });
         self.close_open_calls();
         self.say(&final_text);
@@ -872,9 +833,7 @@ impl<'a> Run<'a> {
 
     fn finish_max_steps(&mut self) -> TaskOutcome {
         let n = self.transcript.model_calls;
-        let final_text = self.agent.phrase(Situation::LimitReached, &Vars::new().set("n", n.to_string()), || {
-            format!("Сэр, я остановился: исчерпан лимит в {n} шагов, задача не завершена.")
-        });
+        let final_text = format!("Сэр, я остановился: исчерпан лимит в {n} шагов, задача не завершена.");
         self.transcript.notes.push(format!("Лимит шагов ({n}) исчерпан."));
         self.close_open_calls();
         self.say(&final_text);

@@ -39,6 +39,5 @@
   "appearance": {
     "theme": "arc-reactor", "accent": null, "glow": 1.0, "animation_speed": 1.0, "corner_size": "medium",
     "scanlines": true, "show_telemetry": true, "show_actions": true, "show_sources": true, "show_subtitles": true
-  },
-  "persona": { "mode": "butler", "tease": "sometimes", "address": "", "adaptive": true, "mood": true, "banned_words": [] }
+  }
 }

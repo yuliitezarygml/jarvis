@@ -53,16 +53,6 @@ export const SETTINGS_TAB_EVENT = 'jarvis://settings_tab';
 export const CONFIG_CHANGED_EVENT = 'jarvis://config_changed';
 /** Уровень микрофона во время «Проверить микрофон» (RMS 0…1). */
 export const MIC_TEST_EVENT = 'jarvis://mic_test_level';
-/** Настроение Джарвиса изменилось (payload — `PersonaMoodPayload`). Шлёт рантайм характера. */
-export const PERSONA_MOOD_EVENT = 'persona:mood';
-
-/** Настроение Джарвиса: спокоен / раздражён / обижен. */
-export type PersonaMood = 'calm' | 'irritated' | 'offended';
-export interface PersonaMoodPayload {
-  mood: PersonaMood;
-  /** Почему (для подсказки): «дважды послали». */
-  reason?: string | null;
-}
 
 // ───────────── config.json (jarvis_core::Config) ─────────────
 
@@ -117,20 +107,6 @@ export interface Config {
   hud: { mode: HudMode; corner_x: number | null; corner_y: number | null; wallpaper: boolean };
   audio: AudioConfig;
   appearance: AppearanceConfig;
-  persona: PersonaConfig;
-}
-
-/** Характер Джарвиса (см. PERSONALITY-PLAN.md). */
-export type PersonaMode = 'butler' | 'buddy' | 'uncensored';
-export type TeaseLevel = 'rare' | 'sometimes' | 'often';
-export interface PersonaConfig {
-  mode: PersonaMode;
-  tease: TeaseLevel;
-  /** Обращение к пользователю; пусто — по режиму. */
-  address: string;
-  adaptive: boolean;
-  mood: boolean;
-  banned_words: string[];
 }
 
 export type CornerSize = 'small' | 'medium' | 'large';
@@ -237,7 +213,7 @@ export interface AudioDevices {
 }
 
 /** Категория факта памяти (`jarvis_memory::category`); любая другая строка тоже возможна. */
-export type FactCategory = 'preference' | 'personal' | 'alias' | 'habit' | 'contact' | 'general' | 'style';
+export type FactCategory = 'preference' | 'personal' | 'alias' | 'habit' | 'contact' | 'general';
 export interface Fact {
   id: string;
   text: string;

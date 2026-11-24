@@ -14,7 +14,6 @@
 
 pub mod bridges;
 pub mod models;
-pub mod persona;
 pub mod registry;
 pub mod services;
 pub mod speech;
@@ -28,7 +27,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use jarvis_agent::{Agent, AgentConfig, MemoryHooks, NoopMemory, SpeechSink, TaskOutcome};
 use jarvis_core::{
-    AssistantState, AudioSource, CancellationToken, ChatModel, Config, Event, EventSink, Situation, Speaker, Tool, Vars,
+    AssistantState, AudioSource, CancellationToken, ChatModel, Config, Event, EventSink, Speaker, Tool,
 };
 use jarvis_kb::Kb;
 use jarvis_llm::{Presets, ProviderReport};
@@ -124,8 +123,6 @@ pub struct Core {
     telemetry: Mutex<Option<CancellationToken>>,
     /// Последние отчёты «Проверить» по провайдерам (для «Выбрать лучшее автоматически»).
     pub reports: Mutex<HashMap<String, ProviderReport>>,
-    /// Характер: словарь, реплики, настроение, смена режима голосом, пометки к ходу.
-    pub persona: Arc<persona::PersonaRuntime>,
     opts: CoreOptions,
     me: Weak<Core>,
 }
@@ -200,28 +197,6 @@ impl Core {
         }
         let built = registry::build_registry(groups);
 
-        // Характер: словарь ругани/похвалы и банк реплик (`config/persona`), локальные подколки (`data/persona`).
-        let persona = Arc::new(persona::PersonaRuntime::new(&cfg.persona, events.clone()));
-        let persona_dir = root.join("config").join("persona");
-        if persona_dir.is_dir() {
-            match persona.load(&persona_dir, Some(&root.join(&cfg.data_dir).join("persona"))) {
-                Ok(warnings) => {
-                    for w in warnings.iter().take(20) {
-                        tracing::warn!(warning = %w, "характер: предупреждение словаря");
-                    }
-                }
-                Err(e) => issues.push(ModuleIssue {
-                    module: "persona",
-                    message: format!("Словарь характера не загрузился ({e}) — Джарвис говорит встроенными фразами."),
-                }),
-            }
-        } else {
-            issues.push(ModuleIssue {
-                module: "persona",
-                message: format!("Нет папки {} — Джарвис говорит встроенными фразами.", persona_dir.display()),
-            });
-        }
-
         // Агент.
         let speech = SpeechQueue::new(&handle);
         let gate = ConfirmGate::new(events.clone());
@@ -233,8 +208,6 @@ impl Core {
                 session,
                 handle: handle.clone(),
                 reflect: opts.reflect,
-                chat: Default::default(),
-                persona: persona.clone(),
             }),
             None => Arc::new(NoopMemory),
         };
@@ -251,13 +224,11 @@ impl Core {
                     speech: speech.clone(),
                     events: events.clone(),
                     timeout: opts.confirm_timeout,
-                    persona: persona.clone(),
                 }))
                 .memory(memory_hooks)
                 .speech(speech.clone())
                 .redactor(Arc::new(|s: &str| jarvis_sys::redact_secrets(s).0))
                 .protected_paths(protected)
-                .phrases(persona.clone())
                 .build(),
         );
 
@@ -291,11 +262,9 @@ impl Core {
             mic: Mutex::new(MicState { wanted: listen_on_start, error: None, handle: None }),
             telemetry: Mutex::new(None),
             reports: Mutex::new(HashMap::new()),
-            persona,
             opts,
             me: me.clone(),
         });
-        core.start_mood_timer();
         if core.opts.telemetry {
             core.start_telemetry();
         }
@@ -305,20 +274,6 @@ impl Core {
             core.mic.lock().unwrap().error = Some("голос выключен".into());
         }
         core
-    }
-
-    /// Настроение затухает само: раз в 30 с проверить ярлык и обновить значок в HUD.
-    fn start_mood_timer(&self) {
-        let persona = Arc::downgrade(&self.persona);
-        self.handle.spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(30));
-            tick.tick().await;
-            loop {
-                tick.tick().await;
-                let Some(p) = persona.upgrade() else { break };
-                p.check_mood(std::time::Instant::now());
-            }
-        });
     }
 
     fn arc(&self) -> Arc<Core> {
@@ -350,11 +305,6 @@ impl Core {
 
     /// Новая команда (голос или поле HUD). Предыдущая задача отменяется (барж-ин), речь обрывается.
     pub fn submit(&self, text: &str, from_voice: bool) -> Result<(), String> {
-        self.submit_with(text, from_voice, None)
-    }
-
-    /// То же, что `submit`, плюс тон голоса фразы (громкость/скорость относительно обычных) — для пометок к ходу.
-    pub fn submit_with(&self, text: &str, from_voice: bool, voice: Option<jarvis_voice::VoiceTone>) -> Result<(), String> {
         let text = text.trim().to_string();
         if text.is_empty() {
             return Err("Пустая команда".into());
@@ -366,30 +316,11 @@ impl Core {
         if self.refuse_without_model() {
             return Ok(());
         }
-        let notes = self.persona.notes(&text, voice.as_ref(), std::time::Instant::now());
         let core = self.arc();
         self.handle.spawn(async move {
-            core.run_task_with(id, text, notes, token).await;
+            core.run_task(id, text, token).await;
         });
         Ok(())
-    }
-
-    /// Сменить характер (голосом, из трея, из настроек): сохранить в config.json через приложение
-    /// (или применить в памяти, если сохранять нечем) и ответить уже новым голосом.
-    pub fn set_persona_mode(&self, mode: jarvis_core::config::PersonaMode) {
-        if !self.persona.save(mode) {
-            let mut cfg = self.config();
-            cfg.persona.mode = mode;
-            self.apply_config(&cfg);
-        }
-        // Ответ уже в новом режиме (и с его обращением).
-        let phrase = self
-            .persona
-            .pick_in(mode, Situation::ModeSwitched, Vars::new())
-            .unwrap_or_else(|| format!("Режим «{}».", mode.title()));
-        tracing::info!(mode = mode.as_str(), "характер: режим изменён");
-        self.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: phrase.clone(), is_final: true });
-        self.speech.say(&phrase);
     }
 
     /// То же, что `submit`, но дождаться итога (тесты, отладка).
@@ -417,24 +348,11 @@ impl Core {
         let Some(problem) = self.models.brain.problem() else { return false };
         self.events.emit(Event::Error { message: problem.clone() });
         let phrase = if problem == NO_KEY_TEXT {
-            self.persona.say(
-                Situation::NoKey,
-                Vars::new(),
-                "Сэр, у меня нет ключа к языковой модели. Добавьте его в настройках, раздел «Провайдеры и модели».",
-            )
+            "Сэр, у меня нет ключа к языковой модели. Добавьте его в настройках, раздел «Провайдеры и модели».".to_string()
+        } else if let Some(rest) = problem.strip_prefix("Модель «Мозг» недоступна") {
+            format!("Сэр, модель «Мозг» недоступна{rest}")
         } else {
-            // «Модель «Мозг» недоступна: причина» → в фразу идёт только причина.
-            let reason = problem
-                .strip_prefix("Модель «Мозг» недоступна")
-                .unwrap_or(&problem)
-                .trim_start_matches([':', ' ', '—', '-'])
-                .trim_end_matches(['.', ' ']);
-            let vars = if reason.is_empty() { Vars::new() } else { Vars::new().set("problem", reason) };
-            let fallback = match problem.strip_prefix("Модель «Мозг» недоступна") {
-                Some(rest) => format!("Сэр, модель «Мозг» недоступна{rest}"),
-                None => format!("Сэр, языковая модель недоступна: {problem}"),
-            };
-            self.persona.say(Situation::ModelUnavailable, vars, &fallback)
+            format!("Сэр, языковая модель недоступна: {problem}")
         };
         self.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: phrase.clone(), is_final: true });
         self.speech.say(&phrase);
@@ -443,11 +361,6 @@ impl Core {
     }
 
     async fn run_task(&self, id: u64, text: String, token: CancellationToken) -> Option<TaskOutcome> {
-        let notes = self.persona.notes(&text, None, std::time::Instant::now());
-        self.run_task_with(id, text, notes, token).await
-    }
-
-    async fn run_task_with(&self, id: u64, text: String, notes: Vec<String>, token: CancellationToken) -> Option<TaskOutcome> {
         // Задачи строго по очереди: предыдущая уже отменена и завершится сама.
         let _serial = tokio::select! {
             biased;
@@ -463,8 +376,8 @@ impl Core {
         self.busy.store(true, Ordering::Release);
         self.glow_sink.begin_task();
         let t0 = std::time::Instant::now();
-        tracing::info!(text = %text, notes = ?notes, "агент: задача");
-        let outcome = self.agent.run_with(&text, &notes, token).await;
+        tracing::info!(text = %text, "агент: задача");
+        let outcome = self.agent.run(&text, token).await;
         tracing::info!(
             ms = t0.elapsed().as_millis() as u64,
             model = ?outcome.transcript.model,
@@ -629,14 +542,12 @@ impl Core {
         let guard = self.config().resource_guard.then(|| {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<jarvis_sys::GuardAlert>();
             let (events, speech, t) = (self.events.clone(), self.speech.clone(), token.clone());
-            let persona = self.persona.clone();
             self.handle.spawn(async move {
                 loop {
                     let alert = tokio::select! { _ = t.cancelled() => break, a = rx.recv() => a };
                     let Some(alert) = alert else { break };
-                    let text = persona.guard_phrase(&alert);
-                    events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: text.clone(), is_final: true });
-                    speech.say(&text);
+                    events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: alert.message.clone(), is_final: true });
+                    speech.say(&alert.message);
                 }
             });
             (ResourceGuard::new(GuardConfig::default()), tx)
@@ -655,7 +566,6 @@ impl Core {
             self.reports.lock().unwrap().retain(|id, _| new.provider(id).is_some());
         }
         self.agent.set_config(AgentConfig::from_core(new));
-        self.persona.set_config(&new.persona);
         if old.web_search != new.web_search {
             *self.web_search.0.write().unwrap() =
                 Arc::new(SearchChain::from_config(&new.web_search, &jarvis_web::http::default_client()));
@@ -704,15 +614,9 @@ impl Drop for Core {
 fn on_intent(core: &Weak<Core>, intent: Intent) {
     let Some(core) = core.upgrade() else { return };
     match intent {
-        // Тон голоса (громче обычного, кричит, быстро) уходит модели пометкой к этому ходу.
-        Intent::Command { text, voice } => {
-            let _ = core.submit_with(&text, true, voice);
-        }
-        // «Джарвис, давай на ты» / «будь культурным» / «можешь материться».
-        Intent::Persona(mode) => {
-            let c = core.clone();
-            // Сохранение идёт через ConfigStore и after_save (перезапускает части ядра) — не в потоке голоса.
-            std::thread::spawn(move || c.set_persona_mode(mode));
+        // Тон голоса (`voice`) модели не передаётся: замеры нужны только защите от эха.
+        Intent::Command { text, .. } => {
+            let _ = core.submit(&text, true);
         }
         Intent::Stop => core.stop_all("voice"),
         Intent::Confirm => {
@@ -726,9 +630,9 @@ fn on_intent(core: &Weak<Core>, intent: Intent) {
         // команду без повторного обращения (окно follow-up ставит голосовой конвейер). Без «да» в фразе,
         // чтобы эхо не сошло за подтверждение.
         Intent::WakeOnly => {
-            let ack = core.persona.wake_phrase();
-            core.speech.say(&ack);
-            core.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: ack, is_final: true });
+            const ACK: &str = "Слушаю, сэр.";
+            core.speech.say(ACK);
+            core.events.emit(Event::Subtitle { speaker: Speaker::Jarvis, text: ACK.into(), is_final: true });
         }
         Intent::Ignored => {}
     }

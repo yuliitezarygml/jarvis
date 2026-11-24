@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use jarvis_core::config::PersonaConfig;
 use jarvis_core::{Autonomy, Config};
 
 use crate::prompt::PERSONA_PROMPT;
@@ -30,10 +29,8 @@ pub struct AgentConfig {
     pub max_tool_output_chars: usize,
     /// Сколько одинаковых вызовов подряд считается зацикливанием (план: 3).
     pub loop_repeat_limit: usize,
-    /// Промпт персоны (по умолчанию — [`PERSONA_PROMPT`]; из конфига — `prompt::persona_prompt`).
+    /// Промпт персоны (по умолчанию — [`PERSONA_PROMPT`]).
     pub persona: String,
-    /// Настройки характера (режим, обращение…) — для готовых фраз вне модели.
-    pub persona_cfg: PersonaConfig,
     pub temperature: Option<f32>,
     /// Бюджет ответа модели. Groq считает запрошенный бюджет в лимит токенов в минуту, поэтому не `None`;
     /// у reasoning-моделей (gpt-oss) сюда входят и рассуждения — меньше ~1500 рискует пустым ответом.
@@ -71,7 +68,6 @@ impl Default for AgentConfig {
             max_tool_output_chars: 3_500,
             loop_repeat_limit: 3,
             persona: PERSONA_PROMPT.to_string(),
-            persona_cfg: PersonaConfig::default(),
             temperature: None,
             max_tokens: Some(DEFAULT_MAX_TOKENS),
             lazy_tools: true,
@@ -80,15 +76,9 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
-    /// Значения по умолчанию + `autonomy`, `vision_enabled` и характер (`persona`) из общего `config.json`.
+    /// Значения по умолчанию + `autonomy` и `vision_enabled` из общего `config.json`.
     pub fn from_core(cfg: &Config) -> Self {
-        Self {
-            autonomy: cfg.autonomy,
-            vision_enabled: cfg.vision_enabled,
-            persona: crate::prompt::persona_prompt(&cfg.persona),
-            persona_cfg: cfg.persona.clone(),
-            ..Self::default()
-        }
+        Self { autonomy: cfg.autonomy, vision_enabled: cfg.vision_enabled, ..Self::default() }
     }
 
     /// Таймаут для конкретного инструмента.
@@ -122,14 +112,5 @@ mod tests {
         assert_eq!(c.autonomy, Autonomy::Never);
         assert!(!c.vision_enabled);
         assert_eq!(c.max_steps, 25);
-        // По умолчанию — дворецкий, как раньше.
-        assert!(c.persona.contains("«сэр»"));
-        let wild = Config {
-            persona: PersonaConfig { mode: jarvis_core::config::PersonaMode::Uncensored, ..Default::default() },
-            ..Config::default()
-        };
-        let c = AgentConfig::from_core(&wild);
-        assert!(c.persona.contains("Мат разрешён"));
-        assert_eq!(c.persona_cfg.mode, jarvis_core::config::PersonaMode::Uncensored);
     }
 }

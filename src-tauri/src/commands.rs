@@ -139,7 +139,6 @@ pub async fn config_set(
 /// Сохранённый конфиг → ядро, размер виджета, все окна (тема, панели HUD). Возвращает замаскированный.
 pub fn after_save<R: tauri::Runtime>(app: &AppHandle<R>, core: &Core, saved: &Config) -> Config {
     core.apply_config(saved);
-    crate::tray::sync_persona(app, saved.persona.mode);
     apply_corner_size(app, saved.appearance.corner_size);
     if saved.hud.wallpaper != windows_manager::wallpaper_on() {
         let (app, on) = (app.clone(), saved.hud.wallpaper);
@@ -304,13 +303,6 @@ pub fn agent_submit(core: State<'_, CoreState>, text: String) -> CmdResult<()> {
     core.0.submit(&text, false)
 }
 
-/// Текущее настроение Джарвиса — HUD и виджет спрашивают при открытии окна (дальше — событие `persona:mood`).
-#[tauri::command]
-pub fn persona_mood(core: State<'_, CoreState>) -> serde_json::Value {
-    let (mood, reason) = core.0.persona.mood_now(std::time::Instant::now());
-    serde_json::json!({ "mood": mood.as_str(), "reason": reason })
-}
-
 #[tauri::command]
 pub fn mic_get(core: State<'_, CoreState>) -> MicStatus {
     core.0.mic_status()
@@ -455,8 +447,7 @@ pub fn audio_mic_test_stop() {
 pub async fn audio_sound_test(core: State<'_, CoreState>, device: Option<String>, volume: Option<f32>) -> CmdResult<api::ServiceCheck> {
     let c = core.0.clone();
     let cfg = c.config();
-    let phrase = c.persona.say(jarvis_core::Situation::SoundTest, jarvis_core::Vars::new(), services::SOUND_TEST_PHRASE);
-    Ok(services::sound_test(&cfg, &c.root, device, volume.unwrap_or_else(|| cfg.audio.gain()), &phrase).await)
+    Ok(services::sound_test(&cfg, &c.root, device, volume.unwrap_or_else(|| cfg.audio.gain())).await)
 }
 
 // ───────────────────────────── память, KB, история ─────────────────────────────

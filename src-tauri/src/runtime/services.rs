@@ -335,9 +335,9 @@ pub fn mic_test(
 
 pub const SOUND_TEST_PHRASE: &str = "Проверка звука. Вы меня хорошо слышите, сэр?";
 
-/// «Проверить звук»: короткая фраза TTS (`phrase` — по характеру, обычно [`SOUND_TEST_PHRASE`]) через выбранное
-/// устройство вывода с выбранной громкостью. Сервер речи недоступен — короткий сигнал, чтобы всё равно проверить динамики.
-pub async fn sound_test(cfg: &Config, root: &Path, device: Option<String>, volume: f32, phrase: &str) -> api::ServiceCheck {
+/// «Проверить звук»: короткая фраза TTS через выбранное устройство вывода с выбранной громкостью.
+/// Сервер речи недоступен — короткий сигнал, чтобы всё равно проверить динамики.
+pub async fn sound_test(cfg: &Config, root: &Path, device: Option<String>, volume: f32) -> api::ServiceCheck {
     let t0 = Instant::now();
     let mut app = cfg.clone();
     app.audio.output_device = device_arg(device);
@@ -354,7 +354,7 @@ pub async fn sound_test(cfg: &Config, root: &Path, device: Option<String>, volum
     })
     .await;
     let tts_problem = match built {
-        Ok(Ok(p)) => match tokio::time::timeout(Duration::from_secs(25), p.say(phrase)).await {
+        Ok(Ok(p)) => match tokio::time::timeout(Duration::from_secs(25), p.say(SOUND_TEST_PHRASE)).await {
             Ok(Ok(_)) => {
                 return api::ServiceCheck {
                     demo: false,

@@ -20,9 +20,9 @@ pub use agent::{
 pub use config::{AgentConfig, DEFAULT_MAX_TOKENS};
 pub use history::{IMAGE_TOKENS, estimate_tokens};
 pub use hooks::{
-    Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, Phrases, ProtectedPathCheck, Redactor, SpeechSink,
+    Confirmer, FixedConfirmer, MemoryHooks, NoopMemory, NullSpeech, ProtectedPathCheck, Redactor, SpeechSink,
     identity_redactor, no_protected_paths,
 };
-pub use prompt::{PERSONA_LIMITS, PERSONA_PROMPT, TOOLS_LOAD_NOTE, build_system_prompt, persona_prompt};
+pub use prompt::{PERSONA_PROMPT, TOOLS_LOAD_NOTE, build_system_prompt};
 pub use toolsets::{TOOLS_LOAD, group_of, route};
 pub use transcript::{StepStatus, StopReason, Transcript, TranscriptStep};

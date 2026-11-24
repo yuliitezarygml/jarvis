@@ -1,7 +1,4 @@
-//! `WakeFilter`: текстовый wake word «Джарвис, …» по транскрипту, стоп-слова (барж-ин), подтверждение/отказ,
-//! голосовое переключение характера («Джарвис, давай на ты»).
-
-use jarvis_core::config::PersonaMode;
+//! `WakeFilter`: текстовый wake word «Джарвис, …» по транскрипту, стоп-слова (барж-ин), подтверждение/отказ.
 
 use crate::tone::VoiceTone;
 
@@ -12,9 +9,6 @@ pub enum Intent {
     /// `voice` — тон голоса этой фразы (громкость/темп относительно обычного), если голосовой конвейер его
     /// оценил; `WakeFilter::classify` всегда ставит `None`.
     Command { text: String, voice: Option<VoiceTone> },
-    /// Сменить характер голосом: «Джарвис, будь вежливым» / «давай на ты» / «можешь материться».
-    /// Только с обращением или в окне продолжения и только если фраза — (почти) одна эта просьба.
-    Persona(PersonaMode),
     /// Только обращение «Джарвис» — ждать команду следующей репликой.
     WakeOnly,
     /// «стоп / хватит / отмена» — прервать речь и действие.
@@ -69,48 +63,6 @@ const CONFIRM: &[&[&str]] = &[
     &["окей"],
 ];
 const NEGATIONS: &[&str] = &["нет", "не", "ни", "отмена", "отмени", "отменить", "стоп", "отставить", "нельзя", "хватит", "стой"];
-/// Просьбы сменить характер. Сравниваются по словам целиком (после выкидывания `PERSONA_FILLERS` с обеих
-/// сторон), поэтому «напиши в блокноте будь вежливым» — обычная команда, а «не матерись» ≠ «матерись».
-const PERSONA_PHRASES: &[(PersonaMode, &[&str])] = &[
-    (
-        PersonaMode::Butler,
-        &[
-            "будь культурным", "будь культурнее", "будь вежливым", "будь вежливее", "как дворецкий", "будь дворецким",
-            "без мата", "без матов", "культурно", "говори культурно", "говори вежливо", "вежливо", "не матерись",
-            "хватит материться", "режим дворецкого",
-        ],
-    ),
-    (
-        PersonaMode::Buddy,
-        &[
-            "давай на ты", "на ты", "будь проще", "будь попроще", "по простому", "попроще", "как друг",
-            "говори по простому", "говори проще", "общайся на ты",
-        ],
-    ),
-    (
-        PersonaMode::Uncensored,
-        &[
-            "можешь материться", "без цензуры", "матерись", "разрешаю материться", "можно с матом", "можно материться",
-            "с матом", "давай с матом", "говори с матом", "режим без цензуры",
-        ],
-    ),
-];
-/// Слова, которые не мешают просьбе сменить характер: «ну давай теперь со мной на ты, пожалуйста».
-const PERSONA_FILLERS: &[&str] = &[
-    "пожалуйста", "сэр", "уже", "все", "же", "ну", "ладно", "давай", "давайте", "теперь", "отныне", "впредь", "снова",
-    "опять", "дальше", "со", "мной", "мне", "тогда", "короче", "хорошо", "окей", "ok", "а", "и", "чуть", "немного",
-    "немножко", "более", "можно", "будь",
-];
-
-/// Слово распознано «почти так же» (ошибки ASR): средние слова — до 1 правки, длинные в просьбе из
-/// нескольких слов — до 2 («будь культурней»), короткие — точно. Одно длинное слово — не больше 1 правки,
-/// иначе «культура» сошла бы за «культурно».
-fn word_close(heard: &str, want: &str, multi_word: bool) -> bool {
-    let len = want.chars().count();
-    heard == want
-        || (len >= 5 && edit_distance(heard, want) <= 1)
-        || (multi_word && len >= 8 && edit_distance(heard, want) <= 2)
-}
 
 /// Слова реплики: нижний регистр, ё→е, только буквы и цифры.
 pub fn words(text: &str) -> Vec<String> {
@@ -221,24 +173,6 @@ impl WakeFilter {
         CONFIRM.contains(&ws.as_slice()).then_some(true)
     }
 
-    /// Просьба сменить характер: вся реплика (без обращения и слов-связок) — одна из `PERSONA_PHRASES`.
-    pub fn persona_switch(&self, text: &str) -> Option<PersonaMode> {
-        let core = |t: &str| -> Vec<String> {
-            words(t).into_iter().filter(|x| !PERSONA_FILLERS.contains(&x.as_str()) && !self.is_wake_word(x)).collect()
-        };
-        let heard = core(text);
-        if heard.is_empty() || heard.len() > 4 {
-            return None;
-        }
-        PERSONA_PHRASES.iter().find_map(|(mode, phrases)| {
-            phrases.iter().any(|p| {
-                let want = core(p);
-                want.len() == heard.len() && heard.iter().zip(&want).all(|(h, w)| word_close(h, w, want.len() > 1))
-            })
-            .then_some(*mode)
-        })
-    }
-
     pub fn classify(&self, text: &str, ctx: WakeContext) -> Intent {
         let stripped = self.strip_wake(text);
         let body = stripped.unwrap_or(text);
@@ -252,17 +186,15 @@ impl WakeFilter {
         if self.is_stop(body) {
             return Intent::Stop;
         }
-        let addressed = match stripped {
-            Some("") => return Intent::WakeOnly,
-            Some(cmd) => cmd,
+        match stripped {
+            Some("") => Intent::WakeOnly,
+            Some(cmd) => Intent::command(cmd),
             // Без обращения в окне ожидания — только осмысленная фраза (≥4 букв): обрывки вроде «п»,
             // «ну» или кашель не тратят запрос к модели.
-            None if ctx.follow_up && text.chars().filter(|c| c.is_alphabetic()).count() >= 4 => text.trim(),
-            None => return Intent::Ignored,
-        };
-        match self.persona_switch(addressed) {
-            Some(mode) => Intent::Persona(mode),
-            None => Intent::command(addressed),
+            None if ctx.follow_up && text.chars().filter(|c| c.is_alphabetic()).count() >= 4 => {
+                Intent::command(text.trim())
+            }
+            None => Intent::Ignored,
         }
     }
 }
@@ -333,61 +265,5 @@ mod tests {
         let f = WakeFilter::with_names(["Пятница"]);
         assert_eq!(f.strip_wake("пятница, свет"), Some("свет"));
         assert!(!f.has_wake_prefix("джарвис, свет"));
-    }
-    #[test]
-    fn persona_switch_phrases() {
-        let f = WakeFilter::new();
-        let follow = WakeContext { follow_up: true, ..idle() };
-        let cases: &[(&str, PersonaMode)] = &[
-            ("Джарвис, будь культурным", PersonaMode::Butler),
-            ("Джарвис, будь вежливым, пожалуйста", PersonaMode::Butler),
-            ("Джарвис, будь вежливее", PersonaMode::Butler),
-            ("Джарвис, будь культурней", PersonaMode::Butler),
-            ("Джарвис, как дворецкий", PersonaMode::Butler),
-            ("Джарвис, давай без мата", PersonaMode::Butler),
-            ("Джарвис, культурно", PersonaMode::Butler),
-            ("Джарвис, не матерись", PersonaMode::Butler),
-            ("Джарвис, давай на ты", PersonaMode::Buddy),
-            ("Джарвис, ну давай теперь со мной на ты", PersonaMode::Buddy),
-            ("Джарвис, будь проще", PersonaMode::Buddy),
-            ("Джарвис, по-простому", PersonaMode::Buddy),
-            ("Джарвис, по простому", PersonaMode::Buddy),
-            ("Джарвис, как друг", PersonaMode::Buddy),
-            ("Джарвис, можешь материться", PersonaMode::Uncensored),
-            ("Джарвис, без цензуры", PersonaMode::Uncensored),
-            ("Джарвис, матерись", PersonaMode::Uncensored),
-            ("Джарвис, разрешаю материться", PersonaMode::Uncensored),
-            ("Джарвис, можно с матом", PersonaMode::Uncensored),
-            ("Джарвис, можеш матерится", PersonaMode::Uncensored),
-            ("Эй, Джарвис, без цензуры!", PersonaMode::Uncensored),
-        ];
-        for (t, mode) in cases {
-            assert_eq!(f.classify(t, idle()), Intent::Persona(*mode), "{t}");
-        }
-        // В окне продолжения обращение не нужно.
-        assert_eq!(f.classify("будь вежливым", follow), Intent::Persona(PersonaMode::Butler));
-        assert_eq!(f.classify("давай на ты", follow), Intent::Persona(PersonaMode::Buddy));
-        // Без обращения и вне окна — не к Джарвису.
-        assert_eq!(f.classify("будь вежливым", idle()), Intent::Ignored);
-        assert_eq!(f.classify("давай на ты", idle()), Intent::Ignored);
-        // Длинные команды с теми же словами — обычные команды.
-        for t in [
-            "Джарвис, напиши в блокноте будь вежливым",
-            "Джарвис, найди песню без цензуры",
-            "Джарвис, как друг посоветуй фильм",
-            "Джарвис, открой браузер без мата в поиске",
-            "Джарвис, будь другом, открой почту",
-            "Джарвис, культура",
-            "Джарвис, давай",
-        ] {
-            assert!(matches!(f.classify(t, idle()), Intent::Command { voice: None, .. }), "{t}: {:?}", f.classify(t, idle()));
-        }
-        assert_eq!(f.persona_switch("не матерись"), Some(PersonaMode::Butler), "отрицание не путается с разрешением");
-        assert_eq!(f.persona_switch("пожалуйста"), None);
-        assert_eq!(f.persona_switch(""), None);
-        // В режиме подтверждения «давай» — подтверждение, а «давай на ты» — смена характера.
-        let wait = WakeContext { awaiting_confirm: true, ..idle() };
-        assert_eq!(f.classify("давай", wait), Intent::Confirm);
-        assert_eq!(f.classify("Джарвис, давай на ты", wait), Intent::Persona(PersonaMode::Buddy));
     }
 }

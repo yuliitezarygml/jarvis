@@ -5,7 +5,6 @@ mod consolidate_tests;
 mod lessons_tests;
 mod reflect_tests;
 mod retrieve_tests;
-mod style_tests;
 mod storage_tests;
 mod tools_tests;
 

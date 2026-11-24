@@ -41,7 +41,6 @@ pub(crate) fn normalize_category(c: &str) -> String {
         "алиас" | "aliases" | "псевдоним" => category::ALIAS.into(),
         "привычка" | "habits" => category::HABIT.into(),
         "личное" | "person" => category::PERSONAL.into(),
-        "styles" | "стиль" | "общение" | "характер" | "communication" => category::STYLE.into(),
         _ => crate::text::truncate_chars(&c, 32),
     }
 }
@@ -192,14 +191,9 @@ impl Memory {
         Ok(search_facts_scored(&self.conn(), query, k)?.into_iter().map(|(f, _)| f).collect())
     }
 
-    /// Всегда важные факты: `important` или категория `preference` (кроме `style` — у них свой блок).
+    /// Всегда важные факты: `important` или категория `preference`.
     pub fn important_facts(&self, k: usize) -> Result<Vec<Fact>> {
         important_facts_conn(&self.conn(), k)
-    }
-
-    /// Факты о манере общения пользователя (категория `style`): важные, затем свежие.
-    pub fn style_facts(&self, k: usize) -> Result<Vec<Fact>> {
-        style_facts_conn(&self.conn(), k, 0.0)
     }
 }
 
@@ -216,21 +210,9 @@ pub(crate) fn search_facts_scored(conn: &Connection, query: &str, k: usize) -> R
 
 pub(crate) fn important_facts_conn(conn: &Connection, k: usize) -> Result<Vec<Fact>> {
     let mut st = conn.prepare_cached(&format!(
-        "SELECT {FACT_COLS} FROM facts WHERE (important = 1 OR category = 'preference') AND category != 'style'
+        "SELECT {FACT_COLS} FROM facts WHERE important = 1 OR category = 'preference'
          ORDER BY important DESC, confidence DESC, use_count DESC, updated_at DESC LIMIT ?1"
     ))?;
     let rows = st.query_map([k as i64], row_fact)?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-/// Факты категории `style` с доверием ≥ `min_confidence`: важные, затем свежие (повторно замеченный факт
-/// обновляет `updated_at`), затем часто используемые. Не по `use_count` в первую очередь: блок всегда в
-/// контексте, и счётчик растёт у старых фактов сам собой — новые бы никогда не попадали.
-pub(crate) fn style_facts_conn(conn: &Connection, k: usize, min_confidence: f64) -> Result<Vec<Fact>> {
-    let mut st = conn.prepare_cached(&format!(
-        "SELECT {FACT_COLS} FROM facts WHERE category = 'style' AND confidence >= ?2
-         ORDER BY important DESC, updated_at DESC, use_count DESC, id DESC LIMIT ?1"
-    ))?;
-    let rows = st.query_map(params![k as i64, min_confidence], row_fact)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }

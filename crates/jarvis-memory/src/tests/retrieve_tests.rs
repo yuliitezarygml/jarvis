@@ -142,7 +142,6 @@ fn big_context(mem: &Memory) -> MemoryContext {
         .unwrap();
     }
     MemoryContext {
-        style: vec![],
         facts: mem.list_facts(100, 0).unwrap(),
         lessons: mem.list_lessons(100, 0).unwrap(),
         playbooks: (0..3)
@@ -203,4 +202,18 @@ fn render_empty_and_lesson_without_fix() {
     let out = ctx.render(1500);
     assert!(out.contains("[ui_click · Блокнот]"), "{out}");
     assert!(out.contains("Как правильно: пока неизвестно"), "{out}");
+}
+
+#[test]
+fn old_style_category_facts_load_as_ordinary_facts() {
+    // Категория `style` (удалённый «характер») могла остаться в memory.db: такие факты читаются и
+    // попадают в контекст как обычные факты, без отдельного блока.
+    let (_d, mem) = temp_mem();
+    let id = mem.upsert_fact(NewFact::inferred("Любит короткие ответы про погоду", 0.7).with_category("style")).unwrap().id;
+    let listed = mem.list_facts(10, 0).unwrap();
+    assert!(listed.iter().any(|f| f.id == id && f.category == "style"), "{listed:?}");
+    let ctx = mem.retrieve_context("какая погода", None, None).unwrap();
+    assert!(ctx.facts.iter().any(|f| f.id == id), "{ctx:?}");
+    let text = ctx.render(DEFAULT_BUDGET_TOKENS);
+    assert!(text.contains("Факты о пользователе:") && text.contains("Любит короткие ответы про погоду"), "{text}");
 }

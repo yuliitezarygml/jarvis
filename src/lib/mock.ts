@@ -72,7 +72,6 @@ export function defaultConfig(): Config {
       show_sources: true,
       show_subtitles: true,
     },
-    persona: { mode: 'butler', tease: 'sometimes', address: '', adaptive: true, mood: true, banned_words: [] },
   };
 }
 
@@ -122,8 +121,6 @@ const memory = {
   facts: [
     { id: 'f1', text: 'Пользователь пьёт чёрный кофе', confidence: 0.95, source: 'сказано явно', updated: '2026-11-20', category: 'preference', important: false },
     { id: 'f2', text: 'Рабочая папка проектов — D:\\projects', confidence: 0.8, source: 'выведено', updated: '2026-11-18', category: 'alias', important: false },
-    { id: 'f3', text: 'Любит, когда ему отвечают подколом', confidence: 0.7, source: 'выведено', updated: '2026-11-22', category: 'style', important: false },
-    { id: 'f4', text: 'Злится, если переспрашивать', confidence: 0.6, source: 'выведено', updated: '2026-11-23', category: 'style', important: false },
   ],
   lessons: [
     {
@@ -224,8 +221,6 @@ export async function mockInvoke<T>(cmd: string, a: Record<string, unknown>): Pr
     }
     case 'mic_get':
       return r(mockMic);
-    case 'persona_mood':
-      return r({ mood: 'calm', reason: null });
     case 'mic_set':
       mockMic = { ...mockMic, enabled: Boolean(a.enabled) };
       return r(mockMic);

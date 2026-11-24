@@ -527,7 +527,7 @@ impl Inner {
         match &intent {
             Intent::Ignored => {}
             Intent::Stop => self.barge_in(),
-            Intent::Command { .. } | Intent::Persona(_) => {
+            Intent::Command { .. } => {
                 if self.speaking.load(Ordering::Acquire) {
                     self.barge_in();
                 }
@@ -1048,13 +1048,5 @@ mod tests {
         assert!(got.is_empty());
         assert_eq!(VoiceProfile::load(&path).baseline("Микрофон (USB)").unwrap().samples, 1);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn listen_detects_persona_switch() {
-        let got = listen("Джарвис, давай на ты", |_, _| {}).await;
-        assert_eq!(got, vec![Intent::Persona(jarvis_core::config::PersonaMode::Buddy)]);
-        let got = listen("Джарвис, напиши в блокноте будь вежливым", |_, _| {}).await;
-        assert_eq!(got, vec![Intent::command("напиши в блокноте будь вежливым")]);
     }
 }
