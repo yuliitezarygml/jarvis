@@ -101,11 +101,8 @@ export interface Config {
     voice: string;
     ca_path: string;
     /** Запасной адрес (обычно LAN, если `url` — туннель). */
-    lan_url: string;
     /** Секрет: из ядра приходит замаскированным. */
-    discovery_bot_token: string;
     /** `auto` | `lan` | `internet` */
-    prefer: string;
   };
   stt: { engine: string; url: string; ca_path: string };
   providers: ProviderConfig[];

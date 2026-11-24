@@ -76,11 +76,12 @@ pub fn pinned_http_client(base_url: &str, ca_path: &Path, connect_timeout: Durat
         .no_proxy() // сервер в LAN: системный прокси не нужен и не должен видеть трафик
         .tcp_nodelay(true)
         .user_agent(concat!("jarvis-voice/", env!("CARGO_PKG_VERSION")));
-    if base_url.starts_with("https://") {
+    if base_url.starts_with("https://") && is_private_host(base_url) {
         let mut cfg = pinned_config(ca_path)?;
         cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
         b = b.tls_backend_preconfigured(cfg);
     } else {
+        // `http://` или публичный адрес (туннель Cloudflare): обычные сертификаты из хранилища Windows.
         // Без TLS reqwest всё равно собирает rustls-бэкенд — нужен провайдер.
         ensure_default_provider();
     }
@@ -93,19 +94,6 @@ pub fn public_http_client(timeout: Duration) -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(timeout)
-        .user_agent(concat!("jarvis-voice/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| VoiceError::Tls(format!("не удалось создать HTTP-клиент: {e}")))
-}
-
-/// HTTP-клиент к публичному адресу сервера голоса (туннель Cloudflare) и к API Telegram: обычная проверка
-/// сертификатов через хранилище Windows (rustls-platform-verifier), без общего таймаута — поток PCM
-/// может идти долго; таймауты ставятся на запросы.
-pub fn web_http_client(connect_timeout: Duration) -> Result<reqwest::Client> {
-    ensure_default_provider();
-    reqwest::Client::builder()
-        .connect_timeout(connect_timeout)
-        .tcp_nodelay(true)
         .user_agent(concat!("jarvis-voice/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| VoiceError::Tls(format!("не удалось создать HTTP-клиент: {e}")))
@@ -155,6 +143,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn private_vs_public_hosts() {
+        for u in ["https://192.168.50.38:8443", "https://10.0.0.5/x", "https://localhost:8181", "https://127.0.0.1", "https://xeon.lan:8443", "https://[::1]:8443"] {
+            assert!(is_private_host(u), "{u}");
+        }
+        for u in ["https://minute-aerial-slim-same.trycloudflare.com", "https://api.groq.com/v1", "https://8.8.8.8", "https://192.169.1.1"] {
+            assert!(!is_private_host(u), "{u}");
+        }
+    }
+
+    /// Живая проверка: туннель Cloudflare к серверу голоса отвечает через обычные сертификаты.
+    /// `JARVIS_TTS_PUBLIC_URL=https://….trycloudflare.com cargo test -p jarvis-voice tunnel_ready -- --ignored`
+    #[tokio::test]
+    #[ignore = "ходит в интернет"]
+    async fn tunnel_ready() {
+        let Ok(url) = std::env::var("JARVIS_TTS_PUBLIC_URL") else { return };
+        let root = default_project_root();
+        let ca = resolve_path(&root, &jarvis_core::config::TtsConfig::default().ca_path);
+        let c = pinned_http_client(&url, &ca, Duration::from_secs(10)).unwrap();
+        let r = c.get(format!("{url}/ready")).send().await.unwrap();
+        assert_eq!(r.status(), 200);
+    }
+
+    #[test]
     fn project_ca_parses() {
         let root = default_project_root();
         let ca = resolve_path(&root, &jarvis_core::config::TtsConfig::default().ca_path);
@@ -185,7 +196,7 @@ mod tests {
         for u in ["https://192.168.50.38:8443", "http://127.0.0.1:9", "https://10.0.0.5", "https://[::1]:8443", "https://xeon.local:8443", "https://localhost"] {
             assert!(is_private_host(u), "{u}");
         }
-        for u in ["https://minute-aerial-slim-same.trycloudflare.com", "https://8.8.8.8", "https://api.telegram.org", "мусор"] {
+        for u in ["https://minute-aerial-slim-same.trycloudflare.com", "https://8.8.8.8", "https://api.groq.com", "мусор"] {
             assert!(!is_private_host(u), "{u}");
         }
     }

@@ -79,20 +79,11 @@ impl std::fmt::Display for ModelRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TtsConfig {
-    /// Основной адрес сервера голоса: LAN (`https://192.168.50.38:8443`) или туннель Cloudflare
-    /// (`https://….trycloudflare.com`). Адрес `*.trycloudflare.com` устаревает при перезапуске туннеля —
-    /// тогда клиент берёт свежий из `data/voice-tunnel-url.txt` / описания Telegram-бота.
+    /// Адрес сервера голоса: LAN (`https://192.168.50.38:8443`) или туннель Cloudflare (`https://….trycloudflare.com`).
     pub url: String,
     pub voice: String,
     /// CA для проверки TLS сервера в LAN (путь от корня проекта). Для публичных адресов — обычные корни Windows.
     pub ca_path: String,
-    /// Запасной адрес (обычно LAN, если `url` — туннель). Пусто — нет.
-    pub lan_url: String,
-    /// Токен Telegram-бота, в описании которого сервер публикует `jarvis-voice <url туннеля>`. Секрет.
-    pub discovery_bot_token: String,
-    /// Порядок адресов: `auto` — как записаны (url → lan_url → найденный туннель), `lan` — сначала LAN,
-    /// `internet` — сначала интернет. В любом режиме первым пробуется последний сработавший.
-    pub prefer: String,
 }
 impl Default for TtsConfig {
     fn default() -> Self {
@@ -100,9 +91,6 @@ impl Default for TtsConfig {
             url: "https://192.168.50.38:8443".into(),
             voice: "jarvis-ru".into(),
             ca_path: "src-tauri/config/xeon-tts-ca.pem".into(),
-            lan_url: String::new(),
-            discovery_bot_token: String::new(),
-            prefer: "auto".into(),
         }
     }
 }
@@ -486,8 +474,6 @@ mod tests {
         let c2 = Config::load(&p).unwrap();
         assert_eq!(c2.tts.voice, "x");
         assert_eq!(c2.tts.url, TtsConfig::default().url);
-        // старый конфиг без новых полей голоса
-        assert_eq!((c2.tts.lan_url.as_str(), c2.tts.discovery_bot_token.as_str(), c2.tts.prefer.as_str()), ("", "", "auto"));
         assert_eq!(c2.autonomy, Autonomy::AskDangerous);
         assert!(Config::load(dir.join("missing.json")).is_ok());
         std::fs::remove_dir_all(&dir).ok();

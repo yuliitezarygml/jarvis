@@ -64,7 +64,6 @@ pub fn masked(cfg: &Config) -> Config {
     for s in &mut c.web_search {
         s.api_key = mask(&s.api_key);
     }
-    c.tts.discovery_bot_token = mask(&c.tts.discovery_bot_token);
     c
 }
 
@@ -88,14 +87,7 @@ pub fn merge_from_ui(stored: &Config, mut incoming: Config) -> Config {
         let old = stored.web_search.iter().find(|o| o.id == s.id).map(|o| o.api_key.as_str());
         s.api_key = merge_key(&s.api_key, old);
     }
-    incoming.tts.discovery_bot_token = resolve_tts_token(stored, &incoming.tts.discovery_bot_token);
     incoming
-}
-
-/// Токен бота для поиска адреса туннеля: маска из UI → сохранённый токен.
-pub fn resolve_tts_token(stored: &Config, from_ui: &str) -> String {
-    let old = Some(stored.tts.discovery_bot_token.as_str()).filter(|t| !t.is_empty());
-    merge_key(from_ui, old)
 }
 
 /// Ключ для проверки провайдера: если UI прислал маску — берём сохранённый.
@@ -450,48 +442,6 @@ mod tests {
         assert_eq!(merged.providers[0].api_key, "gsk_NEWKEY000000000000");
         assert_eq!(merged.web_search[0].api_key, "");
         assert_eq!(merged.providers[1].api_key, "", "маска без сохранённого ключа не становится ключом");
-    }
-
-    #[test]
-    fn tts_bot_token_is_masked_and_survives_ui_roundtrip() {
-        let mut stored = cfg_with_keys();
-        stored.tts.discovery_bot_token = "1234567890:AAHsecretSECRETsecret_xyzW".into();
-        let ui = masked(&stored);
-        let j = serde_json::to_string(&ui).unwrap();
-        assert!(!j.contains("secretSECRET") && !j.contains("AAH"), "{j}");
-        assert_eq!(ui.tts.discovery_bot_token, mask_key(&stored.tts.discovery_bot_token));
-        assert_eq!(merge_from_ui(&stored, ui.clone()), stored, "маска не затирает токен");
-        let mut ui2 = ui.clone();
-        ui2.tts.discovery_bot_token = " 999:NEWTOKEN0000000000 ".into();
-        assert_eq!(merge_from_ui(&stored, ui2).tts.discovery_bot_token, "999:NEWTOKEN0000000000");
-        let mut ui3 = ui;
-        ui3.tts.discovery_bot_token = String::new();
-        assert_eq!(merge_from_ui(&stored, ui3).tts.discovery_bot_token, "", "очистили — токена нет");
-        // токена не было, а UI прислал маску — не превращается в токен
-        let mut ui4 = masked(&cfg_with_keys());
-        ui4.tts.discovery_bot_token = "123…zzzz".into();
-        assert_eq!(merge_from_ui(&cfg_with_keys(), ui4).tts.discovery_bot_token, "");
-        assert_eq!(resolve_tts_token(&stored, &mask_key(&stored.tts.discovery_bot_token)), stored.tts.discovery_bot_token);
-        assert_eq!(masked(&Config::default()).tts.discovery_bot_token, "");
-    }
-
-    /// Трёхстороннее сохранение из UI (base и draft с масками) не теряет токен бота.
-    #[test]
-    fn ui_save_keeps_tts_token() {
-        let root = tmp("tts-token");
-        let path = root.join("config.json");
-        let mut start = cfg_with_keys();
-        start.tts.discovery_bot_token = "1234567890:AAHsecretSECRETsecret_xyzW".into();
-        start.save(&path).unwrap();
-        let (store, _) = ConfigStore::open(path.clone());
-        let base = masked(&store.get());
-        let mut draft = base.clone();
-        draft.tts.lan_url = "https://192.168.50.38:8443".into();
-        let saved = store.set_from_ui(draft, Some(base)).unwrap();
-        assert_eq!(saved.tts.discovery_bot_token, start.tts.discovery_bot_token);
-        assert_eq!(saved.tts.lan_url, "https://192.168.50.38:8443");
-        assert_eq!(Config::load(&path).unwrap().tts.discovery_bot_token, start.tts.discovery_bot_token);
-        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

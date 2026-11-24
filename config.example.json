@@ -3,10 +3,7 @@
   "tts": {
     "url": "https://192.168.50.38:8443",
     "voice": "jarvis-ru",
-    "ca_path": "src-tauri/config/xeon-tts-ca.pem",
-    "lan_url": "",
-    "discovery_bot_token": "",
-    "prefer": "auto"
+    "ca_path": "src-tauri/config/xeon-tts-ca.pem"
   },
   "stt": {
     "engine": "local",
